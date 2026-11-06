@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     cloud_enabled: bool = False
     image_transmission: bool = False
     audio_transmission: bool = False
+    stt_model: str | None = Field(default=None, min_length=1)
+    tts_model: str | None = Field(default=None, min_length=1)
+    tts_voice: str | None = Field(default=None, min_length=1)
+    voice_capture_ms: int = Field(default=5000, ge=100, le=30000)
     hardware_enabled: bool = False
     dry_run: bool = True
     openai_model: str | None = None

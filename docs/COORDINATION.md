@@ -53,6 +53,11 @@ CLI는 시작 시, ActionExecutor 직접 사용은 최초 명령 전에 획득�
 SQLiteRequestBudget는 HTTP 요청 전에 분/시간/일 rolling 예산을 한 트랜잭션에서 확인하고
 예약한다. 기본 2/30/100회다. 동시 프로세스의 확인과 예약이 원자적이므로 같은 한도를
 사용하면 경쟁으로 한도를 초과하지 않는다. SDK retry는 계속 0이다.
+음성 STT/TTS 어댑터도 같은 namespace의 예약을 사용하며 주입한 SDK 클라이언트에도
+retry=0을 적용한다. 오디오 endpoint의 token/요금은 추정하지 않고, 현재 token 집계는
+알려진 Responses API usage만 반영한다. STT+Decision+TTS에는 최소 3회의 예약이 필요해
+기본 분당 2회에서는 마지막 호출이 차단될 수 있다. 실제 연결 시 사용자가 비용에 맞는
+한도를 명시적으로 설정해야 하며 앱이 한도를 자동으로 올리지 않는다.
 
 확정된 예약은 HTTP 실패/시간초과/취소/강제 종료 때도 환급하지 않는다. 예약 직후
 HTTP를 보내지 못하고 종료해도 1회로 계산한다. 알려진 응답의 input/output token 수와

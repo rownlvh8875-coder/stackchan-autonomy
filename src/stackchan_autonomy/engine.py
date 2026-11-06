@@ -62,11 +62,12 @@ class AutonomyEngine:
         self.memory = Memory(settings.history_size, settings.memory_path)
         self.perception = Perception()
         self.actions = ActionExecutor(robot, settings)
-        self.actions.on_control_lost = self._control_lost
+        self.actions.on_control_lost = self._fault
         self.transitions: deque[State] = deque(maxlen=settings.history_size)
         self.state = State.BOOT
         self.transitions.append(self.state)
         self.stopped = False
+        self.stop_event = asyncio.Event()
         self._cycle_lock = asyncio.Lock()
         self._active: asyncio.Task | None = None
         self._runner: asyncio.Task | None = None
@@ -79,7 +80,7 @@ class AutonomyEngine:
         self.state = state
         self.transitions.append(state)
 
-    def _control_lost(self) -> None:
+    def _fault(self) -> None:
         self.stop()
         self._transition(State.ERROR)
 
@@ -88,13 +89,13 @@ class AutonomyEngine:
             self.stop()
             return True
         if event.kind == EventKind.DEVICE_DISCONNECTED:
-            self.stop()
-            self._transition(State.ERROR)
+            self._fault()
             return True
         return False if self.stopped else self.events.put(event)
 
     def stop(self) -> None:
         self.stopped = True
+        self.stop_event.set()
         self.actions.stop()  # synchronous latch before any cancellation await
         self._transition(State.ERROR if self.state == State.ERROR else State.STOPPED)
         current = asyncio.current_task()
@@ -146,8 +147,7 @@ class AutonomyEngine:
             if self.stopped:
                 return ActionResult(code="stopped")
             if self.actions.faulted:
-                self.stopped = True
-                self._transition(State.ERROR)
+                self._fault()
                 return ActionResult(code="device_fault")
             self._active = asyncio.current_task()
             if self.state == State.BOOT:
@@ -208,9 +208,7 @@ class AutonomyEngine:
                         )
                     self.memory.record(now, event.kind, decision.intent, result.code)
                     if result.code == "device_fault" or self.actions.faulted:
-                        self.stopped = True
-                        self.actions.stop()
-                        self._transition(State.ERROR)
+                        self._fault()
                         return result
                 self._transition(State.COOLDOWN)
                 await asyncio.sleep(self.settings.cooldown_s)
@@ -220,16 +218,12 @@ class AutonomyEngine:
                     return ActionResult(code="stopped")
                 raise
             except ConnectionError:
-                self.stopped = True
-                self.actions.stop()
-                self._transition(State.ERROR)
+                self._fault()
                 return ActionResult(code="device_fault")
             except Exception:
                 self._analysis_succeeded = False
                 if self.actions.faulted:
-                    self.stopped = True
-                    self.actions.stop()
-                    self._transition(State.ERROR)
+                    self._fault()
                 # Narrow external exception details to one fixed, non-private event code.
                 logger.warning("autonomy_cycle_unavailable")
                 return ActionResult(code="cycle_unavailable")

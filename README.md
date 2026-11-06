@@ -31,6 +31,10 @@ uv run --frozen ruff check .
 uv run --frozen python -m stackchan_autonomy --cycles 3
 # 외부 장치/포트 없이 실제 MCP SDK 세션을 거치는 통합 시뮬레이션
 uv run --frozen stackchan-autonomy --mode mcp-sim --cycles 3 --event touch
+# 한국어 전사 fixture와 tone TTS를 쓰는 오프라인 음성 순환
+uv run --frozen stackchan-autonomy --mode voice-sim --cycles 1 --event touch
+# 신뢰하는 시스템 libopus가 있을 때만 raw Opus 변환도 검증 (스피커 재생 없음)
+uv run --frozen stackchan-autonomy --mode voice-sim --cycles 1 --event touch --opus
 # touch / 텍스트 음성요청 시뮬레이션 (녹음하지 않음)
 uv run --frozen stackchan-autonomy --cycles 1 --event touch
 uv run --frozen stackchan-autonomy --cycles 1 --event voice --text "안녕"
@@ -63,7 +67,10 @@ Linux에서도 같은 uv 명령을 사용한다. 현재 클라우드 환경에�
 | STACKCHAN_BUDGET_NAMESPACE | openai:default; 모델과 무관하게 공유하는 API 예산 |
 | STACKCHAN_CLOUD_ENABLED | false, --mode cloud도 별도 필요 |
 | STACKCHAN_IMAGE_TRANSMISSION | false; 명시 설정 후 이미지 전송 |
-| STACKCHAN_AUDIO_TRANSMISSION | false; 현재 음성 bytes 경로 자체가 없음 |
+| STACKCHAN_AUDIO_TRANSMISSION | false; OpenAI STT/TTS 어댑터의 별도 동의 |
+| STACKCHAN_STT_MODEL / STACKCHAN_TTS_MODEL | 미설정; 계정에서 확인한 모델을 명시 |
+| STACKCHAN_TTS_VOICE | 미설정; 사용자가 선택한 지원 voice ID |
+| STACKCHAN_VOICE_CAPTURE_MS | 5000ms; 명시 요청 1회당 100..30000ms |
 | STACKCHAN_DRY_RUN | true; 이 MVP는 항상 Fake에서 시뮬레이션 |
 | STACKCHAN_HARDWARE_ENABLED | false; true로 바꿔도 이 버전은 물리 실행을 허용하지 않음 |
 | STACKCHAN_MEMORY_PATH | 미설정; 선택적으로 metadata SQLite 경로 |
@@ -101,6 +108,8 @@ provider.budget.snapshot()은 공유 누적 통계다. token 수는 청구액이
 응답이 유실된 요청의 token 사용량은 알 수 없다.
 
 ## 제어권 lease와 영속 예산
+
+음성 기능의 오프라인 실행과 입력/출력 형식은 [VOICE](docs/VOICE.md)를 참고한다.
 
 CLI는 제어권을 확보한 뒤 시작한다. 다른 프로세스가 같은 로봇을 점유 중이면
 종료 코드 2로 안내하며, 새 명령을 보내지 않는다. heartbeat 갱신 실패나 lease 만료는

@@ -193,3 +193,24 @@ OpenAI 3.x는 httpx2, MCP 1.x는 httpx를 사용하는 차이가 있어 별도 �
 실제 AST에서 추출해 저장했다. 출처 SHA/path와 MIT 고지를 함께 보존한다.
 시뮬레이터는 이 스키마와 위 반환 계약을 사용하며 외부 장치/포트에는 연결하지 않는다.
 프로토콜 시뮬레이션 결과를 ESP32/HTTP/auth/실물 검증으로 확대하지 않는다.
+
+## Phase 5 음성 계약 추가 확인 — 2026-11-06
+
+- 공식 https://developers.openai.com/api/docs/guides/text-to-speech 와
+  https://developers.openai.com/api/docs/guides/speech-to-text 에서 HTTP 200을 확인했다.
+  TTS raw PCM은 **24kHz, signed 16-bit little-endian, header 없음**이라고 명시한다.
+  언어 목록에 한국어가 있지만 실제 계정/선택 모델/음질을 검증한 것은 아니다.
+- 설치 SDK 3.46.0의 audio.transcriptions.create와
+  audio.speech.with_streaming_response.create 서명을 확인했다.
+  STT ko/in-memory WAV, TTS response_format=pcm 요청은 MockTransport로 검증했다.
+  모델/voice ID는 사용자 설정이며 실제 API 요청은 실행하지 않았다.
+- 감사 SHA의 gateway/stackchan_mcp/tts/audio_utils.py는 16kHz/mono/60ms=960 samples,
+  PCM→Opus frame 경로를 정의한다. OpenAI의 opus 응답 container와 이 raw packet을
+  동일시하지 않고 PCM에서 별도 인코딩한다.
+- capture_server.py:385의 handle_pcm은 /pcm, 별도 PCM token, X-Sample-Rate,
+  X-Channels=1 및 선택 X-Message-Id를 사용한다. 새 pcm_upload는 고정 형식 payload만
+  구성하고 token/HTTP/스피커 전송은 구현하지 않았다.
+- 변환/네이티브 codec wrapper는 새 구현이며 upstream Python/servo 코드를 복사하지 않았다.
+  신뢰하는 OS libopus를 동적으로 사용하고 바이너리를 재배포하지 않는다.
+  Linux libopus 1.5.2로 실제 raw packet 인코딩/디코딩을 검증했다.
+  Windows/DLL/장치 오디오는 여전히 미검증이다.

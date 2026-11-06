@@ -185,3 +185,46 @@ User approved the proposed cross-process lease, persistent API budget and proces
   Real .env, SQLite state, virtualenvs, caches, build outputs and .local backups stay ignored.
 - Prepare one initial feature commit and a normal non-force push to main.
   Push confirmation is reported in the chat; environment publication is not part of this request.
+
+## Offline voice follow-up
+
+Plan: docs/superpowers/plans/2026-11-06-offline-voice.md.
+User approved the recommended offline voice adapter/audio-conversion next step.
+Base e9e5c561fed7be1d90f673a8fe720ce77a091c9e; local feat/offline-voice branch.
+
+- Added audio.py (bounded s16le PCM/WAV, antialias normalization, /pcm payload),
+  opus_codec.py (optional OS libopus raw16k/mono/60ms packets), cloud_audio.py
+  (consent/model/voice/quota-gated SDK STT/TTS), voice.py (ports, fixtures and lifecycle).
+- Existing AI/safety/lease/action pipeline is reused through SpeakingRobotAdapter.
+  VoiceConversation handles explicit touch/voice only, blocks duplicate capture, and watches
+  common engine stop_event. CLI voice-sim forbids --forever/timer and adds optional --opus.
+- Ruling: this step implements offline voice/audio and API boundaries, not memory/UI/CI work.
+  Fake ASR returns a fixture; Fake TTS generates a tone. Treating those as speech quality
+  evidence would be wrong; live account/hardware checks remain separate.
+- Checked official OpenAI audio docs HTTP200 and installed SDK3.46.0 signatures.
+  TTS rawPCM24kHz/s16le is converted to audited gateway16kHz/mono and optional60ms Opus.
+  /pcm payload generation is implemented; actual transport/token/playback is still blocked.
+- No new Python dependencies/lockfile updates. Native libopus1.5.2 is OS-provided and not bundled.
+  PCM mode works without native codec; missing codec produces an explicit optional capability error.
+- Test-first: missing-module/CLI failures were observed, then functional tests passed.
+  Added rate-type and cancellation-after-playback regressions, observed RED→GREEN.
+  Intermediate full suite: 180 then187 passed.
+- Fresh review independently ran39 new tests (2.87s) including actual Opus. Five important issues
+  plus WAV frame alignment were reproduced. Added7 failing regression cases, then fixed:
+  post-record cancellation before STT; injected SDK retries forced0; all terminal faults signal
+  stop_event; disconnect safety events forwarded; voice/codec failure exitsCLI2; RIFF data alignment.
+- WAV minor was treated as a material media-validation contract and fixed. No deferred review
+  minors remain. Corrections were verified by full suite, not a second review.
+- Review excluded real device/firmware, gateway HTTP/auth/ACK/STOP, live account/Korean quality/
+  retention/billing, Windows/macOS/big-endian, external fencing, always-on capture/UI/face tracking/
+  long soak, exact original-length Opus restoration and forced CPU-thread termination.
+  Those limitations are recorded in VOICE.md and VOICE_TEST_REPORT.md.
+- Final suite:194 PASS /15.95s; failures/errors/skips0; .local/voice-pytest.xml retained.
+  Ruff/format passed36 Python files. Voice CLI ran both PCM and --opus: one capture/playback,
+  IDLE,0 cloud calls; optional Opus generated7 packets. No real sound was played.
+- Restricted cloud shell could stall thread shutdown (as with earlier SDK probe). Its owned
+  smoke-test processes were terminated and CLI was verified in approved execution with a
+  separate local state path. No verification bypass, physical I/O or live API calls.
+- Offline sdist/wheel build passed. Environment draft/publication and remote push not performed.
+- Wheel included all4 new voice modules and ran voice-sim --opus from /tmp successfully
+  (capture/playback1, Opus7, cloud0). Restored editable install offline; final Ruff/format passed.

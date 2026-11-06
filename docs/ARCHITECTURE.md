@@ -59,8 +59,9 @@ Mock 이미지·원시 음성은 파일로 저장하지 않으며 이미지 원�
 Memory에는 시간/event kind/intent/result만 저장한다. 기본 SQLite는 꺼져 있다.
 
 클라우드 모드는 명시적인 cloud_enabled와 계정 모델·키가 필요하다. image_transmission은
-별도 opt-in이다. 현재 음성 bytes 경로는 구현되지 않았고 audio_transmission을 켜도
-마이크를 시작하지 않는다. 텍스트 VOICE_REQUEST는 사용자가 입력한 전사문을 의미한다.
+별도 opt-in이다. 음성 bytes는 명시적 OpenAI audio 어댑터에서만 전송하며
+audio_transmission을 켜도 실제 마이크를 시작하지 않는다. 실제 마이크 구현은 없고,
+voice-sim은 메모리 내 무음과 fixture 전사문만 사용한다.
 Responses는 store=false, strict JSON Schema, SDK 자동 retry 없음이다.
 요청 실패도 sliding budget에 포함한다. budget.SQLiteRequestBudget는 요청 전 예약을
 공용 SQLite에 원자적으로 기록하므로 한도·집계 메타데이터가 재시작 후에도 유지된다.
@@ -76,7 +77,13 @@ DB 실패 시 새 제어/클라우드 호출을 허용하지 않는다. [운영 
 
 ## 확장 지점
 
-ports.py의 VoiceInput/PlaybackAdapter는 Phase 5 계약이다.
+ports.py의 VoiceInput/PlaybackAdapter/Microphone/SpeechTranscriber/SpeechSynthesizer는
+voice.py에서 오프라인 구현과 연결을 제공한다. RecordedVoiceInput은 수동 요청으로만
+시작하며 SpeakingRobotAdapter가 기존 ActionExecutor의 speak를 합성/정규화/가상 재생으로
+변환한다. stop_event는 STOP뿐 아니라 모든 terminal fault에서 설정해 녹음 작업도 정리한다.
+오디오 변환은 bounded PCM/WAV와 선택적인 시스템 libopus를 쓰고 cloud_audio.py는
+동의·명시적 모델/voice·공유 예산 아래 SDK를 호출한다. voice-sim CLI는 항상 Fake ASR/TTS다.
+실제 마이크·스피커 및 gateway /pcm transport/auth는 아직 차단된다. 상세는 VOICE.md를 따른다.
 MCPRobotAdapter는 공유 daemon의 연결/도구 discovery, 상태·절대 pose·터치 파싱을 제공한다.
 available은 코드에서 확인한 도구·스키마의 교집합이며 실제 기계 동작 검증을 뜻하지 않는다.
 사진 보관/전사 로그/샘플레이트·단일 제어 소유권을 해결하기 전 물리 capture/execute와

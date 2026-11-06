@@ -1,7 +1,9 @@
 # Test Report
 
 실행일: 2026-11-06. Python 3.12.14 / Linux 클라우드 환경.
-최종 전체 pytest: **148 PASS, 0 FAIL, 0 SKIP**, 13.70초.
+최종 전체 pytest: **194 PASS, 0 FAIL, 0 SKIP**, 15.95초.
+오프라인 음성 단계에서 46개를 추가했다. native Opus 테스트도 실행했다.
+[최신 음성 테스트 결과](VOICE_TEST_REPORT.md)를 참고한다. 아래 수치는 이전 단계 이력이다.
 지속형 제어권/예산 작업에서 31개를 추가했다. 아래 117개 결과는 MCP 단계의 이력이다.
 게시 후 새 환경에서 기존 60개 테스트가 통과했고, MCP 관련 57개를 추가했다.
 최초 MVP의 60 PASS / 7.73초와 JUnit 10.16초 기록은 아래 이력에 해당한다.
@@ -152,5 +154,5 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 | 실제 MCP HTTP/auth/ESP32 세션/장치 도구 | BLOCKED: 장치/gateway 없음; 메모리 내 SDK 경로만 PASS |
 | 실물 서보/센서/사진/음성/긴급 정지 | BLOCKED: 장치 없음 및 물리 테스트 승인 없음 |
 | Windows 및 Python 3.11 실제 실행 | 미실행: 현재 Linux 3.12만 검증 |
-| Phase 5 STT/TTS/face tracking/dashboard/24h 운영 | 미구현/미검증: 인터페이스와 개발계획만 제공 |
+| Phase 5 | 오프라인 음성/API 어댑터·변환은 Mock 검증; 실제 음성/face tracking/dashboard/24h 운영은 미검증 |
 | 게시된 이전 snapshot 복원 | PASS: 새 환경에서 파일·의존성과 기존 60개 테스트 확인; 이번 후속 변경은 미게시 |

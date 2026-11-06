@@ -28,11 +28,14 @@ STOP·분리·재연결 테스트 기록. 기본 물리 실행 비활성화 유�
 ## Phase 5 — 음성 / Memory / 고급 동작
 
 1. `VoiceInput.listen(language="ko", duration_ms=...) -> Event(VOICE_REQUEST)`:
-   터치/명시 요청으로 시작, gateway listen의 STT 엔진을 검증한다. OpenAI STT는
-   설치된 SDK와 현재 계정 모델로 확인하며 WAV wrapping/16kHz Opus decoding을 시험한다.
+   RecordedVoiceInput/GatewayVoiceInput 및 FakeMic/fixture ASR을 구현했다.
+   OpenAI STT의 ko/WAV/예산/동의 처리는 SDK MockTransport로 검증했다.
+   실제 gateway STT 엔진·마이크·계정 모델은 기기 도착 후 확인한다.
 2. `PlaybackAdapter.play_pcm(pcm, sample_rate, channels)`:
-   OpenAI TTS의 실제 출력 형식 확인 후 mono s16le로 변환, gateway /pcm 토큰 경로와
-   16kHz 리샘플링·Opus 전송을 검증한다. say의 기본 voicevox를 OpenAI TTS로 오인하지 않는다.
+   PCM/WAV·anti-alias 16kHz mono 변환·시스템 libopus 60ms packet 왕복을 구현했다.
+   TTS의 공식 24kHz PCM 형식은 문서/SDK MockTransport로 확인했다. /pcm payload는
+   구성하지만 실제 token/HTTP 전송·재생은 아직 차단했다.
+   say의 기본 voicevox를 OpenAI TTS로 오인하지 않는다.
    migratorywhale의 24kHz HTTP 계약은 별도 adapter가 필요하다.
 3. 상시 녹음/wake word는 별도 선택 기능. 기본적으로 만들지 않는다.
 4. 현재 SQLite는 최근 event/intent/result 시각만 저장한다. 사용자 설정/로봇 상태,
