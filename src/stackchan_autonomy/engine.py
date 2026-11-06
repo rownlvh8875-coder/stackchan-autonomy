@@ -7,6 +7,7 @@ from collections import deque
 
 from .action import ActionExecutor
 from .memory import Memory
+from .memory_store import MemoryUnavailable
 from .models import ActionResult, Decision, DecisionContext, Event, EventKind, State
 from .perception import Perception
 from .ports import DecisionProvider, RobotAdapter
@@ -59,7 +60,13 @@ class AutonomyEngine:
         self.clock = clock
         self.personality = personality
         self.events = EventQueue(settings.queue_size)
-        self.memory = Memory(settings.history_size, settings.memory_path)
+        self.memory = Memory(
+            settings.history_size,
+            settings.memory_path,
+            resource=settings.control_resource,
+            retention_s=settings.memory_retention_s,
+            clock=clock,
+        )
         self.perception = Perception()
         self.actions = ActionExecutor(robot, settings)
         self.actions.on_control_lost = self._fault
@@ -156,6 +163,7 @@ class AutonomyEngine:
                 async with asyncio.timeout(self.settings.operation_timeout_s):
                     self._transition(State.OBSERVE)
                     status = await self.robot.status()
+                    observed_at = self.clock()
                     if not status.connected:
                         raise ConnectionError("disconnected")
                     observation = self.perception.process(await self.robot.capture())
@@ -193,12 +201,30 @@ class AutonomyEngine:
                     self._transition(State.VALIDATE)
                     decision = Decision.model_validate(decision.model_dump())
                     now = self.clock()
-                    last_spoken = self.memory.last_spoken_at
+                    # Refresh policy after model latency; CLI edits are visible to live engines.
+                    # Acquire command ownership before reading shared speech time to avoid a
+                    # previous owner's completed greeting racing a new owner's cooldown check.
+                    if decision.intent == "speak" and not await self.actions.claim_control():
+                        return ActionResult(
+                            code="device_fault" if self.actions.faulted else "lease_busy"
+                        )
+                    snapshot = self.memory.snapshot()
+                    last_spoken = snapshot.last_speech_guard_at
                     if (
+                        decision.intent == "speak"
+                        and event.priority >= 2
+                        and not snapshot.preferences.automatic_speech_enabled
+                    ):
+                        result = ActionResult(code="automatic_speech_disabled")
+                    elif (
                         decision.intent == "speak"
                         and last_spoken is not None
                         and event.kind != EventKind.VOICE_REQUEST
-                        and now - last_spoken < self.settings.speech_cooldown_s
+                        and now - last_spoken
+                        < max(
+                            self.settings.speech_cooldown_s,
+                            snapshot.preferences.minimum_speech_interval_s,
+                        )
                     ):
                         result = ActionResult(code="speech_cooldown")
                     else:
@@ -206,7 +232,14 @@ class AutonomyEngine:
                         result = await self.actions.execute(
                             decision, explicit_request=event.kind == EventKind.VOICE_REQUEST
                         )
-                    self.memory.record(now, event.kind, decision.intent, result.code)
+                    self.memory.record(
+                        self.clock(),
+                        event.kind,
+                        decision.intent,
+                        result.code,
+                        status=status,
+                        status_at=observed_at,
+                    )
                     if result.code == "device_fault" or self.actions.faulted:
                         self._fault()
                         return result
@@ -220,6 +253,10 @@ class AutonomyEngine:
             except ConnectionError:
                 self._fault()
                 return ActionResult(code="device_fault")
+            except MemoryUnavailable:
+                self._fault()
+                logger.warning("autonomy_memory_unavailable")
+                return ActionResult(code="memory_unavailable")
             except Exception:
                 self._analysis_succeeded = False
                 if self.actions.faulted:

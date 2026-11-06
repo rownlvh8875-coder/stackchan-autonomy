@@ -270,3 +270,67 @@ Local base e9c4db7; remote main verified still e9e5c56, with no remote work to o
   checkout7.0.1/setup-python7.1.0/setup-uv10.3.3/upload-artifact7.0.2. Verified release tag SHAs
   and action manifests/input compatibility. Application code/lock/helper are unchanged.
   This targeted follow-up is validated by the next hosted run; no second review is claimed.
+
+## Optional persistent memory follow-up
+
+Plan: docs/superpowers/plans/2026-11-06-persistent-memory.md; spec beside it under specs.
+User asked to proceed to next work after CI. Roadmap Phase5.4 / original brief §10 governs.
+Base aacc0b3; existing checkout, new feat/persistent-memory branch. Inline execution;
+no new worktree/environment publication. Baseline194 PASS /15.83s.
+
+- Task1:12 new tests failed against missing contracts/privacy/schema protections, then passed
+  after version1 SQLite migration, resource scoping, atomic per-operation storage, retention,
+  typed preferences/metadata and independently retained speech/greeting times were implemented.
+- Ruling: use a separate memory_store.py for migration/connection ownership — keeps the
+  public Memory API focused, with no extra dependencies or storage authority.
+- Existing metadata test's epoch0..4 fixture now injects clock4; those records are otherwise
+  correctly expired under the new7-day retention. Assertions are unchanged.
+- SQLite remains optional (:memory: when disabled); persistent control/quota DB is unchanged.
+  Unknown schema/corrupt typed legacy metadata fail without destructive reset. Raw result
+  strings are now a closed allowlist; preferences accept only bool/bounded interval fields.
+- Task2:13 engine/CLI/preference tests failed before implementation, then passed.
+  Engine uses its injected clock/resource, refreshes policy after model latency, claims
+  command ownership before the shared speech check, and stores completion/observation
+  timestamps separately. Memory failure latches ERROR and blocks subsequent actions.
+- Added Settings.memory_retention_s and stackchan-memory show/set/clear entry point.
+  Typed preferences only increase configured cooldown; background speech can be disabled,
+  while touch/explicit voice stay available. No model-driven memory/profile writes.
+- Ruling: retention must cover configured/preferred speech intervals — rejecting an invalid
+  combination avoids expiring the suppression timestamp too early; operators must adjust
+  retention before using a longer interval. Defaults7days comfortably cover300seconds.
+- Real regression tests caught live schema changes being ignored, post-action memory failure
+  exitingCLI0, and migration losing a speech timestamp outside a newly reduced history bound.
+  Each failed first, was corrected, then passed with the whole suite.
+- Task2 suite222 PASS /21.47s, failures/errors/skips0. Ruff passed. Independent installed
+  wheel exercised Mock/MCP/voice/Opus and the new memory CLI, persisted preference gating,
+  process restart cooldown and clear. Native Opus generated7 packets; cloud requests0.
+- Limit: side effects and SQLite cannot commit atomically; crash after dispatch before memory
+  commit can lose completion metadata. Failure stops the live engine, with manual recovery.
+  Memory is not exact-once delivery, physical safety feedback or cross-host fencing.
+- Initial feature branch65ea091 published normally; all4 jobs in run42159742164 passed.
+  Draft PR creation was rejected by automatic approval review: it treats PR creation as
+  an additional remote write requiring explicit user approval. No PR exists and no
+  workaround/retry was attempted. Completed branch/CI work continues without that write.
+- Fresh reviewer independently ran28 focused tests /3.45s and found4 Important issues:
+  newly completed speech expired after large rollback, in-memory retention bypassed cooldown,
+  MCP boot memory error escaped via ExceptionGroup, malformed YAML leaked raw config.
+- Added7 failing cases for those findings and v1→v2 migration, then fixed all4. Separate
+  logical speech_guard_at protects suppression without relabeling expired raw history.
+  Retention/cooldown validation applies in both modes; MCP handles startup error before
+  context exit; shared YAML parser normalizes parse errors without raw content.
+- New version2 migration is backward compatible with legacy/v1. An additional regression
+  failed when retained v1 history validation ran after migration commit; initialization now
+  migrates/validates/expires in one transaction, preserving the original file on failure.
+- Final fix pass:230 PASS /23.63s, failures/errors/skips0. Ruff/format, distributions and
+  independent installed wheel all passed; Mock/MCP/voice/Opus/memory runs cloud requests0.
+  Corrections verified by tests, no second review claimed; no deferred minors.
+- Review rulings: discarding expired/count-evicted invalid rows is permitted by the retained
+  metadata contract; future/corrupt schema and concurrent writes remain transactional.
+  Clock-jump conservative delays are accepted availability costs, not cooldown bypass.
+  Historical pose is the last recorded observation, never restored; touch/voice exemptions
+  and prior control claim remain intentional. Edits after a snapshot are visible next read,
+  without an atomic settings-to-device guarantee. Explicit clear resets clocks/preferences.
+  Crash/cancellation between command and metadata commit, conflicting participant settings,
+  malicious DB/model edits, network FS/cross-host fencing and hardware/live-cloud behavior
+  remain outside guarantees. Windows native DLL/fork cases are explicit SKIP; hosted matrix
+  and distribution/native verification are done by the parent, not claimed as reviewer work.

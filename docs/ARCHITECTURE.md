@@ -56,7 +56,9 @@ BOOT → IDLE → OBSERVE → THINK → VALIDATE → ACT → COOLDOWN → IDLE.
 FakeRobot의 person_present는 명시적인
 시뮬레이션 라벨이다. 실제 사람 인식은 승인된 이미지 입력 모델/CV가 필요하다.
 Mock 이미지·원시 음성은 파일로 저장하지 않으며 이미지 원본은 cycle 종료 후 해제한다.
-Memory에는 시간/event kind/intent/result만 저장한다. 기본 SQLite는 꺼져 있다.
+Memory는 시간/event kind/intent/result와 typed 발화 설정·마지막 관찰 상태만 저장한다.
+기본 persistence는 꺼져 있다. memory_store는 version2 마이그레이션/원자적 SQLite를
+관리하며, 자원별 이력/TTL과 독립 발화 시각을 유지한다. [메모리 계약](MEMORY.md) 참고.
 
 클라우드 모드는 명시적인 cloud_enabled와 계정 모델·키가 필요하다. image_transmission은
 별도 opt-in이다. 음성 bytes는 명시적 OpenAI audio 어댑터에서만 전송하며
