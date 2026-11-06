@@ -1,0 +1,232 @@
+{
+  "source": "https://github.com/kisaragi-mochi/stackchan-mcp",
+  "commit": "03fbd92774c37844e11ea097e632df28f2a5f4e5",
+  "path": "gateway/stackchan_mcp/stdio_server.py",
+  "license": "MIT (gateway interface schema facts only; no firmware code)",
+  "tools": [
+    {
+      "name": "get_status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "take_photo",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "Question to ask about the photo (e.g. 'What do you see?')"
+          }
+        },
+        "required": [
+          "question"
+        ]
+      }
+    },
+    {
+      "name": "move_head",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "yaw": {
+            "type": "integer",
+            "description": "Horizontal angle in degrees (-90 to 90)",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "pitch": {
+            "type": "integer",
+            "description": "Vertical angle in degrees (5 to 85, M5Stack-recommended operating range). For the wider firmware hard clamp (0..88), use the `set_head_angles` device tool instead.",
+            "minimum": 5,
+            "maximum": 85
+          },
+          "speed": {
+            "oneOf": [
+              {
+                "enum": [
+                  "low",
+                  "mid",
+                  "high"
+                ]
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              }
+            ],
+            "description": "speed (optional): How fast to move the head.\n  - \"low\"  — slow, deliberate, ~30°/s. Good for curious tilts or gentle look-toward.\n  - \"mid\"  — default natural turn, ~120°/s. Use for conversational eye contact.\n  - \"high\" — quick reaction, ~240°/s. Use for surprise / double-take.\n  - Or a raw degrees-per-second integer if you need a specific value."
+          }
+        },
+        "required": [
+          "yaw",
+          "pitch"
+        ]
+      }
+    },
+    {
+      "name": "get_head_angles",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "set_avatar",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "face": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "happy",
+              "thinking",
+              "sad",
+              "surprised",
+              "embarrassed",
+              "off"
+            ],
+            "description": "One of: idle, happy, thinking, sad, surprised, embarrassed, off."
+          }
+        },
+        "required": [
+          "face"
+        ]
+      }
+    },
+    {
+      "name": "set_blink",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "True to start blinking, false to stop."
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      }
+    },
+    {
+      "name": "get_touch_state",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "set_all_leds",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "r": {
+            "type": "integer",
+            "description": "Red 0..255",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "g": {
+            "type": "integer",
+            "description": "Green 0..255",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "b": {
+            "type": "integer",
+            "description": "Blue 0..255",
+            "minimum": 0,
+            "maximum": 255
+          }
+        },
+        "required": [
+          "r",
+          "g",
+          "b"
+        ]
+      }
+    },
+    {
+      "name": "say",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to speak. Must be non-empty."
+          },
+          "voice": {
+            "type": "string",
+            "description": "Engine identifier (e.g. 'voicevox', 'irodori', 'elevenlabs'). Default 'voicevox'.",
+            "default": "voicevox"
+          },
+          "speaker_id": {
+            "type": "integer",
+            "description": "Engine-specific numeric speaker identifier (e.g. a VOICEVOX speaker ID)."
+          },
+          "speaker_name": {
+            "type": "string",
+            "description": "Engine-specific string speaker/voice identifier (e.g. an Edge TTS voice name such as 'en-US-AriaNeural'). Distinct from 'voice', which selects the engine itself (e.g. 'edge-tts'); use speaker_name for engines whose speaker selector is a string name rather than the numeric speaker_id."
+          },
+          "reference_audio": {
+            "type": "string",
+            "description": "Path to a reference audio file used by voice-cloning engines (e.g. Irodori). Ignored by engines that do not support it."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "listen",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "duration_ms": {
+            "type": "integer",
+            "description": "Capture window in milliseconds. Clamped to [100, 30000].",
+            "default": 5000,
+            "minimum": 100,
+            "maximum": 30000
+          },
+          "engine": {
+            "type": "string",
+            "description": "Engine identifier (e.g. 'faster-whisper', 'openai-whisper'). Default 'faster-whisper'.",
+            "default": "faster-whisper"
+          },
+          "language": {
+            "type": "string",
+            "description": "ISO 639-1 language code (e.g. 'ja', 'en'). Omit this field to use STACKCHAN_LISTEN_LANGUAGE, or 'ja' when that env is unset. Do not rely on a schema default — many clients send defaults even when the caller did not choose a language."
+          },
+          "model": {
+            "type": "string",
+            "description": "Engine-specific model identifier (e.g. 'base' / 'small' / 'medium' for faster-whisper, 'whisper-1' for OpenAI). Engines fall back to their default when omitted."
+          },
+          "motion": {
+            "type": "string",
+            "enum": [
+              "none",
+              "face-only",
+              "look-up"
+            ],
+            "description": "Optional visible feedback during capture. 'none' preserves the previous behaviour. 'face-only' shows the thinking avatar during capture and restores idle at the end. 'look-up' preserves yaw, tilts pitch to look_up_pitch, and holds the pose on success.",
+            "default": "none"
+          },
+          "look_up_pitch": {
+            "type": "number",
+            "description": "Pitch angle for motion='look-up'. Must be between 5 and 85 degrees.",
+            "default": 50.0,
+            "minimum": 5,
+            "maximum": 85
+          }
+        }
+      }
+    }
+  ]
+}

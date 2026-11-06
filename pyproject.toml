@@ -1,0 +1,40 @@
+[project]
+name = "stackchan-autonomy"
+version = "0.1.0"
+description = "Offline-first, safety-validated autonomous StackChan engine"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic==2.14.3",
+  "pydantic-settings==2.16.2",
+  "openai==3.46.0",
+  "mcp==1.30.0",
+  "Pillow==13.0.0",
+  "PyYAML==6.0.3",
+]
+
+[dependency-groups]
+dev = ["pytest==9.2.0", "pytest-asyncio==1.4.1.post1", "ruff==0.17.4"]
+
+[project.scripts]
+stackchan-autonomy = "stackchan_autonomy.cli:main"
+
+[build-system]
+requires = ["hatchling==1.33.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stackchan_autonomy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

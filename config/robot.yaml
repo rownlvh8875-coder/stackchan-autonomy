@@ -1,0 +1,25 @@
+# Conservative operating envelope from audited move_head schema.
+observe_interval_s: 30
+max_unchanged_interval_s: 300
+cooldown_s: 1
+speech_cooldown_s: 300
+command_interval_s: 1
+max_step_deg: 15
+yaw_min: -90
+yaw_max: 90
+pitch_min: 5
+pitch_max: 85
+requests_per_minute: 2
+requests_per_hour: 30
+requests_per_day: 100
+state_path: .local/autonomy.sqlite3
+control_resource: stackchan:default
+lease_ttl_s: 10
+budget_namespace: openai:default
+queue_size: 64
+history_size: 100
+cloud_enabled: false
+image_transmission: false
+audio_transmission: false
+hardware_enabled: false
+dry_run: true
