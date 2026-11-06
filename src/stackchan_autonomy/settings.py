@@ -10,7 +10,10 @@ from .models import StrictModel
 
 
 def yaml_mapping(path: str | Path) -> dict:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    try:
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except yaml.YAMLError:
+        raise ValueError("configuration must be valid YAML") from None
     if not isinstance(data, dict):
         raise ValueError("configuration must be a mapping")
     return data
@@ -67,7 +70,7 @@ class Settings(BaseSettings):
     def valid_ranges(self):
         if self.yaw_min >= self.yaw_max or self.pitch_min >= self.pitch_max:
             raise ValueError("angle lower bounds must precede upper bounds")
-        if self.memory_path is not None and self.memory_retention_s < self.speech_cooldown_s:
+        if self.memory_retention_s < self.speech_cooldown_s:
             raise ValueError("memory retention must cover speech cooldown")
         return self
 

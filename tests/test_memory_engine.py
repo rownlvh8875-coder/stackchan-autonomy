@@ -5,7 +5,7 @@ import pytest
 from stackchan_autonomy.decision import MockDecisionProvider
 from stackchan_autonomy.engine import AutonomyEngine
 from stackchan_autonomy.memory import Memory
-from stackchan_autonomy.models import Event, EventKind, RobotStatus, State
+from stackchan_autonomy.models import Decision, Event, EventKind, RobotStatus, State
 from stackchan_autonomy.robot import FakeRobotAdapter
 from stackchan_autonomy.settings import Settings
 
@@ -156,3 +156,38 @@ async def test_speech_completion_and_pose_observation_have_distinct_timestamps(t
 def test_persistent_memory_retention_must_cover_configured_cooldown(tmp_path):
     with pytest.raises(ValueError):
         settings(tmp_path / "short.sqlite3", memory_retention_s=60, speech_cooldown_s=300)
+
+
+def test_in_memory_retention_must_also_cover_configured_cooldown():
+    with pytest.raises(ValueError):
+        Settings(memory_path=None, memory_retention_s=60, speech_cooldown_s=300)
+
+
+async def test_large_clock_rollback_preserves_suppression_for_new_speech(tmp_path):
+    now = [1000]
+
+    class DifferentSpeech:
+        count = 0
+
+        async def decide(self, observation, context):
+            self.count += 1
+            return Decision(intent="speak", speech=f"fixture {self.count}")
+
+    engine = AutonomyEngine(
+        FakeRobotAdapter(),
+        DifferentSpeech(),
+        settings(tmp_path / "rollback.sqlite3", memory_retention_s=60, speech_cooldown_s=60),
+        clock=lambda: now[0],
+    )
+    try:
+        now[0] = 100
+        assert (await engine.step(Event(kind=EventKind.VOICE_REQUEST))).executed
+        assert (await engine.step(Event(kind=EventKind.PERSON_DETECTED))).code == "speech_cooldown"
+        assert len(engine.robot.history) == 1
+        # Retain a logical suppression clock; do not relabel expired raw wall-time history.
+        snapshot = engine.memory.snapshot()
+        assert snapshot.last_speech_guard_at == 1000
+        assert snapshot.last_spoken_at is None
+        assert snapshot.recent == ()
+    finally:
+        await engine.aclose()

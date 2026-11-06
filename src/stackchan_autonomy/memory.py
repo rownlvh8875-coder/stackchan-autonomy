@@ -37,9 +37,9 @@ class Memory:
             retention_s,
             clock,
         )
-        self._store = MemoryStore(path, limit=limit, now=finite_time(clock()))
+        self._store = MemoryStore(path)
         try:
-            self.snapshot()
+            self._store.initialize(limit, finite_time(clock()), self._read)
         except BaseException:
             self.close()
             raise
@@ -53,7 +53,7 @@ class Memory:
     def _read(self, db, now: float) -> tuple[MemorySnapshot, float]:
         try:
             row = db.execute(
-                "SELECT clock_at,last_spoken_at,last_greeting_at,robot,preferences "
+                "SELECT clock_at,last_spoken_at,last_greeting_at,robot,preferences,speech_guard_at "
                 "FROM memory_profiles WHERE resource=?",
                 (self.resource,),
             ).fetchone()
@@ -64,6 +64,7 @@ class Memory:
                 now = max(now, finite_time(row[0]))
                 snapshot = MemorySnapshot(
                     last_spoken_at=row[1],
+                    last_speech_guard_at=row[5],
                     last_greeting_at=row[2],
                     robot=ObservedRobotState.model_validate_json(row[3]) if row[3] else None,
                     preferences=MemoryPreferences.model_validate_json(row[4]),
@@ -96,6 +97,12 @@ class Memory:
                     if snapshot.last_greeting_at is not None and snapshot.last_greeting_at >= cutoff
                     else None
                 ),
+                last_speech_guard_at=(
+                    snapshot.last_speech_guard_at
+                    if snapshot.last_speech_guard_at is not None
+                    and snapshot.last_speech_guard_at >= cutoff
+                    else None
+                ),
                 robot=snapshot.robot if snapshot.robot and snapshot.robot.at >= cutoff else None,
             )
         except (ValueError, TypeError):
@@ -105,10 +112,11 @@ class Memory:
 
     def _write(self, db, snapshot, now):
         db.execute(
-            "INSERT INTO memory_profiles VALUES(?,?,?,?,?,?) ON CONFLICT(resource) DO UPDATE SET "
+            "INSERT INTO memory_profiles(resource,clock_at,last_spoken_at,last_greeting_at,"
+            "robot,preferences,speech_guard_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(resource) DO UPDATE SET "
             "clock_at=excluded.clock_at,last_spoken_at=excluded.last_spoken_at,"
             "last_greeting_at=excluded.last_greeting_at,robot=excluded.robot,"
-            "preferences=excluded.preferences",
+            "preferences=excluded.preferences,speech_guard_at=excluded.speech_guard_at",
             (
                 self.resource,
                 now,
@@ -116,6 +124,7 @@ class Memory:
                 snapshot.last_greeting_at,
                 snapshot.robot.model_dump_json() if snapshot.robot else None,
                 snapshot.preferences.model_dump_json(),
+                snapshot.last_speech_guard_at,
             ),
         )
 
@@ -161,6 +170,9 @@ class Memory:
             changes = {}
             if record.intent == "speak" and record.result == "executed":
                 changes["last_spoken_at"] = max(record.at, snapshot.last_spoken_at or 0)
+                # This is logical suppression bookkeeping, independent of actual history time.
+                # A fresh completion after rollback must not expire as an old historical event.
+                changes["last_speech_guard_at"] = now
                 if record.event == EventKind.PERSON_DETECTED:
                     changes["last_greeting_at"] = max(record.at, snapshot.last_greeting_at or 0)
             if robot is not None and (snapshot.robot is None or robot.at >= snapshot.robot.at):

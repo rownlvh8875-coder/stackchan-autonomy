@@ -4,7 +4,13 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-from .models import EventKind, MemoryRecord
+from .models import (
+    EventKind,
+    MemoryPreferences,
+    MemoryRecord,
+    MemorySnapshot,
+    ObservedRobotState,
+)
 from .state_store import finite_time
 
 
@@ -13,18 +19,18 @@ class MemoryUnavailable(OSError):
 
 
 class MemoryStore:
-    def __init__(self, path: Path | None, *, limit: int, now: float):
+    def __init__(self, path: Path | None):
         self.path = Path(path).expanduser().resolve() if path is not None else None
         self._anchor = sqlite3.connect(":memory:", isolation_level=None) if path is None else None
         self.closed = False
         self._initialized = False
-        try:
-            with self.transaction() as db:
-                self._migrate(db, limit, now)
-            self._initialized = True
-        except BaseException:
-            self.close()
-            raise
+
+    def initialize(self, limit, now, read_snapshot):
+        # Migration, validation and initial expiry must commit or roll back together.
+        with self.transaction() as db:
+            self._migrate(db, limit, now)
+            read_snapshot(db, now)
+        self._initialized = True
 
     @contextmanager
     def transaction(self):
@@ -57,13 +63,32 @@ class MemoryStore:
 
     @staticmethod
     def _check_version(db):
-        if db.execute("SELECT id,version FROM memory_schema").fetchall() != [(1, 1)]:
+        if db.execute("SELECT id,version FROM memory_schema").fetchall() != [(1, 2)]:
             raise MemoryUnavailable("unsupported memory schema")
 
     @staticmethod
     def _migrate(db, limit, now):
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "memory_schema" in tables:
+            if db.execute("SELECT id,version FROM memory_schema").fetchall() == [(1, 1)]:
+                # Validate before upgrading: malformed metadata leaves the v1 file intact.
+                try:
+                    for clock, spoken, greeting, robot, preferences in db.execute(
+                        "SELECT clock_at,last_spoken_at,last_greeting_at,robot,preferences "
+                        "FROM memory_profiles"
+                    ):
+                        finite_time(clock)
+                        MemorySnapshot(
+                            last_spoken_at=spoken,
+                            last_greeting_at=greeting,
+                            robot=ObservedRobotState.model_validate_json(robot) if robot else None,
+                            preferences=MemoryPreferences.model_validate_json(preferences),
+                        )
+                except (ValueError, TypeError):
+                    raise MemoryUnavailable("invalid version1 memory metadata") from None
+                db.execute("ALTER TABLE memory_profiles ADD COLUMN speech_guard_at REAL")
+                db.execute("UPDATE memory_profiles SET speech_guard_at=last_spoken_at")
+                db.execute("UPDATE memory_schema SET version=2 WHERE id=1")
             MemoryStore._check_version(db)
             return
         if {"memory_history", "memory_profiles"} & tables:
@@ -100,7 +125,7 @@ class MemoryStore:
             except ValueError:
                 raise MemoryUnavailable("invalid legacy memory metadata") from None
         db.execute("CREATE TABLE memory_schema(id INTEGER PRIMARY KEY, version INTEGER NOT NULL)")
-        db.execute("INSERT INTO memory_schema VALUES(1,1)")
+        db.execute("INSERT INTO memory_schema VALUES(1,2)")
         db.execute(
             "CREATE TABLE memory_history(id INTEGER PRIMARY KEY, resource TEXT NOT NULL, "
             "at REAL NOT NULL, event TEXT NOT NULL, intent TEXT NOT NULL, result TEXT NOT NULL)"
@@ -108,13 +133,14 @@ class MemoryStore:
         db.execute("CREATE INDEX memory_history_scope ON memory_history(resource,id)")
         db.execute(
             "CREATE TABLE memory_profiles(resource TEXT PRIMARY KEY, clock_at REAL NOT NULL, "
-            "last_spoken_at REAL, last_greeting_at REAL, robot TEXT, preferences TEXT NOT NULL)"
+            "last_spoken_at REAL, last_greeting_at REAL, robot TEXT, preferences TEXT NOT NULL, "
+            "speech_guard_at REAL)"
         )
         if legacy:
             now = max(now, *(finite_time(record.at) for record in legacy))
             now = max(now, spoken_at or 0, greeting_at or 0)
             db.execute(
-                "INSERT INTO memory_profiles VALUES(?,?,?,?,?,?)",
+                "INSERT INTO memory_profiles VALUES(?,?,?,?,?,?,?)",
                 (
                     "stackchan:default",
                     now,
@@ -122,6 +148,7 @@ class MemoryStore:
                     greeting_at,
                     None,
                     '{"automatic_speech_enabled":true,"minimum_speech_interval_s":0}',
+                    spoken_at,
                 ),
             )
             db.executemany(

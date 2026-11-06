@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 
 def run_cli(tmp_path, *args, enabled=True):
     env = {
@@ -86,4 +88,41 @@ raise SystemExit(cli.main(['--cycles','1','--event','touch']))
     )
     assert result.returncode == 2
     assert "retry" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("mode", ["mock", "mcp-sim", "voice-sim"])
+def test_autonomy_cli_memory_boot_failure_is_private_in_all_modes(tmp_path, mode):
+    path = tmp_path / "corrupt.sqlite3"
+    path.write_bytes(b"private-startup-db")
+    env = dict(os.environ) | {"STACKCHAN_MEMORY_PATH": str(path)}
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "stackchan_autonomy",
+            "--mode",
+            mode,
+            "--event",
+            "touch",
+            "--cycles",
+            "1",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 2
+    assert "memory" in result.stderr.lower()
+    assert "Traceback" not in result.stderr and "ExceptionGroup" not in result.stderr
+    assert "private-startup-db" not in result.stderr
+
+
+def test_malformed_yaml_never_prints_raw_configuration(tmp_path):
+    path = tmp_path / "bad.yaml"
+    path.write_text("private-config-secret: [unterminated", encoding="utf-8")
+    result = run_cli(tmp_path, "--config", str(path), "show")
+    assert result.returncode == 2
+    assert "private-config-secret" not in result.stderr
     assert "Traceback" not in result.stderr

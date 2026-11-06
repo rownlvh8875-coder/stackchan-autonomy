@@ -25,9 +25,10 @@ creating a memory DB. It never constructs a robot or API provider.
 |---|---|
 | Recent interactions/actions | Time, closed event/intent/result codes; bounded by history_size |
 | Last successful speech/greeting | Separate timestamps, survive history-count eviction |
+| Last speech suppression guard | Separate logical timestamp; conservative after clock rollback |
 | Preferences | automatic_speech_enabled bool, minimum_speech_interval_s 0..86400 |
 | Last recorded robot observation | Observation time, connected, yaw, pitch; historical only |
-| Schema/clock | Component version1, per-resource clock high-water mark |
+| Schema/clock | Component version2, per-resource clock high-water mark |
 
 No conversation text, model rationale, image, audio, name/biometric identity, secret,
 command queue or saved motor target is accepted. Preferences are changed explicitly
@@ -46,11 +47,16 @@ History and speech/observation metadata expire on access for that resource, not 
 a background deletion service. Preferences persist until cleared. Count/retention
 cleanup and updates commit atomically. Expiration is not undone by clock rollback;
 a clock jump far forward can expire data early and delay availability after rollback.
+Actual history/observation timestamps are not rewritten after rollback. Newly executed
+speech separately updates `last_speech_guard_at` using the logical high-water clock;
+cooldown uses that guard even if the raw completion timestamp is already expired.
 Configured retention must cover the configured speech cooldown and stored preference
 interval. Invalid combinations stop with a fixed error rather than silently shorten
 the interval. Raise retention to edit a preference that exceeds a newly lowered limit.
 
-Legacy `history(id,at,event,intent,result)` files migrate atomically to version1.
+Legacy `history(id,at,event,intent,result)` files and the initial version1 format
+migrate atomically to version2. Version1 speech times seed the new logical guard.
+Migration and retained-profile/history validation share one transaction.
 Unscoped legacy records belong only to `stackchan:default`, never an arbitrary selected
 robot. Migration retains at most history_size recent records; normal retention then
 applies. Preserve a backup before an operator migrates an important existing file.

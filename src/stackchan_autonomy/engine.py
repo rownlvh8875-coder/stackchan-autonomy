@@ -209,7 +209,7 @@ class AutonomyEngine:
                             code="device_fault" if self.actions.faulted else "lease_busy"
                         )
                     snapshot = self.memory.snapshot()
-                    last_spoken = snapshot.last_spoken_at
+                    last_spoken = snapshot.last_speech_guard_at
                     if (
                         decision.intent == "speak"
                         and event.priority >= 2

@@ -307,3 +307,30 @@ no new worktree/environment publication. Baseline194 PASS /15.83s.
 - Limit: side effects and SQLite cannot commit atomically; crash after dispatch before memory
   commit can lose completion metadata. Failure stops the live engine, with manual recovery.
   Memory is not exact-once delivery, physical safety feedback or cross-host fencing.
+- Initial feature branch65ea091 published normally; all4 jobs in run42159742164 passed.
+  Draft PR creation was rejected by automatic approval review: it treats PR creation as
+  an additional remote write requiring explicit user approval. No PR exists and no
+  workaround/retry was attempted. Completed branch/CI work continues without that write.
+- Fresh reviewer independently ran28 focused tests /3.45s and found4 Important issues:
+  newly completed speech expired after large rollback, in-memory retention bypassed cooldown,
+  MCP boot memory error escaped via ExceptionGroup, malformed YAML leaked raw config.
+- Added7 failing cases for those findings and v1→v2 migration, then fixed all4. Separate
+  logical speech_guard_at protects suppression without relabeling expired raw history.
+  Retention/cooldown validation applies in both modes; MCP handles startup error before
+  context exit; shared YAML parser normalizes parse errors without raw content.
+- New version2 migration is backward compatible with legacy/v1. An additional regression
+  failed when retained v1 history validation ran after migration commit; initialization now
+  migrates/validates/expires in one transaction, preserving the original file on failure.
+- Final fix pass:230 PASS /23.63s, failures/errors/skips0. Ruff/format, distributions and
+  independent installed wheel all passed; Mock/MCP/voice/Opus/memory runs cloud requests0.
+  Corrections verified by tests, no second review claimed; no deferred minors.
+- Review rulings: discarding expired/count-evicted invalid rows is permitted by the retained
+  metadata contract; future/corrupt schema and concurrent writes remain transactional.
+  Clock-jump conservative delays are accepted availability costs, not cooldown bypass.
+  Historical pose is the last recorded observation, never restored; touch/voice exemptions
+  and prior control claim remain intentional. Edits after a snapshot are visible next read,
+  without an atomic settings-to-device guarantee. Explicit clear resets clocks/preferences.
+  Crash/cancellation between command and metadata commit, conflicting participant settings,
+  malicious DB/model edits, network FS/cross-host fencing and hardware/live-cloud behavior
+  remain outside guarantees. Windows native DLL/fork cases are explicit SKIP; hosted matrix
+  and distribution/native verification are done by the parent, not claimed as reviewer work.

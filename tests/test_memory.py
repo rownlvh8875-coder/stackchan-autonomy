@@ -17,6 +17,27 @@ def legacy(path, result="executed"):
         db.execute("INSERT INTO history VALUES(1,10,'PERSON_DETECTED','speak',?)", (result,))
 
 
+def version1(path, *, invalid_history=False):
+    with sqlite3.connect(path) as db:
+        db.executescript(
+            "CREATE TABLE memory_schema(id INTEGER PRIMARY KEY,version INTEGER);"
+            "INSERT INTO memory_schema VALUES(1,1);"
+            "CREATE TABLE memory_profiles(resource TEXT PRIMARY KEY,clock_at REAL,"
+            "last_spoken_at REAL,last_greeting_at REAL,robot TEXT,preferences TEXT);"
+            "CREATE TABLE memory_history(id INTEGER PRIMARY KEY,resource TEXT,at REAL,"
+            "event TEXT,intent TEXT,result TEXT);"
+        )
+        db.execute(
+            "INSERT INTO memory_profiles VALUES('stackchan:default',20,10,10,NULL,?)",
+            ('{"automatic_speech_enabled":true,"minimum_speech_interval_s":0}',),
+        )
+        if invalid_history:
+            db.execute(
+                "INSERT INTO memory_history VALUES(1,'stackchan:default',20,'TOUCH_TAP','speak',?)",
+                ("invalid-private-result",),
+            )
+
+
 def test_legacy_history_migrates_only_into_default_resource(tmp_path):
     path = tmp_path / "memory.sqlite3"
     legacy(path)
@@ -27,7 +48,7 @@ def test_legacy_history_migrates_only_into_default_resource(tmp_path):
         assert memory.last_spoken_at == 10
         assert memory.snapshot().last_greeting_at == 10
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version FROM memory_schema WHERE id=1").fetchone() == (1,)
+        assert db.execute("SELECT version FROM memory_schema WHERE id=1").fetchone() == (2,)
 
 
 def test_legacy_migration_preserves_speech_time_outside_new_history_limit(tmp_path):
@@ -144,6 +165,25 @@ def test_live_reader_rejects_schema_changed_by_another_process(tmp_path):
             db.execute("UPDATE memory_schema SET version=99")
         with pytest.raises(OSError, match="memory"):
             memory.snapshot()
+
+
+def test_v1_migration_preserves_existing_speech_suppression(tmp_path):
+    path = tmp_path / "version1.sqlite3"
+    version1(path)
+    with Memory(path=path, clock=lambda: 20) as memory:
+        assert memory.last_spoken_at == 10
+        assert memory.snapshot().last_speech_guard_at == 10
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT version FROM memory_schema").fetchone() == (2,)
+
+
+def test_v1_migration_and_retained_history_validation_are_one_transaction(tmp_path):
+    path = tmp_path / "invalid-v1.sqlite3"
+    version1(path, invalid_history=True)
+    before = path.read_bytes()
+    with pytest.raises(OSError):
+        Memory(path=path, clock=lambda: 20)
+    assert path.read_bytes() == before
 
 
 def test_invalid_legacy_data_rolls_back_migration_without_removing_history(tmp_path):

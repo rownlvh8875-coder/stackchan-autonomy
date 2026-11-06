@@ -118,6 +118,7 @@ class MemorySnapshot(StrictModel):
     recent: tuple[MemoryRecord, ...] = ()
     preferences: MemoryPreferences = MemoryPreferences()
     last_spoken_at: float | None = Field(default=None, ge=0, strict=True)
+    last_speech_guard_at: float | None = Field(default=None, ge=0, strict=True)
     last_greeting_at: float | None = Field(default=None, ge=0, strict=True)
     robot: ObservedRobotState | None = None
 

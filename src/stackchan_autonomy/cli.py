@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .decision import MockDecisionProvider, OpenAIDecisionProvider
 from .engine import AutonomyEngine
+from .memory_store import MemoryUnavailable
 from .models import Event, EventKind
 from .opus_codec import opus_available
 from .robot import FakeRobotAdapter
@@ -45,7 +46,11 @@ async def run(args) -> dict:
             speech = FakeSpeechService(transcript=args.text or "안녕하세요")
             playback = FakePlaybackAdapter(opus=args.opus, history_size=settings.history_size)
             robot = SpeakingRobotAdapter(robot, speech, playback)
-        engine = AutonomyEngine(robot, provider, settings, personality=personality)
+        try:
+            engine = AutonomyEngine(robot, provider, settings, personality=personality)
+        except MemoryUnavailable:
+            # Handle before MCP context cleanup can wrap the failure in an ExceptionGroup.
+            return {"error": "memory_unavailable"}
         stack.push_async_callback(engine.aclose)
         if args.mode == "voice-sim":
             conversation = VoiceConversation(
@@ -141,6 +146,8 @@ def main(argv=None) -> int:
         )
     if summary.get("error") == "coordination_unavailable":
         parser.exit(2, "Coordination storage unavailable; no robot commands were sent.\n")
+    if summary.get("error") == "memory_unavailable":
+        parser.exit(2, "Memory storage unavailable; no robot commands were sent.\n")
     if summary.get("state") == "ERROR":
         parser.exit(2, "Autonomy stopped after a storage or device fault; no automatic retry.\n")
     if summary.get("error") == "voice_simulation_unavailable":

@@ -24,6 +24,9 @@ Recent history is bounded by history_size and a configurable 7-day default reten
 (60..31536000 seconds); speech/status timestamps also expire. Preferences last until
 explicitly cleared. Clock rollback must not resurrect expired records. Speech times
 survive history eviction, and live processes must see other processes' writes.
+Review refinement: current schema version2 adds a separate logical speech suppression
+guard; raw history timestamps still expire normally after rollback. Legacy/v1 migrations
+and retained-data validation commit together. Retention covers cooldown in both modes.
 
 Recorded robot pose is historical information, never restored or used to move the
 robot. Memory storage failure with persistence enabled stops the engine; if it occurs
