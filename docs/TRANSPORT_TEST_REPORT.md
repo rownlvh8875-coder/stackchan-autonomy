@@ -2,7 +2,10 @@
 
 Date2026-11-06. Baseline230 tests. Final targeted HTTP23 + existing MCP56:
 **79 PASS /13.80s**, using MCP1.30.0/uvicorn0.54.0/Starlette1.10.0 from uv.lock.
-Whole suite after review fixes: **266 PASS /40.83s**, no failures/errors/skips on Linux.
+Latest whole suite: **267 PASS /40.68s**, no failures/errors/skips on Linux.
+Windows CI exposed a short-duration test throughput assumption; a controlled slow-provider
+regression now verifies real elapsed time and valid insufficient-measurement failure
+without assuming warmup can finish on every machine within0.4s.
 
 These tests run a real TCP listener bound to127.0.0.1 on a kernel-selected port,
 an actual SDK StreamableHTTP session manager and the real MCPRobotAdapter.connect.

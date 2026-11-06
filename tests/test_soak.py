@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -54,9 +55,19 @@ async def test_soak_ignores_application_environment_and_never_touches_user_db(
     assert "private-secret" not in report.model_dump_json()
 
 
-async def test_soak_duration_is_real_monotonic_time():
-    from stackchan_autonomy.soak import SoakConfig, run_soak
+@pytest.mark.parametrize("provider_delay", [0, 0.25])
+async def test_soak_duration_is_real_monotonic_time(monkeypatch, provider_delay):
+    from stackchan_autonomy.soak import MockDecisionProvider, SoakConfig, run_soak
 
+    original = MockDecisionProvider.decide
+
+    async def delayed(self, observation, context):
+        await asyncio.sleep(provider_delay)
+        return await original(self, observation, context)
+
+    monkeypatch.setattr(MockDecisionProvider, "decide", delayed)
+
+    started = time.monotonic()
     report = await run_soak(
         SoakConfig(
             cycles=None,
@@ -66,10 +77,14 @@ async def test_soak_duration_is_real_monotonic_time():
             restart_every=5,
         )
     )
-    assert report.passed, report.violations
-    assert report.wall_elapsed_s >= 0.4
+    elapsed = time.monotonic() - started
+    assert elapsed >= report.wall_elapsed_s >= 0.4
     assert report.virtual_elapsed_s is None
-    assert report.measured_cycles > 0
+    if report.measured_cycles:
+        assert report.passed, report.violations
+    else:
+        assert not report.passed
+        assert report.violations == ("insufficient_measurement",)
 
 
 async def test_soak_short_run_cannot_claim_a_measurement_pass():

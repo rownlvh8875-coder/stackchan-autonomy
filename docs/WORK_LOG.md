@@ -398,3 +398,12 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   Dedicated-process tracer/task interference limits, unique interrupted-report paths,
   native/RSS/scheduler/hardware/real24h limits remain explicit. Exact artifact paths exclude
   secrets/DBs. Pending real-run documentation is now resolved by completed evidence above.
+- First hosted run42166297818: Linux jobs passed; both Windows jobs correctly reported
+  insufficient measurement in the0.4s duration unit test (only2 warmup cycles completed).
+  The test had incorrectly assumed machine throughput, while the runner's failure was valid.
+  Added controlled0.25s/provider latency, observed RED locally, then asserted independent
+  monotonic elapsed bounds plus exact success/insufficient-measurement consistency.
+  The full2880-cycle CI diagnostic still requires PASS. No production checks were disabled.
+- After platform-test correction:267 PASS /40.68s, failures/errors/skips0 locally;
+  Ruff/format pass. Diagnostic source is unchanged, so completed10-minute/virtual24h
+  source-blob evidence remains valid. Hosted final matrix is being rechecked.

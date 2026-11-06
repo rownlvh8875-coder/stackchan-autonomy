@@ -1,8 +1,8 @@
 # Test Report
 
 실행일: 2026-11-06. Python 3.12.14 / Linux 클라우드 환경.
-최신 로컬 전체 pytest: **266 PASS, 0 FAIL, 0 SKIP**, 40.83초.
-후속 HTTP23개·안정성13개를 추가했다. [HTTP 검증](TRANSPORT_TEST_REPORT.md),
+최신 로컬 전체 pytest: **267 PASS, 0 FAIL, 0 SKIP**, 40.68초.
+후속 HTTP23개·안정성14개를 추가했다. [HTTP 검증](TRANSPORT_TEST_REPORT.md),
 [실시간10분/가상24시간 결과](SOAK.md)를 참고한다.
 선택적 영속 메모리에 36개 회귀 테스트를 추가했다. [메모리 계약](MEMORY.md) 참고.
 CI 추가 후 독립 임시 venv에 wheel을 설치해 Mock/MCP/음성/Opus 실행도 통과했다.
