@@ -74,13 +74,13 @@ async def test_mock_ai_responds_to_simulated_person_without_api_key(monkeypatch)
 
 def test_memory_persists_only_bounded_metadata(tmp_path):
     path = tmp_path / "memory.sqlite"
-    memory = Memory(limit=2, path=path)
+    memory = Memory(limit=2, path=path, clock=lambda: 4)
     for i in range(5):
         memory.record(i, EventKind.TOUCH_TAP, "speak", "executed")
     assert len(memory.recent()) == 2
     assert memory.last_spoken_at == 4
     memory.close()
-    reloaded = Memory(limit=2, path=path)
+    reloaded = Memory(limit=2, path=path, clock=lambda: 4)
     assert [r.at for r in reloaded.recent()] == [3, 4]
     assert reloaded.last_spoken_at == 4
     reloaded.close()

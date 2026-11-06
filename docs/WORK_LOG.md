@@ -270,3 +270,21 @@ Local base e9c4db7; remote main verified still e9e5c56, with no remote work to o
   checkout7.0.1/setup-python7.1.0/setup-uv10.3.3/upload-artifact7.0.2. Verified release tag SHAs
   and action manifests/input compatibility. Application code/lock/helper are unchanged.
   This targeted follow-up is validated by the next hosted run; no second review is claimed.
+
+## Optional persistent memory follow-up
+
+Plan: docs/superpowers/plans/2026-11-06-persistent-memory.md; spec beside it under specs.
+User asked to proceed to next work after CI. Roadmap Phase5.4 / original brief §10 governs.
+Base aacc0b3; existing checkout, new feat/persistent-memory branch. Inline execution;
+no new worktree/environment publication. Baseline194 PASS /15.83s.
+
+- Task1:12 new tests failed against missing contracts/privacy/schema protections, then passed
+  after version1 SQLite migration, resource scoping, atomic per-operation storage, retention,
+  typed preferences/metadata and independently retained speech/greeting times were implemented.
+- Ruling: use a separate memory_store.py for migration/connection ownership — keeps the
+  public Memory API focused, with no extra dependencies or storage authority.
+- Existing metadata test's epoch0..4 fixture now injects clock4; those records are otherwise
+  correctly expired under the new7-day retention. Assertions are unchanged.
+- SQLite remains optional (:memory: when disabled); persistent control/quota DB is unchanged.
+  Unknown schema/corrupt typed legacy metadata fail without destructive reset. Raw result
+  strings are now a closed allowlist; preferences accept only bool/bounded interval fields.

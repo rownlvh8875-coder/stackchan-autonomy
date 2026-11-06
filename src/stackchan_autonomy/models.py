@@ -79,10 +79,47 @@ class ActionResult(StrictModel):
 
 
 class MemoryRecord(StrictModel):
-    at: float
+    at: float = Field(ge=0, strict=True)
     event: EventKind
     intent: Literal["idle", "look", "emote", "speak"]
-    result: str
+    result: Literal[
+        "idle",
+        "executed",
+        "unsafe",
+        "duplicate",
+        "command_rate_limit",
+        "hardware_disabled",
+        "device_fault",
+        "lease_busy",
+        "queue_full",
+        "stopped",
+        "speech_cooldown",
+        "automatic_speech_disabled",
+        "cycle_unavailable",
+        "unchanged",
+        "cloud_error",
+        "memory_unavailable",
+    ]
+
+
+class MemoryPreferences(StrictModel):
+    automatic_speech_enabled: bool = Field(default=True, strict=True)
+    minimum_speech_interval_s: float = Field(default=0, ge=0, le=86400, strict=True)
+
+
+class ObservedRobotState(StrictModel):
+    at: float = Field(ge=0, strict=True)
+    connected: bool = Field(strict=True)
+    yaw: float = Field(strict=True)
+    pitch: float = Field(strict=True)
+
+
+class MemorySnapshot(StrictModel):
+    recent: tuple[MemoryRecord, ...] = ()
+    preferences: MemoryPreferences = MemoryPreferences()
+    last_spoken_at: float | None = Field(default=None, ge=0, strict=True)
+    last_greeting_at: float | None = Field(default=None, ge=0, strict=True)
+    robot: ObservedRobotState | None = None
 
 
 class DecisionContext(StrictModel):
