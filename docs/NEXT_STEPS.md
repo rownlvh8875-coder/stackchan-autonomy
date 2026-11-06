@@ -1,12 +1,16 @@
 # Next steps
 
+제품 도착 후 사용자 작업 순서는 [상세 작업설명서](DEVICE_ARRIVAL_RUNBOOK.ko.md)의 D00–D10을
+따른다. 아래 개발 과제는 D03–D04의 호환성/물리 어댑터 체크포인트에서 실행한다.
+
 ## Phase 4 — 계약 검증 후 실제 MCP Adapter
 
 현재 구현: MCPRobotAdapter.connect/discover/status/touch_state, 공개 Tool 스키마와
 장치 tools 교집합, 절대 pose 파싱, 세션·장치 고정, 시간초과/취소 fault latch.
 `--mode mcp-sim`에서 factory 소유의 메모리 내 gateway를 통한 전체 engine을 실행한다.
 사진/서보/표정/blink/LED/가상 listen·say 계약을 테스트했지만, 실물의 capture/execute 및
-음성은 여전히 차단돼 있다. 실제 HTTP/auth/ESP32 연동은 미검증이다.
+음성은 여전히 차단돼 있다. HTTP/auth는 로컬 loopback fixture로 검증했고,
+실제 gateway/auth/ESP32 연동은 미검증이다.
 
 구현할 계약:
 

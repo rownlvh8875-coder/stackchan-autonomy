@@ -1,5 +1,10 @@
 # Hardware bring-up — 미실행 계획
 
+사용자가 택배 수령부터 따라갈 절차는 **[제품 도착 후 상세 작업설명서](DEVICE_ARRIVAL_RUNBOOK.ko.md)**를
+참고한다. 공식 출고 매뉴얼의 첫 부팅·앱 설정, Windows 명령, 개발 체크포인트,
+실물 인수/24시간 시험과 [기록 양식](templates/DEVICE_ACCEPTANCE_RECORD.ko.md)을 포함한다.
+아래 내용은 개발 담당을 위한 기술 요약이다.
+
 이 문서는 Phase 4 도입 절차다. 이 작업에서는 장치 연결·플래시·모터 구동을 하지 않았다.
 MCPRobotAdapter의 물리 실행은 코드에서 차단되며 환경변수만으로 해제되지 않는다.
 

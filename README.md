@@ -6,6 +6,14 @@ Observe → Perceive → Decide → Validate → Act → Evaluate 순환을 가�
 Phase 4는 MCP 계약·상태/각도/터치 파서와 메모리 내 gateway 통합 시뮬레이션을 제공한다.
 물리 실행은 계속 차단돼 있다.
 
+## 제품이 도착하면
+
+[제품 도착 후 상세 작업설명서](docs/DEVICE_ARRIVAL_RUNBOOK.ko.md)를 D00부터 따른다.
+공식 매뉴얼을 바탕으로 개봉·출고 점검 → PC 준비 → 복구·호환성 확인 → 읽기 전용 연결 →
+실물 어댑터 개발 → 모터·매체·AI 시험 → 실물 24시간 순서를 정리했다.
+각 단계의 통과 기준과 [인수 기록 양식](docs/templates/DEVICE_ACCEPTANCE_RECORD.ko.md)을 제공한다.
+PC Mock 24시간은 별도 참고 시험이며 실물 연동에는 추가 개발이 필요하다.
+
 ## Windows 설치와 첫 실행
 
 Python 3.11 이상과 [uv](https://docs.astral.sh/uv/getting-started/installation/)가 필요하다.

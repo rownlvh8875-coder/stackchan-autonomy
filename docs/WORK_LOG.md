@@ -407,3 +407,27 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - After platform-test correction:267 PASS /40.68s, failures/errors/skips0 locally;
   Ruff/format pass. Diagnostic source is unchanged, so completed10-minute/virtual24h
   source-blob evidence remains valid. Hosted final matrix is being rechecked.
+
+## Product arrival operating guide — 2026-11-06
+
+- User requested a detailed Korean manual from parcel arrival through physical validation,
+  based on product manuals, and GitHub upload. Added the D00–D10 runbook, Mermaid flowchart,
+  blank local acceptance record and links from README/bring-up/next steps.
+- Read the official M5Stack StackChan, download, M5Burner and Qoder guides and Astral uv
+  installation page over HTTPS (all HTTP200). Captured firstboot servo movement, World app,
+  original-controller compatibility, 2.4GHz requirement, automatic OTA, account-unpair loss,
+  power/RST distinction, factory recovery and the2026-08-07 LCD revision requirement.
+- Distinguished factory functionality, current read-only MCP API, missing physical adapter,
+  actual media/AI development and subsequent supervised/1h/real24h acceptance. No physical
+  stage is marked passed. The user's PC24h completion remains unconfirmed.
+- Verified local Markdown links/anchors and fences; parsed the flowchart with Mermaid11.14.0;
+  compiled the embedded Python example and checked its robot calls are discover/status/
+  touch_state only. Compared documented app/soak CLI options with installed --help output.
+- Ran documented Mock3-cycle, MCP3-cycle, voice1-cycle and30-cycle soak examples in a private
+  temporary directory: all exit0, each cloud_requests0; app state IDLE and soak passed with
+  no violations. These are Linux CLI checks, not a Windows PowerShell or real-device run.
+- Fresh read-only review reported no actionable Critical/Important/Minor findings. Final
+  clarity pass added the project directory/PATH before the new-window read-only example.
+- Documentation only: source, lockfile, original development brief and environment config
+  unchanged. No firmware/device/gateway connection, paid API, new PR or merge was performed.
+  User authorized normal upload to the existing feat/transport-soak branch.
