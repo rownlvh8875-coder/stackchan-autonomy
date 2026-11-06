@@ -288,3 +288,22 @@ no new worktree/environment publication. Baseline194 PASS /15.83s.
 - SQLite remains optional (:memory: when disabled); persistent control/quota DB is unchanged.
   Unknown schema/corrupt typed legacy metadata fail without destructive reset. Raw result
   strings are now a closed allowlist; preferences accept only bool/bounded interval fields.
+- Task2:13 engine/CLI/preference tests failed before implementation, then passed.
+  Engine uses its injected clock/resource, refreshes policy after model latency, claims
+  command ownership before the shared speech check, and stores completion/observation
+  timestamps separately. Memory failure latches ERROR and blocks subsequent actions.
+- Added Settings.memory_retention_s and stackchan-memory show/set/clear entry point.
+  Typed preferences only increase configured cooldown; background speech can be disabled,
+  while touch/explicit voice stay available. No model-driven memory/profile writes.
+- Ruling: retention must cover configured/preferred speech intervals — rejecting an invalid
+  combination avoids expiring the suppression timestamp too early; operators must adjust
+  retention before using a longer interval. Defaults7days comfortably cover300seconds.
+- Real regression tests caught live schema changes being ignored, post-action memory failure
+  exitingCLI0, and migration losing a speech timestamp outside a newly reduced history bound.
+  Each failed first, was corrected, then passed with the whole suite.
+- Task2 suite222 PASS /21.47s, failures/errors/skips0. Ruff passed. Independent installed
+  wheel exercised Mock/MCP/voice/Opus and the new memory CLI, persisted preference gating,
+  process restart cooldown and clear. Native Opus generated7 packets; cloud requests0.
+- Limit: side effects and SQLite cannot commit atomically; crash after dispatch before memory
+  commit can lose completion metadata. Failure stops the live engine, with manual recovery.
+  Memory is not exact-once delivery, physical safety feedback or cross-host fencing.

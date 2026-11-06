@@ -68,6 +68,8 @@ class Memory:
                     robot=ObservedRobotState.model_validate_json(row[3]) if row[3] else None,
                     preferences=MemoryPreferences.model_validate_json(row[4]),
                 )
+            if snapshot.preferences.minimum_speech_interval_s > self.retention_s:
+                raise MemoryUnavailable("memory retention is shorter than speech preference")
             cutoff = now - self.retention_s
             db.execute(
                 "DELETE FROM memory_history WHERE resource=? AND (at<? OR id NOT IN "
@@ -137,11 +139,15 @@ class Memory:
         result: str,
         *,
         status: RobotStatus | None = None,
+        status_at: float | None = None,
     ) -> None:
         record = MemoryRecord(at=at, event=event, intent=intent, result=result)
         robot = (
             ObservedRobotState(
-                at=at, connected=status.connected, yaw=status.yaw, pitch=status.pitch
+                at=at if status_at is None else status_at,
+                connected=status.connected,
+                yaw=status.yaw,
+                pitch=status.pitch,
             )
             if status is not None
             else None
@@ -168,6 +174,8 @@ class Memory:
             preferences = MemoryPreferences.model_validate(
                 snapshot.preferences.model_dump() | changes
             )
+            if preferences.minimum_speech_interval_s > self.retention_s:
+                raise ValueError("speech interval must fit within memory retention")
             self._write(db, snapshot.model_copy(update={"preferences": preferences}), now)
             return preferences
 

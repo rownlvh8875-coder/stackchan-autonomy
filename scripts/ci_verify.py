@@ -129,6 +129,53 @@ def main():
             if mode == "voice-sim" and bool(summary.get("opus_packets")) != use_opus:
                 raise RuntimeError("installed voice CLI did not exercise the requested codec")
             print(json.dumps(summary), flush=True)
+        memory_cli = binaries / ("stackchan-memory.exe" if os.name == "nt" else "stackchan-memory")
+        memory_env = child_env | {
+            "STACKCHAN_MEMORY_PATH": str(root / "memory.sqlite3"),
+            "STACKCHAN_STATE_PATH": str(root / "memory-control.sqlite3"),
+        }
+        configured = json.loads(
+            run(
+                [
+                    memory_cli,
+                    "set",
+                    "--automatic-speech",
+                    "off",
+                    "--minimum-speech-interval",
+                    "600",
+                ],
+                cwd=root,
+                env=memory_env,
+            )
+        )
+        if configured["preferences"] != {
+            "automatic_speech_enabled": False,
+            "minimum_speech_interval_s": 600,
+        }:
+            raise RuntimeError("installed memory CLI did not persist preferences")
+
+        def autonomy(*flags):
+            return json.loads(run([cli, "--cycles", "1", *flags], cwd=root, env=memory_env))
+
+        blocked = autonomy("--person")
+        if blocked["simulated_actions"] != 0 or blocked["cloud_requests"] != 0:
+            raise RuntimeError("installed engine ignored automatic speech preference")
+        touched = autonomy("--event", "touch")
+        if touched["simulated_actions"] != 1 or touched["cloud_requests"] != 0:
+            raise RuntimeError("installed engine lost explicit interaction capability")
+        run([memory_cli, "set", "--automatic-speech", "on"], cwd=root, env=memory_env)
+        restarted = autonomy("--person")
+        retained = json.loads(run([memory_cli, "show"], cwd=root, env=memory_env))
+        if (
+            restarted["simulated_actions"] != 0
+            or restarted["cloud_requests"] != 0
+            or retained["recent"][-1]["result"] != "speech_cooldown"
+        ):
+            raise RuntimeError("installed engine lost speech cooldown across process restart")
+        cleared = json.loads(run([memory_cli, "clear"], cwd=root, env=memory_env))
+        if cleared["recent"] or cleared["last_spoken_at"] is not None:
+            raise RuntimeError("installed memory CLI did not clear scoped metadata")
+        print("Optional memory CLI / persisted preferences / restart cooldown: PASS", flush=True)
     return 0
 
 

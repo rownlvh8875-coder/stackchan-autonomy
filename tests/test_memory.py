@@ -30,6 +30,18 @@ def test_legacy_history_migrates_only_into_default_resource(tmp_path):
         assert db.execute("SELECT version FROM memory_schema WHERE id=1").fetchone() == (1,)
 
 
+def test_legacy_migration_preserves_speech_time_outside_new_history_limit(tmp_path):
+    path = tmp_path / "legacy-small-limit.sqlite3"
+    legacy(path)
+    with sqlite3.connect(path) as db:
+        db.execute("INSERT INTO history VALUES(2,11,'TIMER_OBSERVE','idle','idle')")
+        db.execute("INSERT INTO history VALUES(3,12,'TIMER_OBSERVE','idle','idle')")
+    with Memory(limit=1, path=path, clock=lambda: 20) as memory:
+        assert [record.at for record in memory.recent()] == [12]
+        assert memory.last_spoken_at == 10
+        assert memory.snapshot().last_greeting_at == 10
+
+
 def test_successful_speech_time_survives_history_eviction_and_restart(tmp_path):
     path = tmp_path / "bounded.sqlite3"
     with Memory(limit=2, path=path, clock=lambda: 20) as memory:
@@ -108,6 +120,12 @@ def test_preferences_are_typed_and_cannot_accept_text_or_cloud_authority(tmp_pat
     assert b"private-transcript" not in path.read_bytes()
 
 
+def test_preference_interval_cannot_outlast_retained_speech_time():
+    with Memory(retention_s=60) as memory:
+        with pytest.raises(ValueError):
+            memory.update_preferences(minimum_speech_interval_s=600)
+
+
 def test_unknown_future_schema_fails_without_changing_existing_data(tmp_path):
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as db:
@@ -117,6 +135,15 @@ def test_unknown_future_schema_fails_without_changing_existing_data(tmp_path):
     with pytest.raises(OSError, match="memory"):
         Memory(path=path)
     assert path.read_bytes() == before
+
+
+def test_live_reader_rejects_schema_changed_by_another_process(tmp_path):
+    path = tmp_path / "changed-schema.sqlite3"
+    with Memory(path=path) as memory:
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE memory_schema SET version=99")
+        with pytest.raises(OSError, match="memory"):
+            memory.snapshot()
 
 
 def test_invalid_legacy_data_rolls_back_migration_without_removing_history(tmp_path):

@@ -141,6 +141,8 @@ def main(argv=None) -> int:
         )
     if summary.get("error") == "coordination_unavailable":
         parser.exit(2, "Coordination storage unavailable; no robot commands were sent.\n")
+    if summary.get("state") == "ERROR":
+        parser.exit(2, "Autonomy stopped after a storage or device fault; no automatic retry.\n")
     if summary.get("error") == "voice_simulation_unavailable":
         parser.exit(
             2, "Voice simulation failed; check audio configuration and codec availability.\n"

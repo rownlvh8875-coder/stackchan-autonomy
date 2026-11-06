@@ -41,11 +41,11 @@ test_memory_cli.py, scripts/ci_verify.py.
 Consumes Task1 snapshot/preferences APIs; Settings adds memory_retention_s.
 Produces stackchan-memory show/set/clear, disabled without memory_path;
 engine honors fresh preferences/times and stops on MemoryUnavailable.
-- [ ] Write failing restart greeting/cooldown, fresh preference/voice exemption,
+- [x] Write failing restart greeting/cooldown, fresh preference/voice exemption,
   historical pose nonrestoration and pre/post-dispatch storage failure tests.
-- [ ] Write subprocess CLI set/show/clear/disabled/error tests and independent wheel smoke.
-- [ ] Implement engine/CLI with no model-driven memory writes, no stored commands.
-- [ ] Run all tests; verify Ruff, distributions and independent installed wheel; commit GREEN.
+- [x] Write subprocess CLI set/show/clear/disabled/error tests and independent wheel smoke.
+- [x] Implement engine/CLI with no model-driven memory writes, no stored commands.
+- [x] Run all tests; verify Ruff, distributions and independent installed wheel; commit GREEN.
 
 ## Task 3: Review, records and integration
 Files: MEMORY.md, README.md, NEXT_STEPS.md, TEST_REPORT.md, WORK_LOG.md, this plan.

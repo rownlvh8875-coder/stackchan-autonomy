@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     queue_size: int = Field(default=64, ge=1, le=1000)
     history_size: int = Field(default=100, ge=1, le=10000)
     memory_path: Path | None = None
+    memory_retention_s: float = Field(default=604800, ge=60, le=31536000)
     state_path: Path = Path(".local/autonomy.sqlite3")
     control_resource: str = Field(default="stackchan:default", min_length=1, max_length=200)
     lease_ttl_s: float = Field(default=10, ge=0.1, le=300)
@@ -66,6 +67,8 @@ class Settings(BaseSettings):
     def valid_ranges(self):
         if self.yaw_min >= self.yaw_max or self.pitch_min >= self.pitch_max:
             raise ValueError("angle lower bounds must precede upper bounds")
+        if self.memory_path is not None and self.memory_retention_s < self.speech_cooldown_s:
+            raise ValueError("memory retention must cover speech cooldown")
         return self
 
     @classmethod

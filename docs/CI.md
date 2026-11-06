@@ -26,6 +26,9 @@ and zero cloud requests. Voice must capture/play back once; available Opus must 
 packets. Linux requires the native codec rather than silently skipping it.
 The helper removes application settings/keys and source-path overrides from child
 environments; network proxy/CA trust configuration remains intact for package installation.
+It also runs the installed stackchan-memory entry point, verifies persisted preferences
+control background speech, checks cooldown across separate CLI processes and clears
+only the temporary test resource. No user's memory file is used.
 
 Only JUnit XML is uploaded (seven-day retention). Local state databases, caches, keys,
 media, conversation content and built distributions are not uploaded as artifacts.

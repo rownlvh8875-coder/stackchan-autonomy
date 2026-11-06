@@ -74,7 +74,8 @@ Linux에서도 같은 uv 명령을 사용한다. 현재 클라우드 환경에�
 | STACKCHAN_VOICE_CAPTURE_MS | 5000ms; 명시 요청 1회당 100..30000ms |
 | STACKCHAN_DRY_RUN | true; 이 MVP는 항상 Fake에서 시뮬레이션 |
 | STACKCHAN_HARDWARE_ENABLED | false; true로 바꿔도 이 버전은 물리 실행을 허용하지 않음 |
-| STACKCHAN_MEMORY_PATH | 미설정; 선택적으로 metadata SQLite 경로 |
+| STACKCHAN_MEMORY_PATH | 미설정; 선택적 metadata/설정 SQLite, [관리 방법](docs/MEMORY.md) |
+| STACKCHAN_MEMORY_RETENTION_S | 604800초(7일); 이력·발화/관찰 시각 보관, 60..31536000 |
 
 기본 모터 envelope는 **감사한 커스텀 gateway**의 yaw −90..90 / pitch 5..85이다.
 공식 펌웨어의 영점/좌표와 동일하다고 가정하지 않는다.
@@ -82,6 +83,8 @@ Linux에서도 같은 uv 명령을 사용한다. 현재 클라우드 환경에�
 STOP은 진행 중 작업을 취소하고 새 명령을 차단한다. 통신 장애·명령 실행 중 timeout은
 자동 retry 없이 fault로 잠근다. 재개는 원인을 확인한 뒤 새로운 engine으로 수동 수행한다.
 사진은 기본적으로 저장하지 않으며, SQLite에는 이벤트·행동 종류·결과·시각만 기록한다.
+선택적 메모리를 켜면 자동 발화 설정과 마지막 관찰 상태도 저장한다.
+`uv run --frozen stackchan-memory show/set/clear`로 관리하며 로봇 위치를 복원하지 않는다.
 
 ## OpenAI Responses API 연결 (실계정 미검증)
 

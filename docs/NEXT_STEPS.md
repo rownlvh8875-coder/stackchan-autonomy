@@ -38,8 +38,9 @@ STOP·분리·재연결 테스트 기록. 기본 물리 실행 비활성화 유�
    say의 기본 voicevox를 OpenAI TTS로 오인하지 않는다.
    migratorywhale의 24kHz HTTP 계약은 별도 adapter가 필요하다.
 3. 상시 녹음/wake word는 별도 선택 기능. 기본적으로 만들지 않는다.
-4. 현재 SQLite는 최근 event/intent/result 시각만 저장한다. 사용자 설정/로봇 상태,
-   세션 간 인사 시각 보존과 마이그레이션/보관기한을 추가한다. 지속 API 예산과
+4. 선택적 [영속 메모리](MEMORY.md)에 event/intent/result, 발화/인사 시각, 자동 발화 설정,
+   마지막 관찰 상태와 마이그레이션/보관기한을 구현했다. 상태는 모터 복원에 쓰지 않는다.
+   stackchan-memory show/set/clear와 재시작·설정 반영·저장 장애를 검증했다. 지속 API 예산과
    누적 사용량 메타데이터는 공용 SQLite로 구현하고 재시작·프로세스 경쟁을 테스트했다.
    원시 대화·이미지·오디오·생체 신원 데이터는 기본 저장 대상에서 제외한다.
 5. 얼굴 추적은 비식별 bounding box → 작은 head delta로 분리한다. 실제 탐지 정확도,
