@@ -44,7 +44,8 @@ DC/길이/진폭 범위를 테스트했다. 변환은 제한된 입력을 메모
 취소해도 이미 실행 중인 Python worker thread의 순수 계산을 강제로 끝내지는 못하지만
 그 결과를 후속 재생으로 전달하지 않는다. 오디오 파일은 생성하지 않는다.
 현재 cloud의 제한된 shell에서는 thread 종료가 정지하는 환경 차이가 있어, SDK/음성 CLI
-검증은 승인된 실행 경로로 수행했다. Windows 실행은 아직 검증하지 않았다.
+검증은 승인된 실행 경로로 수행했다. 후속 [CI](CI.md)에서 Windows의 PCM 음성
+시뮬레이션과 설치 wheel 실행도 통과했다. Windows native libopus는 여전히 미검증이다.
 
 OpenAI TTS에 response_format=pcm을 요청하며 공식 문서의 24kHz s16le 계약을 사용한다.
 OpenAI가 반환하는 opus container를 장치의 raw Opus packet과 같다고 가정하지 않는다.

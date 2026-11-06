@@ -11,6 +11,8 @@ Runs on push, pull request and manual dispatch, with four independent jobs:
 Each job uses uv 0.13.4, `uv sync --frozen`, Ruff lint/format, full pytest,
 sdist/wheel build and an independent installed-wheel CLI smoke check.
 Official actions are pinned to full commit SHAs, verified from their release tags.
+Checkout 7.0.1, setup-python 7.1.0, setup-uv 10.3.3 and upload-artifact 7.0.2 use
+Node 24; their action manifests and the inputs used here were checked upstream.
 The workflow token has `contents: read`; no application secrets are bound to jobs.
 No real robot, microphone, speaker or paid API is used. SDK API tests use MockTransport.
 
@@ -51,11 +53,23 @@ wheel manually if its version differs. The helper leaves the development venv un
 - Ruff lint/format and workflow YAML/matrix/permissions/SHA checks: PASS.
 - Offline sdist/wheel build: PASS using cached verified build dependencies.
 - Independent wheel: all four runs PASS, including native Opus (seven packets).
-- Remote Windows/Linux matrix: pending publication and execution; local results do
-  not establish that Windows or Python 3.11 has passed.
+- Hosted matrix: all four jobs PASS in [run 42151710686](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/42151710686),
+  commit `3817ab1`. Each job passed locked install, lint, tests, build, independent
+  wheel smoke and JUnit upload. Downloaded JUnit files confirm:
+
+| Runner | Python | Passed | Skipped | Failures/errors | Test time |
+|---|---|---:|---:|---:|---:|
+| Ubuntu | 3.11 | 194 | 0 | 0 | 18.058s |
+| Ubuntu | 3.12 | 194 | 0 | 0 | 17.970s |
+| Windows | 3.11 | 192 | 2 | 0 | 29.259s |
+| Windows | 3.12 | 192 | 2 | 0 | 46.765s |
+
+Windows skips are the native libopus round trip and Linux fork ownership test.
+Windows PCM voice and subprocess lease/budget races executed successfully.
+Both Linux jobs exercised native Opus, including the installed wheel.
+The first hosted run reported Node 20 action deprecation; the action pins above
+were updated to official Node 24 versions in response. Application code is unchanged.
 
 The restricted cloud shell denied a build dependency network connection. An offline
 build using the existing cache passed; TLS/hash verification was retained.
 Threaded SDK/voice checks ran using the environment's approved command execution.
-GitHub repository and Actions run listing are readable. The Actions administration
-permissions endpoint returns HTTP 403; CI does not require changing that setting.

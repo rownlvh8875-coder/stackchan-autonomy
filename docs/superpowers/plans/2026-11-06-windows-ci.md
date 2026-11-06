@@ -29,5 +29,5 @@ capability differences, independent wheel imports, secret/artifact scope and act
    lint/tests/build/wheel smoke, Linux libopus and JUnit artifacts with minimal permissions.
 4. [x] Validate YAML/workflow structure, run local full suite/build/smoke, independent
    review and corrections. Update README/CI.md/TEST_REPORT/WORK_LOG.
-5. [ ] Commit, fast-forward main and push without overwrite. Observe actual Actions
+5. [x] Commit, fast-forward main and push without overwrite. Observe actual Actions
    matrix outcomes, diagnose/fix failures and report verified vs externally blocked checks.

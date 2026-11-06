@@ -53,3 +53,7 @@ WAV 문제도 검증 계약의 문제로 판단해 수정했다. 재리뷰는 �
 실제 마이크/스피커, gateway PCM 인증·재생 ACK/STOP, 실제 한국어 ASR/TTS·계정·보관·청구,
 Windows/DLL/big-endian 실기, 장기 운영은 미검증이다. memory 확장/얼굴 추적/웹 UI/Windows CI는
 이번 음성 단계에서 구현하지 않았다. 환경 게시와 GitHub push도 하지 않았다.
+
+후속 [CI 단계](CI.md)에서 GitHub 반영과 Windows/Linux × Python3.11/3.12 검증을
+완료했다. Windows PCM 음성/wheel은 PASS이며 native libopus와 fork는 SKIP이다.
+위 미구현·미실행 기록은 음성 단계 종료 시점의 이력이다.

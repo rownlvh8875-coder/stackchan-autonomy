@@ -10,7 +10,9 @@ CI 추가 후 독립 임시 venv에 wheel을 설치해 Mock/MCP/음성/Opus 실�
 게시 후 새 환경에서 기존 60개 테스트가 통과했고, MCP 관련 57개를 추가했다.
 최초 MVP의 60 PASS / 7.73초와 JUnit 10.16초 기록은 아래 이력에 해당한다.
 현재 범위의 최종 판정: **MOCK_MVP_PASS**.
-실제 K151/OpenAI 계정/Windows/펌웨어 검증 결과를 뜻하지 않는다.
+실제 K151/OpenAI 계정/펌웨어 검증 결과를 뜻하지 않는다.
+후속 GitHub Actions는 Windows/Linux × Python3.11/3.12 네 조합 모두 PASS다.
+Linux는 각각194 PASS, Windows는 각각192 PASS와 fork/libopus 2 SKIP이다.
 
 ## 최초 MVP 검증 명령과 결과 (이력)
 
@@ -127,7 +129,8 @@ lease는 같은 로컬 DB/resource를 쓰는 참여 프로세스에 한정된다
 gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하지 않는다.
 예산도 같은 DB/namespace/한도를 공유하는 이 앱의 예약 한도이며 실제 청구액은 아니다.
 시계 점프의 가용성 영향, DB 삭제/설정 분리, 응답 유실 후 알 수 없는 token 수는
-[COORDINATION.md](COORDINATION.md)에 명시했다. Windows/Python 3.11 실행은 여전히 미검증이다.
+[COORDINATION.md](COORDINATION.md)에 명시했다. 이 단계 당시 미검증이던 Windows/Python3.11은
+후속 [CI](CI.md)에서 검증했다. Windows fork는 지원하지 않아 별도 SKIP이다.
 
 ## 독립 리뷰와 회귀 검증
 
@@ -155,6 +158,6 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 | 공식 M5Stack 문서·M5Burner 복구 절차 | 문서 조회 PASS(후속 HTTP 200); 이미지 체크섬·실제 플래시/복구는 미검증 |
 | 실제 MCP HTTP/auth/ESP32 세션/장치 도구 | BLOCKED: 장치/gateway 없음; 메모리 내 SDK 경로만 PASS |
 | 실물 서보/센서/사진/음성/긴급 정지 | BLOCKED: 장치 없음 및 물리 테스트 승인 없음 |
-| Windows 및 Python 3.11 실제 실행 | 미실행: 현재 Linux 3.12만 검증 |
+| Windows 및 Python 3.11 실행 | 후속 CI PASS: 네 조합 설치/테스트/빌드/wheel; Windows fork/libopus는 SKIP |
 | Phase 5 | 오프라인 음성/API 어댑터·변환은 Mock 검증; 실제 음성/face tracking/dashboard/24h 운영은 미검증 |
 | 게시된 이전 snapshot 복원 | PASS: 새 환경에서 파일·의존성과 기존 60개 테스트 확인; 이번 후속 변경은 미게시 |

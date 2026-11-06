@@ -43,8 +43,8 @@ uv run --frozen stackchan-autonomy --forever
 ```
 
 Linux에서도 같은 uv 명령을 사용한다. 현재 클라우드 환경에서는 Python 3.12.14로
-검증했다. Windows/Linux × Python 3.11/3.12의 [GitHub Actions CI](docs/CI.md)를
-추가했다. 원격 실행 결과가 나오기 전까지 Windows 및 Python 3.11은 미검증이다.
+검증했다. Windows/Linux × Python 3.11/3.12의 [GitHub Actions CI](docs/CI.md)도
+네 조합 모두 통과했다. Windows는 192개 통과, fork/libopus 미지원 2개 건너뜀이다.
 클라우드 sandbox에서 SDK 플랫폼 정보 조회가 정지하면 테스트 환경의 실행 권한을
 확인한다. 제품 코드의 TLS/체크섬을 끄거나 Mock을 실제 API 요청으로 대체하지 않는다.
 

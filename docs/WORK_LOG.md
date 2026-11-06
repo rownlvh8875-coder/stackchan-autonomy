@@ -261,3 +261,12 @@ Local base e9c4db7; remote main verified still e9e5c56, with no remote work to o
   glob behavior. Actual hosted runners, optional Windows native features, existing application
   behavior, remote writes/admin and upstream tag verification were explicitly set aside;
   hosted results remain pending and parent verified upstream refs. No deferred review issues.
+- Published voice e9c4db7 and CI3817ab1 to main by normal fast-forward push; remote hash
+  matched. Run42151710686 completed successfully in all4 jobs. Downloaded JUnit confirms
+  Ubuntu3.11/3.12 each194 PASS/0 SKIP and Windows3.11/3.12 each192 PASS/2 SKIP, no failures/errors.
+  Windows skips: no trusted native libopus and no os.fork. PCM voice, subprocess races,
+  independent installed entry points and packaged MCP resources passed on Windows.
+- Hosted Node20 deprecation annotations prompted official Node24 action updates:
+  checkout7.0.1/setup-python7.1.0/setup-uv10.3.3/upload-artifact7.0.2. Verified release tag SHAs
+  and action manifests/input compatibility. Application code/lock/helper are unchanged.
+  This targeted follow-up is validated by the next hosted run; no second review is claimed.

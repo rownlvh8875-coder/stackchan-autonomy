@@ -23,7 +23,8 @@ uv run --frozen stackchan-autonomy --mode mcp-sim --cycles 3 --event touch
 
 resource/namespace에는 비밀키를 쓰지 않는다. 다른 namespace는 별도 예산이다.
 예산을 공유하는 프로세스는 같은 한도를 사용한다. SQLite 파일은 로컬 디스크에서 사용한다.
-Windows 경로 예시를 제공하지만 이번 검증은 Linux에서 수행했다.
+초기 검증은 Linux에서 수행했다. 후속 [CI](CI.md)에서 Windows/Python3.11·3.12의
+subprocess 경쟁·설치 wheel 실행도 통과했다. fork 회귀는 Linux에서만 실행한다.
 
 ## Lease 수명
 
