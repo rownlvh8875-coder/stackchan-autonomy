@@ -30,12 +30,12 @@ Files: tests/http_gateway.py, tests/test_mcp_http.py, mcp_robot.py.
 Files: soak.py, pyproject.toml, tests/test_soak.py, scripts/ci_verify.py.
 Interfaces: SoakConfig (cycles or duration, pacing, warmup, restart cadence, virtual step,
 heap growth bound), async run_soak(config)->numeric SoakReport, stackchan-soak CLI.
-- [ ] Failing tests: warmed bounds/restarts, no task leaks, env/DB isolation,
+- [x] Failing tests: warmed bounds/restarts, no task leaks, env/DB isolation,
   real vs virtual elapsed, invalid/too-short runs and process exit/report behavior.
-- [ ] Implement actual engine loop, temp SQLite, traced heap/task/history measurements,
+- [x] Implement actual engine loop, temp SQLite, traced heap/task/history measurements,
   cadence restarts, monotonic duration/pacing and fixed errors; targeted GREEN.
 - [ ] Run real600s paced soak and accelerated86400s virtual run; keep their distinct reports.
-- [ ] Add independent installed-wheel entry-point smoke; full tests/lint/build GREEN; commit.
+- [x] Add independent installed-wheel entry-point smoke; full tests/lint/build GREEN; commit.
 
 ## Task3: Evidence and review
 Files: docs/TRANSPORT_TEST_REPORT.md, docs/SOAK.md, README/NEXT_STEPS/CI/WORK_LOG, this plan.

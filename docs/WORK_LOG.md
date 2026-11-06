@@ -360,3 +360,17 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Ruling: use actual loopback sockets rather than ASGI-only mocks — tests transport framing
   and lifecycle with a test bearer token. Proxy bypass is restricted to localhost in test
   fixture environment; external proxy/CA trust remain intact. No public port is exposed.
+- Task2:12 initial soak tests failed before implementation;13 passed /3.13s after adding
+  explicit cancellation/temporary DB cleanup regression. Cancellation had recreated the
+  removed DB during lease release; AsyncExitStack now closes engine before directory deletion.
+- New stackchan-soak uses init-only Settings sources, own temporary files, Fake/Mock,
+  real duration or bounded cycles with optional virtual engine clock. Mixed events,
+  periodic engine restarts/snapshot comparisons, warmed tracemalloc/task/history measurements
+  and nonzero failure exits are exercised; deliberate heap/task leaks fail the diagnostic.
+- Accelerated virtual24h run:2880 cycles,86400 virtual seconds,26.192s wall,11 restorations,
+  traced growth81336 bytes/peak1001313, task growth0/remaining0, cloud requests0.
+  Separate real600s run is active; its result is not yet claimed.
+- Intermediate full260 PASS /36.70s; Ruff/format, sdist/wheel, independent installed
+  Mock/MCP/voice/Opus/memory and new soak entry point passed, all cloud requests0.
+- CI adds accelerated2880×30s scenario and exact JUnit+numeric soak JSON artifacts (7days).
+  Tests bind only loopback; no user state/media/keys or DB artifacts are uploaded.

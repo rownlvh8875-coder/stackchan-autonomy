@@ -29,8 +29,11 @@ environments; network proxy/CA trust configuration remains intact for package in
 It also runs the installed stackchan-memory entry point, verifies persisted preferences
 control background speech, checks cooldown across separate CLI processes and clears
 only the temporary test resource. No user's memory file is used.
+The installed soak entry point also verifies bounded cycles/restarts without source imports.
+The full matrix runs a separate accelerated24-hour virtual scenario (2880×30s);
+it does not claim24 hours of real elapsed operation. HTTP tests use loopback TCP only.
 
-Only JUnit XML is uploaded (seven-day retention). Local state databases, caches, keys,
+Only JUnit XML and numeric soak JSON are uploaded (seven-day retention). Local state databases, caches, keys,
 media, conversation content and built distributions are not uploaded as artifacts.
 Missing optional native features appear as SKIP in pytest output/JUnit and smoke output.
 SKIP does not mean the feature executed successfully.

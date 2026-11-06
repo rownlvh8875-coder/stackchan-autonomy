@@ -130,6 +130,10 @@ namespace, 한도**를 설정해야 한다. [설정·복구·보장 범위](docs
 
 ## 실제 장치 연결
 
+제품 없이 가능한 [실제 로컬 HTTP 검증](docs/TRANSPORT_TEST_REPORT.md)과
+[장시간 Mock 안정성 도구](docs/SOAK.md)를 제공한다. `stackchan-soak`은 사용자
+설정/DB를 읽지 않고 전용 임시 환경에서 실행하며 실제 시간과 가상 시간을 구분한다.
+
 `MCPRobotAdapter.connect(url, headers=...)`는 기존 Streamable HTTP daemon 연결 API다.
 `discover()`, `status()`, `touch_state()`는 도구·상태·절대 각도·터치의 읽기 전용 점검이다.
 실제 장치의 쓰기/촬영/녹음 경로는 아직 차단돼 있다.

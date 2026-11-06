@@ -176,6 +176,34 @@ def main():
         if cleared["recent"] or cleared["last_spoken_at"] is not None:
             raise RuntimeError("installed memory CLI did not clear scoped metadata")
         print("Optional memory CLI / persisted preferences / restart cooldown: PASS", flush=True)
+        soak_cli = binaries / ("stackchan-soak.exe" if os.name == "nt" else "stackchan-soak")
+        soak = json.loads(
+            run(
+                [
+                    soak_cli,
+                    "--cycles",
+                    "30",
+                    "--warmup-cycles",
+                    "5",
+                    "--restart-every",
+                    "10",
+                    "--virtual-step-s",
+                    "30",
+                ],
+                cwd=root,
+                env=env,
+            )
+        )
+        if (
+            not soak["passed"]
+            or soak["cycles"] != 30
+            or soak["virtual_elapsed_s"] != 900
+            or soak["restarts"] != 2
+            or soak["remaining_tasks"] != 0
+            or soak["cloud_requests"] != 0
+        ):
+            raise RuntimeError("installed soak entry point failed the bounded offline contract")
+        print("Isolated installed soak entry point / restart checks: PASS", flush=True)
     return 0
 
 

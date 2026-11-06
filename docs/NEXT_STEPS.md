@@ -18,7 +18,8 @@
 - set_avatar(face), set_blink(enabled), set_all_leds(r,g,b), get_touch_state →
   실제 JSON error/available 및 isError 처리, 지원 도구가 없으면 비활성화.
 - 서버 schema 변경·누락 required·세션/장치 교체·잘못된 pose/사진·취소/timeout은
-  메모리 내 통합 테스트를 추가했다. 실제 권한/토큰 만료/HTTP 단절 테스트는 남아 있다.
+  메모리 내 통합 테스트와 로컬 TCP 기반 [HTTP 인증·단절·수동 재연결](TRANSPORT_TEST_REPORT.md)을
+  검증했다. 실제 gateway의 토큰 발급/갱신·TLS·장치 세션 검증은 남아 있다.
   같은 DB/resource를 쓰는 이 앱의 프로세스 간 lease는 구현했다.
   다른 앱·다른 PC·장치 자체 동작을 통제하는 gateway fencing은 별도로 구현해야 한다.
 
@@ -47,7 +48,8 @@ STOP·분리·재연결 테스트 기록. 기본 물리 실행 비활성화 유�
    추적 lease 및 정지 테스트가 필요하다. 사진의 사람이 누구인지 판단하지 않는다.
 6. 웹 대시보드는 로컬 인증·privacy 상태·STOP·실물 승인 상태만 제공하는 별도 작업이다.
    아직 UI/서버를 만들거나 외부 포트를 공개하지 않았다.
-7. 장기 운용: 24시간 이상 soak, API 계정/비용 확인, 메모리·태스크·재시작 복원,
+7. [안정성 도구](SOAK.md)로 가상24시간과 별도 실시간 실행을 검증한다. 실제24시간 이상
+   운용, API 계정/비용 확인, 메모리·태스크·재시작 복원,
    event flood 우선순위, 다른 앱의 모터 충돌을 실제 환경에서 검증한다.
 
 ## 외부 검증 선행 조건
