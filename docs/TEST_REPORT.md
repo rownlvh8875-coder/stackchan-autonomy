@@ -1,7 +1,9 @@
 # Test Report
 
 실행일: 2026-11-06. Python 3.12.14 / Linux 클라우드 환경.
-최신 로컬 전체 pytest: **230 PASS, 0 FAIL, 0 SKIP**, 23.63초.
+최신 로컬 전체 pytest: **266 PASS, 0 FAIL, 0 SKIP**, 40.83초.
+후속 HTTP23개·안정성13개를 추가했다. [HTTP 검증](TRANSPORT_TEST_REPORT.md),
+[실시간10분/가상24시간 결과](SOAK.md)를 참고한다.
 선택적 영속 메모리에 36개 회귀 테스트를 추가했다. [메모리 계약](MEMORY.md) 참고.
 CI 추가 후 독립 임시 venv에 wheel을 설치해 Mock/MCP/음성/Opus 실행도 통과했다.
 메모리 CLI의 설치 entry point와 프로세스 재시작/발화 정책 smoke도 통과했다.
@@ -16,6 +18,7 @@ CI 추가 후 독립 임시 venv에 wheel을 설치해 Mock/MCP/음성/Opus 실�
 이전 음성/CI 커밋의 GitHub Actions는 Windows/Linux × Python3.11/3.12 네 조합 모두 PASS다.
 Linux는 각각194 PASS, Windows는 각각192 PASS와 fork/libopus 2 SKIP이다.
 영속 메모리 브랜치의 원격 결과는 [해당 Actions 실행](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions?query=branch%3Afeat%2Fpersistent-memory)에서 구분한다.
+HTTP·안정성 후속 브랜치의 원격 결과는 [별도 Actions 실행](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions?query=branch%3Afeat%2Ftransport-soak)에서 구분한다.
 
 ## 최초 MVP 검증 명령과 결과 (이력)
 

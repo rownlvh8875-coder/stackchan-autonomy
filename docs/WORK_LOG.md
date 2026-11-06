@@ -374,3 +374,27 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   Mock/MCP/voice/Opus/memory and new soak entry point passed, all cloud requests0.
 - CI adds accelerated2880×30s scenario and exact JUnit+numeric soak JSON artifacts (7days).
   Tests bind only loopback; no user state/media/keys or DB artifacts are uploaded.
+- Real paced600s run completed PASS:600.026s wall,2803 cycles,2703 measured,
+  11 successful restarts, traced growth83706/peak1012965 bytes, task growth0/remaining0,
+  histories<=100, fake history<=64, cloud requests0. Runner blob matches551cdf6.
+  Both numeric reports committed under docs/validation; not a real24-hour claim.
+- Fresh read-only review confirmed two Important teardown issues: SDK swallowed failed
+  DELETE (HTTP500 returned normally) and inactivity timeout allowed indefinitely trickling
+  DELETE body. Six failing regressions then fixes verify status failures, absolute deadline,
+  body-error note/identity,405unsupported and cancellation during cleanup.
+- Connector now owns bounded same-origin DELETE (SDK auto-termination disabled), records
+  session_cleanup_confirmed and raises fixed failures. Original consumer errors retain
+  identity with fixed notes; external cancellation retains precedence. Normal200/204 confirms
+  protocol termination only, not physical stop. No second review; no deferred minors.
+- Final local suite266 PASS /40.83s; HTTP/MCP target79 PASS /13.80s. Ruff/format,
+  distributions and independently installed Mock/MCP/voice/Opus/memory/soak CLI passed.
+- Ruling:405is a valid unsupported-termination response — preserve protocol compatibility
+  with fixed warning and explicit False confirmation, leaving remote expiry unproven.
+  Cost: operator must rely on gateway expiry/manual cleanup when DELETE is unsupported.
+- Review rulings accepted: SDK GET reconnect is distinct from tool replay; error identity,
+  cancellation, raw log filtering, redirect auth and timeout prevalidation are tested.
+  Fixture watcher ownership and causal late-effect test are deliberate. Init-only settings,
+  warmed growth plus pending-task check, history/restoration and distinct clocks meet scope.
+  Dedicated-process tracer/task interference limits, unique interrupted-report paths,
+  native/RSS/scheduler/hardware/real24h limits remain explicit. Exact artifact paths exclude
+  secrets/DBs. Pending real-run documentation is now resolved by completed evidence above.

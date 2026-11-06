@@ -1,0 +1,65 @@
+{
+  "validation_date": "2026-11-06",
+  "scope": "offline_mock_engine_only",
+  "runner_commit": "551cdf60035b03ac52e5610a5deb7d4d56b4b66d",
+  "runner_blob": "0a477351dc3c48f260be1662f4cfdb8e96c1ce96",
+  "runs": {
+    "real_600_seconds": {
+      "passed": true,
+      "cycles": 2803,
+      "measured_cycles": 2703,
+      "wall_elapsed_s": 600.0259684619996,
+      "virtual_elapsed_s": null,
+      "requested_duration_s": 600.0,
+      "python_traced_growth_bytes": 83706,
+      "python_traced_peak_bytes": 1012965,
+      "max_live_tasks": 2,
+      "task_growth": 0,
+      "remaining_tasks": 0,
+      "history_peak": 100,
+      "transition_peak": 100,
+      "robot_history_peak": 64,
+      "restarts": 11,
+      "restoration_checks": 11,
+      "cloud_requests": 0,
+      "results": {
+        "executed": 703,
+        "idle": 560,
+        "unchanged": 280,
+        "speech_cooldown": 1260
+      },
+      "violations": []
+    },
+    "virtual_86400_seconds": {
+      "passed": true,
+      "cycles": 2880,
+      "measured_cycles": 2780,
+      "wall_elapsed_s": 26.192441094999594,
+      "virtual_elapsed_s": 86400.0,
+      "requested_duration_s": null,
+      "python_traced_growth_bytes": 81336,
+      "python_traced_peak_bytes": 1001313,
+      "max_live_tasks": 2,
+      "task_growth": 0,
+      "remaining_tasks": 0,
+      "history_peak": 100,
+      "transition_peak": 100,
+      "robot_history_peak": 64,
+      "restarts": 11,
+      "restoration_checks": 11,
+      "cloud_requests": 0,
+      "results": {
+        "executed": 721,
+        "idle": 576,
+        "unchanged": 288,
+        "speech_cooldown": 1295
+      },
+      "violations": []
+    }
+  },
+  "limitations": [
+    "Virtual elapsed time is not real elapsed time.",
+    "Python traced allocations are not process RSS or native memory.",
+    "No device or paid API was exercised."
+  ]
+}

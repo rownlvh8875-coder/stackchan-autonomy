@@ -13,7 +13,7 @@ from io import BytesIO
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client as streamablehttp_client
-from mcp.shared._httpx_utils import create_mcp_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client, request_within_origin
 from PIL import Image
 from pydantic import ValidationError
 
@@ -40,6 +40,7 @@ class _TransportPrivacy(logging.Filter):
 
 
 logging.getLogger("mcp.client.streamable_http").addFilter(_TransportPrivacy())
+logger = logging.getLogger(__name__)
 
 
 def _checked_timeout(value):
@@ -51,6 +52,21 @@ def _checked_timeout(value):
     ):
         raise ValueError("timeout must be finite and within (0,120]")
     return float(value)
+
+
+async def _terminate_session(client, url, session_id, protocol_version, timeout_s):
+    headers = {"mcp-session-id": session_id}
+    if protocol_version is not None:
+        headers["mcp-protocol-version"] = protocol_version
+    # HTTPX timeouts limit inactivity, not an indefinitely trickling response body.
+    async with asyncio.timeout(timeout_s):
+        response = await request_within_origin(client, "DELETE", url, headers=headers)
+        if response.status_code == 405:
+            logger.warning("mcp_session_cleanup_unsupported")
+            return False
+        if response.status_code not in (200, 204):
+            raise MCPFailure("gateway session cleanup failed; remote outcome unknown")
+        return True
 
 
 class CapabilityReport(StrictModel):
@@ -67,6 +83,7 @@ class MCPRobotAdapter:
         self.session = session
         self.timeout_s = _checked_timeout(timeout_s)
         self.faulted = False
+        self.session_cleanup_confirmed: bool | None = None
         self._lock = asyncio.Lock()
         self._tools = {}
         self._available: set[str] = set()
@@ -82,33 +99,67 @@ class MCPRobotAdapter:
         privacy_token = _owned_transport.set(True)
         adapter = None
         body_error = None
+        cleanup_failed = False
         try:
             async with create_mcp_http_client(
                 headers=headers, timeout=httpx.Timeout(timeout_s)
             ) as client:
-                async with streamablehttp_client(url, http_client=client) as (read, write, _):
-                    async with ClientSession(
-                        read, write, read_timeout_seconds=timedelta(seconds=timeout_s)
-                    ) as session:
-                        await session.initialize()
-                        # Remote transports never inherit a simulator's physical=False flag.
-                        adapter = MCPRobotAdapter(session, timeout_s)
+                async with streamablehttp_client(
+                    url, http_client=client, terminate_on_close=False
+                ) as (read, write, get_session_id):
+                    protocol_version = None
+                    try:
+                        async with ClientSession(
+                            read, write, read_timeout_seconds=timedelta(seconds=timeout_s)
+                        ) as session:
+                            initialized = await session.initialize()
+                            protocol_version = getattr(initialized, "protocolVersion", None)
+                            # Remote transports never inherit a simulator's physical=False flag.
+                            adapter = MCPRobotAdapter(session, timeout_s)
+                            try:
+                                yield adapter
+                            except BaseException as error:
+                                body_error = error
+                                raise
+                    finally:
                         try:
-                            yield adapter
+                            session_id = get_session_id() if callable(get_session_id) else None
+                            if session_id:
+                                if adapter is not None:
+                                    adapter.session_cleanup_confirmed = False
+                                confirmed = await _terminate_session(
+                                    client, url, session_id, protocol_version, timeout_s
+                                )
+                                if adapter is not None:
+                                    adapter.session_cleanup_confirmed = confirmed
+                                if not confirmed and body_error is not None:
+                                    body_error.add_note("gateway session cleanup unconfirmed")
                         except BaseException as error:
-                            body_error = error
-                            raise
+                            cleanup_failed = True
+                            if adapter is not None:
+                                adapter.session_cleanup_confirmed = False
+                            if body_error is not None:
+                                body_error.add_note(
+                                    "gateway session cleanup failed; remote outcome unknown"
+                                )
+                            if not isinstance(error, Exception):
+                                raise
+                            raise MCPFailure(
+                                "gateway session cleanup failed; remote outcome unknown"
+                            ) from None
         except BaseException as error:
+            task = asyncio.current_task()
+            if isinstance(error, asyncio.CancelledError) or (task and task.cancelling()):
+                if isinstance(body_error, asyncio.CancelledError):
+                    raise body_error from None
+                raise asyncio.CancelledError from None
             # AnyIO may wrap errors raised by the consumer, so retain their identity.
             if body_error is not None and not isinstance(body_error, asyncio.CancelledError):
                 raise body_error from None
-            task = asyncio.current_task()
-            if isinstance(error, asyncio.CancelledError) or (task and task.cancelling()):
-                if body_error is not None:
-                    raise body_error from None
-                raise asyncio.CancelledError from None
             if not isinstance(error, Exception):
                 raise
+            if cleanup_failed:
+                raise MCPFailure("gateway session cleanup failed; remote outcome unknown") from None
             raise MCPFailure("gateway connection failed; manual recovery required") from None
         finally:
             if adapter is not None:

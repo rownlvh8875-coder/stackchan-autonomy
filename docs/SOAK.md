@@ -50,7 +50,11 @@ only artifacts, retained7days. CI does not run a real24-hour soak on each push.
   26.192s wall elapsed;11 successful restart/snapshot checks.
 - Warmed Python traced growth81,336 bytes; peak1,001,313 bytes. Max2 added live tasks,
   task growth0, remaining tasks0. Memory/transitions<=100, fake command history<=64.
-- Cloud requests0, no device interaction. Real600s run is independently in progress;
-  its completed result will be recorded separately after the process exits.
+- Real paced run: PASS,600.026s wall elapsed,2803 cycles/2703 measured,11 successful
+  restart/snapshot checks. Warmed Python traced growth83,706 bytes; peak1,012,965 bytes.
+  Task growth0/remaining0, max2 added live tasks, histories<=100 (fake commands<=64).
+- Both runs: cloud requests0, no device interaction. Numeric evidence with the matching
+  runner source blob/commit is saved in [validation JSON](validation/2026-11-06-soak.json).
+  Neither result claims24 hours of real elapsed operation.
 - Unit regressions deliberately retain memory/create pending tasks and prove failure
   detection, rather than treating the presence of a report as success.

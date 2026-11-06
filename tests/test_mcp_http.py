@@ -180,3 +180,71 @@ async def test_http_invalid_timeout_is_rejected_before_network_io(timeout):
             ):
                 pytest.fail("invalid timeout accepted")
         assert service.post_attempts == 0
+
+
+@pytest.mark.parametrize("status", [401, 500])
+async def test_http_session_termination_failure_is_observable_and_private(status, caplog):
+    async with running_gateway() as service:
+        with pytest.raises(MCPFailure):
+            async with MCPRobotAdapter.connect(
+                service.url, headers=service.headers, timeout_s=1
+            ) as adapter:
+                service.delete_status = status
+        assert adapter.faulted and adapter.session_cleanup_confirmed is False
+        assert "private-cleanup-response" not in caplog.text
+
+
+async def test_http_trickling_termination_has_absolute_deadline():
+    async with running_gateway() as service:
+        with pytest.raises(MCPFailure):
+            async with MCPRobotAdapter.connect(
+                service.url, headers=service.headers, timeout_s=1
+            ) as adapter:
+                service.trickle_delete = True
+                started = time.monotonic()
+        assert time.monotonic() - started < 3
+        assert adapter.session_cleanup_confirmed is False
+
+
+async def test_http_cleanup_failure_preserves_consumer_error_with_fixed_note():
+    original = ValueError("consumer-owned-error")
+    async with running_gateway() as service:
+        with pytest.raises(ValueError) as raised:
+            async with MCPRobotAdapter.connect(
+                service.url, headers=service.headers, timeout_s=1
+            ) as adapter:
+                service.delete_status = 500
+                raise original
+        assert raised.value is original
+        assert any("cleanup" in note for note in original.__notes__)
+        assert adapter.session_cleanup_confirmed is False
+
+
+async def test_http_unsupported_termination_is_explicit_without_breaking_valid_server(caplog):
+    async with running_gateway() as service:
+        async with MCPRobotAdapter.connect(
+            service.url, headers=service.headers, timeout_s=1
+        ) as adapter:
+            service.delete_status = 405
+        assert adapter.session_cleanup_confirmed is False
+        assert "mcp_session_cleanup_unsupported" in caplog.text
+
+
+async def test_http_cancellation_during_cleanup_remains_cancellation():
+    async with running_gateway() as service:
+        holder = []
+
+        async def client():
+            async with MCPRobotAdapter.connect(
+                service.url, headers=service.headers, timeout_s=1
+            ) as adapter:
+                holder.append(adapter)
+                service.trickle_delete = True
+
+        task = asyncio.create_task(client())
+        await asyncio.wait_for(service.delete_entered.wait(), 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 3)
+        assert holder[0].faulted
+        assert holder[0].session_cleanup_confirmed is False

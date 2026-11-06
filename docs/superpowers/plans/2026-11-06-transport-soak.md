@@ -34,13 +34,13 @@ heap growth bound), async run_soak(config)->numeric SoakReport, stackchan-soak C
   real vs virtual elapsed, invalid/too-short runs and process exit/report behavior.
 - [x] Implement actual engine loop, temp SQLite, traced heap/task/history measurements,
   cadence restarts, monotonic duration/pacing and fixed errors; targeted GREEN.
-- [ ] Run real600s paced soak and accelerated86400s virtual run; keep their distinct reports.
+- [x] Run real600s paced soak and accelerated86400s virtual run; keep their distinct reports.
 - [x] Add independent installed-wheel entry-point smoke; full tests/lint/build GREEN; commit.
 
 ## Task3: Evidence and review
 Files: docs/TRANSPORT_TEST_REPORT.md, docs/SOAK.md, README/NEXT_STEPS/CI/WORK_LOG, this plan.
-- [ ] Fresh read-only reviewer; material fixes use RED→GREEN plus whole suite, no second review.
-- [ ] Record actual durations/counts/limits; never claim24h real run or device verification.
+- [x] Fresh read-only reviewer; material fixes use RED→GREEN plus whole suite, no second review.
+- [x] Record actual durations/counts/limits; never claim24h real run or device verification.
 - [ ] Publish verified feature branch, observe Windows/Linux3.11/3.12 CI and inspect reports.
   No new PR creation without specific approval; existing draft PR1 is not changed/merged.
 

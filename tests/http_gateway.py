@@ -27,6 +27,9 @@ class HTTPGateway:
         self.fault = None
         self.redirect_url = None
         self.stall_entered = asyncio.Event()
+        self.delete_status = None
+        self.trickle_delete = False
+        self.delete_entered = asyncio.Event()
         self.manager = StreamableHTTPSessionManager(
             app=self.gateway.server,
             json_response=True,
@@ -60,6 +63,27 @@ class HTTPGateway:
                 scope, receive, send
             )
             return
+        if scope["method"] == "DELETE":
+            self.delete_entered.set()
+            if self.delete_status is not None:
+                await Response("private-cleanup-response", status_code=self.delete_status)(
+                    scope, receive, send
+                )
+                return
+            if self.trickle_delete:
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [(b"content-length", b"100")],
+                    }
+                )
+                for index in range(100):
+                    await asyncio.sleep(0.05)
+                    await send(
+                        {"type": "http.response.body", "body": b"x", "more_body": index < 99}
+                    )
+                return
         if scope["method"] == "POST":
             chunks = []
             while True:
