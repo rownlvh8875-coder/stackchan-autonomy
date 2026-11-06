@@ -1,7 +1,9 @@
 # Test Report
 
 실행일: 2026-11-06. Python 3.12.14 / Linux 클라우드 환경.
-최종 전체 pytest: **194 PASS, 0 FAIL, 0 SKIP**, 15.95초.
+최신 로컬 전체 pytest: **194 PASS, 0 FAIL, 0 SKIP**, 16.05초.
+CI 추가 후 독립 임시 venv에 wheel을 설치해 Mock/MCP/음성/Opus 실행도 통과했다.
+[CI 검증 범위와 원격 실행 결과](CI.md)를 참고한다.
 오프라인 음성 단계에서 46개를 추가했다. native Opus 테스트도 실행했다.
 [최신 음성 테스트 결과](VOICE_TEST_REPORT.md)를 참고한다. 아래 수치는 이전 단계 이력이다.
 지속형 제어권/예산 작업에서 31개를 추가했다. 아래 117개 결과는 MCP 단계의 이력이다.

@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.13.4"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install Linux codec
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libopus0
+      - name: Install locked dependencies
+        run: uv sync --frozen --python '${{ matrix.python }}'
+      - name: Lint and formatting
+        run: |
+          uv run --frozen ruff check .
+          uv run --frozen ruff format --check .
+      - name: Offline test suite
+        run: uv run --frozen pytest -q -ra --junitxml=.local/ci/junit.xml
+      - name: Build distributions
+        run: uv build --no-sources --out-dir .local/ci/dist
+      - name: Verify independent wheel installation (Linux, including Opus)
+        if: runner.os == 'Linux'
+        run: uv run --frozen python scripts/ci_verify.py --require-opus
+      - name: Verify independent wheel installation (Windows)
+        if: runner.os == 'Windows'
+        run: uv run --frozen python scripts/ci_verify.py
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: junit-${{ matrix.os }}-py${{ matrix.python }}
+          path: .local/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 7

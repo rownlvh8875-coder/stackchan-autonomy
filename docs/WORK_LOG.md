@@ -228,3 +228,36 @@ Base e9e5c561fed7be1d90f673a8fe720ce77a091c9e; local feat/offline-voice branch.
 - Offline sdist/wheel build passed. Environment draft/publication and remote push not performed.
 - Wheel included all4 new voice modules and ran voice-sim --opus from /tmp successfully
   (capture/playback1, Opus7, cloud0). Restored editable install offline; final Ruff/format passed.
+
+## GitHub voice reflection and Windows CI
+
+Plan: docs/superpowers/plans/2026-11-06-windows-ci.md.
+User approved publishing the finished voice work and proceeding with Windows CI.
+Local base e9c4db7; remote main verified still e9e5c56, with no remote work to overwrite.
+
+- Added GitHub Actions Ubuntu/Windows × Python3.11/3.12, frozen uv0.13.4 installation,
+  Ruff, pytest/JUnit, distributions and independent installed-wheel CLI validation.
+- Official checkout/setup-python/setup-uv/upload-artifact refs verified from upstream tags;
+  full commit SHAs used, including peeled setup-uv commit. Read-only workflow token.
+- Wheel verification exports hashed runtime requirements from uv.lock, uses a separate
+  temp venv/exact selected interpreter and installed entry point outside the source tree.
+  Temp path includes spaces; development venv is untouched. Linux requires native Opus;
+  Windows's unsupported fork/native cases remain visible SKIP rather than claimed PASS.
+- Local full suite:194 PASS /16.05s; failures/errors/skips0. Ruff/format and workflow
+  YAML/matrix/permissions/SHA checks passed. Cached offline sdist/wheel build passed.
+- Installed wheel passed Mock/MCP/voice/Opus runs: each IDLE, one simulated action,
+  zero cloud requests; voice capture/playback1 and native Opus7 packets.
+- Restricted shell build network denial resolved by existing verified offline cache;
+  threaded offline tests/smokes used approved command execution. TLS/hashes retained.
+- Credential-pattern scan passed; local state/media/keys/cache/build artifacts ignored.
+  Workflow uploads only JUnit XML with seven-day retention, no application secrets bound.
+- Remote Actions listing is accessible. Administration-permissions endpoint returned403;
+  changing that setting is unnecessary and was not attempted.
+- Remote matrix results will be recorded after normal fast-forward publication.
+  Cloud environment draft/publication, actual hardware/firmware and live APIs are excluded.
+- Fresh read-only CI review found no Critical/Important/Minor changes required. It independently
+  checked syntax/workflow/platform lock entries and packaging/CLI interactions, without
+  duplicating the full suite. Exact JUnit file selection was checked against the action's
+  glob behavior. Actual hosted runners, optional Windows native features, existing application
+  behavior, remote writes/admin and upstream tag verification were explicitly set aside;
+  hosted results remain pending and parent verified upstream refs. No deferred review issues.

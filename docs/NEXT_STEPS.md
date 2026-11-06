@@ -53,7 +53,8 @@ STOP·분리·재연결 테스트 기록. 기본 물리 실행 비활성화 유�
 
 - 게시 후 공식 제품/구조화 출력 문서 접근을 확인했다. 이미지/오디오 API와 가격,
   실제 계정 모델 지원은 해당 기능을 연결하기 전에 추가 확인한다.
-- Windows 3.11+에서 uv sync --frozen / pytest / CLI 실행 검증.
+- Windows/Linux × Python 3.11/3.12 CI를 추가했다. 실제 Actions 결과는 [CI 기록](CI.md)에
+  구분하며, Windows의 fork와 시스템 libopus 미지원 SKIP은 실행 성공으로 세지 않는다.
 - 계정 모델이 Responses/strict schema/이미지/한국어를 지원하는지 현재 문서·실제 계정으로 확인.
 - 실제 API 호출은 opt-in이며 키를 채팅이나 Git에 넣지 않는다.
 - 게이트웨이 사진 보관/전사 로그 문제 해결 및 펌웨어 변경·모터 구동 별도 승인.
