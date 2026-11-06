@@ -3,12 +3,17 @@
 import asyncio
 import base64
 import binascii
+import logging
+import math
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import timedelta
 from io import BytesIO
 
+import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client as streamablehttp_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 from PIL import Image
 from pydantic import ValidationError
 
@@ -24,6 +29,29 @@ from .mcp_contract import (
 )
 from .models import Event, EventKind, Observation, RobotCommand, RobotStatus, StrictModel
 
+_owned_transport = ContextVar("stackchan_private_mcp_transport", default=False)
+
+
+class _TransportPrivacy(logging.Filter):
+    def filter(self, record):
+        # SDK validation/debug logs may include raw response bodies. Other clients'
+        # contexts retain their own logging; our callers receive fixed error codes.
+        return not _owned_transport.get()
+
+
+logging.getLogger("mcp.client.streamable_http").addFilter(_TransportPrivacy())
+
+
+def _checked_timeout(value):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or not 0 < value <= 120
+    ):
+        raise ValueError("timeout must be finite and within (0,120]")
+    return float(value)
+
 
 class CapabilityReport(StrictModel):
     connected: bool = False
@@ -36,10 +64,8 @@ class MCPRobotAdapter:
     physical = True
 
     def __init__(self, session: ClientSession, timeout_s: float = 10):
-        if not 0 < timeout_s <= 120:
-            raise ValueError("timeout must be within (0,120]")
         self.session = session
-        self.timeout_s = timeout_s
+        self.timeout_s = _checked_timeout(timeout_s)
         self.faulted = False
         self._lock = asyncio.Lock()
         self._tools = {}
@@ -52,15 +78,42 @@ class MCPRobotAdapter:
     async def connect(
         cls, url: str, *, headers: dict[str, str] | None = None, timeout_s: float = 10
     ):
-        async with streamablehttp_client(
-            url, headers=headers, timeout=timeout_s, sse_read_timeout=timeout_s
-        ) as (read, write, _):
-            async with ClientSession(
-                read, write, read_timeout_seconds=timedelta(seconds=timeout_s)
-            ) as session:
-                await session.initialize()
-                # Remote transport can never inherit a simulator's physical=False flag.
-                yield MCPRobotAdapter(session, timeout_s)
+        timeout_s = _checked_timeout(timeout_s)
+        privacy_token = _owned_transport.set(True)
+        adapter = None
+        body_error = None
+        try:
+            async with create_mcp_http_client(
+                headers=headers, timeout=httpx.Timeout(timeout_s)
+            ) as client:
+                async with streamablehttp_client(url, http_client=client) as (read, write, _):
+                    async with ClientSession(
+                        read, write, read_timeout_seconds=timedelta(seconds=timeout_s)
+                    ) as session:
+                        await session.initialize()
+                        # Remote transports never inherit a simulator's physical=False flag.
+                        adapter = MCPRobotAdapter(session, timeout_s)
+                        try:
+                            yield adapter
+                        except BaseException as error:
+                            body_error = error
+                            raise
+        except BaseException as error:
+            # AnyIO may wrap errors raised by the consumer, so retain their identity.
+            if body_error is not None and not isinstance(body_error, asyncio.CancelledError):
+                raise body_error from None
+            task = asyncio.current_task()
+            if isinstance(error, asyncio.CancelledError) or (task and task.cancelling()):
+                if body_error is not None:
+                    raise body_error from None
+                raise asyncio.CancelledError from None
+            if not isinstance(error, Exception):
+                raise
+            raise MCPFailure("gateway connection failed; manual recovery required") from None
+        finally:
+            if adapter is not None:
+                adapter.faulted = True  # Closed sessions cannot be reused or replayed.
+            _owned_transport.reset(privacy_token)
 
     @asynccontextmanager
     async def _operation(self):

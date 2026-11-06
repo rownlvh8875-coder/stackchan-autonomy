@@ -442,10 +442,11 @@ async def test_initialization_flag_alone_is_not_a_motor_dispatch_ack(ack):
 
 
 async def test_timeout_does_not_imply_remote_rollback():
-    async with simulate_mcp_robot(timeout_s=0.05) as adapter:
-        release, applied = asyncio.Event(), asyncio.Event()
+    async with simulate_mcp_robot(timeout_s=1) as adapter:
+        release, applied, entered = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
         async def late_command(arguments):
+            entered.set()
             await release.wait()
             await adapter.gateway.robot.execute(RobotCommand(kind="move", yaw=5, pitch=45))
             applied.set()
@@ -454,6 +455,7 @@ async def test_timeout_does_not_imply_remote_rollback():
         adapter.gateway.responses["move_head"] = late_command
         with pytest.raises(ConnectionError):
             await adapter.execute(RobotCommand(kind="move", yaw=5, pitch=45))
+        assert entered.is_set()  # Establish dispatch before interpreting the timeout.
         release.set()
         await asyncio.wait_for(applied.wait(), 1)
         with pytest.raises(ConnectionError):

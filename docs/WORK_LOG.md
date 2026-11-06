@@ -334,3 +334,29 @@ no new worktree/environment publication. Baseline194 PASS /15.83s.
   malicious DB/model edits, network FS/cross-host fencing and hardware/live-cloud behavior
   remain outside guarantees. Windows native DLL/fork cases are explicit SKIP; hosted matrix
   and distribution/native verification are done by the parent, not claimed as reviewer work.
+
+## Device-free HTTP and sustained stability follow-up
+
+User approved the recommended HTTP integration and sustained mock verification.
+Base42cf1a3 on feat/transport-soak, with existing memory draftPR1 unchanged.
+Plan/spec: docs/superpowers/{plans,specs}/2026-11-06-transport-soak*.md.
+Baseline230 PASS /24.68s. No environment publication, device or paid API use.
+
+- Task1: actual SDK StreamableHTTP/uvicorn fixture bound only127.0.0.1:0.
+  Initial10 failures reproduced raw ExceptionGroups and context error wrapping;
+  added6 RED cases for raw upstream JSON in SDK logs and invalid timeouts causing I/O.
+- Adapter uses current streamable_http_client, fixed MCPFailure boundary, preserved caller
+  cancellation/consumer exception identity and closed-adapter latch. No RPC replay.
+  ContextVar-scoped SDK transport log filter prevents raw validation/body logs while
+  unrelated client contexts keep their logging. Timeout validated before any network I/O.
+- Server fixture owns dependency SSE watcher cleanup; it does not cancel arbitrary client
+  tasks. No extra live tasks after a successful full connection/server lifecycle.
+- Existing late-application test timed out before dispatch under load. Increased its
+  timeout to1s and added explicit dispatch-entry evidence before testing late effects;
+  it still proves local timeout is not remote rollback, without relying on50ms setup.
+- Task1 targeted73 PASS /10.48s (17 HTTP +56 existing MCP), Ruff/format passed.
+  Auth missing/wrong/revoked, expired session, truncated/stalled response, identity change,
+  explicit reconnection, cancellation, body error and cross-origin redirect all exercised.
+- Ruling: use actual loopback sockets rather than ASGI-only mocks — tests transport framing
+  and lifecycle with a test bearer token. Proxy bypass is restricted to localhost in test
+  fixture environment; external proxy/CA trust remain intact. No public port is exposed.
