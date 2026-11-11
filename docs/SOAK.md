@@ -33,7 +33,7 @@ The CLI is a standalone diagnostic; asyncio.run handles final loop shutdown if
 unexpected pending tasks were detected. It reports those as failures before shutdown.
 Library callers should use a dedicated loop/process rather than compare unrelated tasks.
 
-Report fields contain counts/timings/result codes only. No DB, raw media, text, keys
+Report fields contain counts/timings/fixed result or state codes/booleans only. No DB, raw media, text, keys
 or environment dump is exported. JSON file replacement is atomic; use a unique report
 path per run. A completed failed check exits1, invalid settings/storage exits2, and
 Ctrl+C exits130 without creating a new PASS report. A run ending during warmup fails
@@ -43,6 +43,53 @@ Engine closes before its temporary DB directory is removed, including cancellati
 CI runs the accelerated scenario on Windows/Linux × Python3.11/3.12, plus a short
 independently installed wheel/console-entry test. JUnit and the numeric JSON are the
 only artifacts, retained7days. CI does not run a real24-hour soak on each push.
+
+## Failure details — added 2026-11-11
+
+The first unexpected engine result still stops the test with `engine_failure` and
+exit1. The report now includes `failure` (null on normal completion), captured
+**before cleanup stops the engine**:
+
+- `cycle` and `event`: one-based cycle and the fixture event supplied by the runner.
+  The engine may derive a person event from its observation; this is not an event trace.
+- `result_code`: recognized engine/action result, or fixed `unrecognized_result` for
+  any unexpected string. No exception message or arbitrary result string is exported.
+- `engine_state`, `engine_stopped`, `action_stopped`, `action_faulted`, `lease_lost`:
+  state/flags at the failure boundary. Control loss is not proof of a particular OS cause.
+
+Three numeric observations cover the whole run, including warmup:
+
+- `max_cycle_duration_s`: longest monotonic duration of `engine.step`.
+- `max_cycle_gap_s`: longest interval from one step's end to the next step's start;
+  includes pacing, sampling/GC and restart work. The first gap includes initialization.
+- `max_wall_clock_drift_s`: largest absolute wall-time delta minus monotonic delta
+  observed across a step or inter-step gap. It is not cumulative clock drift.
+
+Timing observations are diagnostic only; they do not prove sleep, a scheduler stall,
+clock adjustment or storage failure caused the stop. They do not relax TTLs/timeouts,
+retry a failed action or turn an engine failure into PASS. Older reports lack these
+fields; their failure cause cannot be reconstructed retrospectively. Only
+`engine_failure` creates the nested detail; other violations can have `failure=null`.
+
+## User Windows run received 2026-11-11 — FAIL
+
+The [uploaded numeric report](validation/2026-11-11-windows-home-soak-failed.json) requested
+86400 real seconds and stopped after **35204.11s (9h46m44s)** /34095 cycles with
+`passed=false`, `violations=["engine_failure"]`. Warmed Python traced growth75247bytes,
+task growth0, remaining tasks0;136 restart/snapshot checks and cloud requests0.
+The operator reports no sleep, lid closure or reboot and no warning before the JSON.
+The report does not contain a source commit or detailed failure result. Its historical
+root cause is **unknown**, not attributed to sleep or to a proven software defect.
+This is not a real24h PASS. The earlier Linux10-minute and virtual24h results below
+remain distinct historical checks.
+
+Before retrying, update the existing `feat/transport-soak` checkout with
+`git pull --ff-only` (stop on local changes/conflicts; never force reset), run a short
+smoke, then a paced10-minute check before starting another real24h run. Keep the
+original failed JSON. Use a fresh report filename and retain any preceding fixed-code
+warnings. Windows **cmd** supports `%RANDOM%` in a report filename; PowerShell uses
+the timestamp variable example in the [arrival guide](DEVICE_ARRIVAL_RUNBOOK.ko.md).
+Copy commands one at a time; don't concatenate `uv sync` with `uv run`.
 
 ## Recorded validation — 2026-11-06
 

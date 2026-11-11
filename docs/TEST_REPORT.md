@@ -1,7 +1,10 @@
 # Test Report
 
-실행일: 2026-11-06. Python 3.12.14 / Linux 클라우드 환경.
-최신 로컬 전체 pytest: **267 PASS, 0 FAIL, 0 SKIP**, 40.68초.
+최신 진단 회귀 실행일: 2026-11-11 / Python 3.12 / Linux 클라우드 환경.
+최신 로컬 전체 pytest: **272 PASS, 0 FAIL, 0 SKIP**, 45.63초.
+실패 진단 회귀 5개를 추가했다. [Windows 실제 시험 실패와 새 진단 항목](SOAK.md)은
+기존 실시간10분/가상24시간 PASS와 구분한다. Windows 집 노트북 보고서는 9시간46분에
+`engine_failure`로 종료됐으며 원인은 미확정이다. 아래 2026-11-06 수치는 이전 단계 이력이다.
 후속 HTTP23개·안정성14개를 추가했다. [HTTP 검증](TRANSPORT_TEST_REPORT.md),
 [실시간10분/가상24시간 결과](SOAK.md)를 참고한다.
 선택적 영속 메모리에 36개 회귀 테스트를 추가했다. [메모리 계약](MEMORY.md) 참고.

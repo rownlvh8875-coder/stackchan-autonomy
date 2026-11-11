@@ -23,6 +23,7 @@ async def test_soak_measures_bounds_restarts_and_virtual_time():
         )
     )
     assert report.passed, report.violations
+    assert report.failure is None
     assert report.cycles == 40 and report.measured_cycles == 35
     assert report.virtual_elapsed_s == 1200
     assert report.wall_elapsed_s < 1200
@@ -31,6 +32,164 @@ async def test_soak_measures_bounds_restarts_and_virtual_time():
     assert report.remaining_tasks == 0
     assert report.cloud_requests == 0
     assert len(asyncio.all_tasks()) <= baseline
+
+
+async def test_soak_records_disconnection_result_before_cleanup(monkeypatch):
+    from stackchan_autonomy import soak
+
+    original = soak.FakeRobotAdapter
+
+    class DisconnectingRobot(original):
+        captures = 0
+
+        async def capture(self):
+            self.captures += 1
+            if self.captures == 7:
+                raise ConnectionError("private-device-error-detail")
+            return await super().capture()
+
+    monkeypatch.setattr(soak, "FakeRobotAdapter", DisconnectingRobot)
+    report = await soak.run_soak(soak.SoakConfig(cycles=20, warmup_cycles=2))
+    assert not report.passed and report.violations == ("engine_failure",)
+    assert report.cycles == 7 and sum(report.results.values()) == 6
+    assert report.failure.model_dump(mode="json") == {
+        "cycle": 7,
+        "event": "TOUCH_TAP",
+        "result_code": "device_fault",
+        "engine_state": "ERROR",
+        "engine_stopped": True,
+        "action_stopped": True,
+        "action_faulted": False,
+        "lease_lost": False,
+    }
+    assert report.remaining_tasks == 0
+    assert "private-device-error-detail" not in report.model_dump_json()
+
+
+async def test_soak_classifies_real_expired_lease_without_retry(monkeypatch):
+    from stackchan_autonomy import soak
+
+    lease_now = [1000.0]
+    original_engine = soak.AutonomyEngine
+    original_decide = soak.MockDecisionProvider.decide
+    decisions = 0
+
+    def engine_with_control_clock(*args, **kwargs):
+        engine = original_engine(*args, **kwargs)
+        engine.actions.lease.clock = lambda: lease_now[0]
+        return engine
+
+    async def expire_before_third_decision(self, observation, context):
+        nonlocal decisions
+        decisions += 1
+        if decisions == 3:
+            lease_now[0] += 20  # Real SQLite ownership expires; no real sleep is required.
+        return await original_decide(self, observation, context)
+
+    monkeypatch.setattr(soak, "AutonomyEngine", engine_with_control_clock)
+    monkeypatch.setattr(soak.MockDecisionProvider, "decide", expire_before_third_decision)
+    report = await soak.run_soak(soak.SoakConfig(cycles=20, warmup_cycles=1))
+    assert not report.passed and report.violations == ("engine_failure",)
+    assert report.cycles == decisions == 3
+    assert report.failure.result_code == "device_fault"
+    assert report.failure.event.value == "VOICE_REQUEST"
+    assert report.failure.engine_state.value == "ERROR"
+    assert report.failure.lease_lost and report.failure.action_faulted
+    assert report.failure.engine_stopped and report.failure.action_stopped
+    assert report.remaining_tasks == 0 and report.cloud_requests == 0
+
+
+async def test_soak_distinguishes_sqlite_lock_failure_from_control_loss(monkeypatch):
+    import sqlite3
+
+    from stackchan_autonomy import soak
+    from stackchan_autonomy.control import ControlLease
+
+    original_check = ControlLease.check
+    original_decide = soak.MockDecisionProvider.decide
+    decisions = 0
+    lock_next_check = False
+
+    async def arrange_lock(self, observation, context):
+        nonlocal decisions, lock_next_check
+        decisions += 1
+        if decisions == 3:
+            lock_next_check = True
+        return await original_decide(self, observation, context)
+
+    def check_with_competing_writer(self, handle):
+        nonlocal lock_next_check
+        if not lock_next_check:
+            return original_check(self, handle)
+        lock_next_check = False
+        db = sqlite3.connect(self.store.path, isolation_level=None)
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            return original_check(self, handle)
+        finally:
+            db.rollback()
+            db.close()
+
+    monkeypatch.setattr(ControlLease, "check", check_with_competing_writer)
+    monkeypatch.setattr(soak.MockDecisionProvider, "decide", arrange_lock)
+    report = await soak.run_soak(soak.SoakConfig(cycles=20, warmup_cycles=1))
+    assert not report.passed and report.violations == ("engine_failure",)
+    assert report.cycles == 3
+    assert report.failure.result_code == "cycle_unavailable"
+    assert report.failure.engine_state.value == "IDLE"
+    assert not report.failure.lease_lost and not report.failure.action_faulted
+    assert not report.failure.engine_stopped  # Capture precedes diagnostic cleanup's stop.
+    assert report.remaining_tasks == 0
+
+
+async def test_soak_redacts_unrecognized_result_strings(monkeypatch):
+    from stackchan_autonomy import soak
+    from stackchan_autonomy.models import ActionResult
+
+    original_step = soak.AutonomyEngine.step
+
+    async def unexpected_engine_result(self, event):
+        await original_step(self, event)
+        return ActionResult(code="private-result-never-export")
+
+    monkeypatch.setattr(soak.AutonomyEngine, "step", unexpected_engine_result)
+    report = await soak.run_soak(soak.SoakConfig(cycles=20, warmup_cycles=1))
+    assert not report.passed and "engine_failure" in report.violations
+    assert report.failure.result_code == "unrecognized_result"
+    assert "private-result-never-export" not in report.model_dump_json()
+
+
+async def test_soak_observes_cycle_delays_and_wall_clock_adjustment(monkeypatch):
+    from types import SimpleNamespace
+
+    from stackchan_autonomy import soak
+
+    wall_offset = [0.0]
+    original_decide = soak.MockDecisionProvider.decide
+    decisions = 0
+
+    async def adjust_clock(self, observation, context):
+        nonlocal decisions
+        decisions += 1
+        if decisions == 3:
+            wall_offset[0] = 20.0
+        await asyncio.sleep(0.01)
+        return await original_decide(self, observation, context)
+
+    # Replace only the runner's clock namespace; the event loop and real lease keep
+    # their actual clocks. This observes clock drift without faking scheduler progress.
+    monkeypatch.setattr(
+        soak,
+        "time",
+        SimpleNamespace(monotonic=time.monotonic, time=lambda: time.time() + wall_offset[0]),
+    )
+    monkeypatch.setattr(soak.MockDecisionProvider, "decide", adjust_clock)
+    report = await soak.run_soak(soak.SoakConfig(cycles=8, warmup_cycles=2, interval_s=0.01))
+    assert report.passed, report.violations
+    assert report.max_cycle_duration_s >= 0.01
+    assert report.max_cycle_gap_s >= 0.01
+    assert report.max_wall_clock_drift_s >= 19
+    assert report.failure is None
 
 
 async def test_soak_ignores_application_environment_and_never_touches_user_db(

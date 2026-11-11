@@ -1,0 +1,74 @@
+{
+  "recorded_on": "2026-11-11",
+  "runner_blob": "ad1eafccbe3e08a4baeaef3543ffd9c42da000ca",
+  "source_base_commit": "2c92e69579bfd5970dc1ea86de2bd3666bb0488d",
+  "paced_120s": {
+    "passed": true,
+    "cycles": 1040,
+    "measured_cycles": 940,
+    "wall_elapsed_s": 120.02890565099915,
+    "virtual_elapsed_s": null,
+    "requested_duration_s": 120.0,
+    "python_traced_growth_bytes": 75585,
+    "python_traced_peak_bytes": 1007400,
+    "max_live_tasks": 2,
+    "task_growth": 0,
+    "remaining_tasks": 0,
+    "history_peak": 100,
+    "transition_peak": 100,
+    "robot_history_peak": 64,
+    "restarts": 4,
+    "restoration_checks": 4,
+    "cloud_requests": 0,
+    "results": {
+      "executed": 261,
+      "idle": 208,
+      "unchanged": 104,
+      "speech_cooldown": 467
+    },
+    "violations": [],
+    "failure": null,
+    "max_cycle_duration_s": 0.13045855500058678,
+    "max_cycle_gap_s": 0.1603736859997298,
+    "max_wall_clock_drift_s": 0.00021174225730646867
+  },
+  "controlled_lease_expiry": {
+    "passed": false,
+    "cycles": 3,
+    "measured_cycles": 2,
+    "wall_elapsed_s": 0.09981869500006724,
+    "virtual_elapsed_s": null,
+    "requested_duration_s": null,
+    "python_traced_growth_bytes": 3750,
+    "python_traced_peak_bytes": 735127,
+    "max_live_tasks": 2,
+    "task_growth": 0,
+    "remaining_tasks": 0,
+    "history_peak": 2,
+    "transition_peak": 14,
+    "robot_history_peak": 2,
+    "restarts": 0,
+    "restoration_checks": 0,
+    "cloud_requests": 0,
+    "results": {
+      "executed": 2
+    },
+    "violations": [
+      "engine_failure"
+    ],
+    "failure": {
+      "cycle": 3,
+      "event": "VOICE_REQUEST",
+      "result_code": "device_fault",
+      "engine_state": "ERROR",
+      "engine_stopped": true,
+      "action_stopped": true,
+      "action_faulted": true,
+      "lease_lost": true
+    },
+    "max_cycle_duration_s": 0.023794586999429157,
+    "max_cycle_gap_s": 0.02641102400048112,
+    "max_wall_clock_drift_s": 1.5853547665756196e-06
+  },
+  "scope": "Offline diagnostic validation only. Historical Windows root cause unknown; no real24h PASS claimed."
+}

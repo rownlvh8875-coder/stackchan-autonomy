@@ -15,7 +15,7 @@ from pydantic import Field, model_validator
 
 from .decision import MockDecisionProvider
 from .engine import AutonomyEngine
-from .models import Event, EventKind, StrictModel
+from .models import Event, EventKind, State, StrictModel
 from .robot import FakeRobotAdapter
 from .settings import Settings
 
@@ -41,6 +41,17 @@ class SoakConfig(StrictModel):
         return self
 
 
+class SoakFailure(StrictModel):
+    cycle: int
+    event: EventKind
+    result_code: str
+    engine_state: State
+    engine_stopped: bool
+    action_stopped: bool
+    action_faulted: bool
+    lease_lost: bool
+
+
 class SoakReport(StrictModel):
     passed: bool
     cycles: int
@@ -61,6 +72,34 @@ class SoakReport(StrictModel):
     cloud_requests: int = 0
     results: dict[str, int]
     violations: tuple[str, ...]
+    failure: SoakFailure | None = None
+    max_cycle_duration_s: float | None = Field(default=None, ge=0)
+    max_cycle_gap_s: float | None = Field(default=None, ge=0)
+    max_wall_clock_drift_s: float | None = Field(default=None, ge=0)
+
+
+_ALLOWED_RESULTS = frozenset(
+    {
+        "executed",
+        "idle",
+        "speech_cooldown",
+        "duplicate",
+        "unchanged",
+        "automatic_speech_disabled",
+        "command_rate_limit",
+    }
+)
+_REPORTED_RESULTS = _ALLOWED_RESULTS | {
+    "device_fault",
+    "lease_busy",
+    "stopped",
+    "cloud_error",
+    "memory_unavailable",
+    "cycle_unavailable",
+    "queue_full",
+    "unsafe",
+    "hardware_disabled",
+}
 
 
 class _IsolatedSettings(Settings):
@@ -83,8 +122,12 @@ async def run_soak(config: SoakConfig) -> SoakReport:
     max_tasks = task_growth = history_peak = transition_peak = robot_peak = 0
     results = Counter()
     violations = set()
+    failure = None
+    max_cycle_duration = max_cycle_gap = max_clock_drift = 0.0
     virtual_start = 1_700_000_000.0
     started = time.monotonic()
+    previous_finished = started
+    previous_wall = time.time()
     engine = None
     try:
         async with AsyncExitStack() as stack:
@@ -137,15 +180,6 @@ async def run_soak(config: SoakConfig) -> SoakReport:
                 EventKind.PERSON_DETECTED,
                 EventKind.SCENE_CHANGED,
             )
-            allowed = {
-                "executed",
-                "idle",
-                "speech_cooldown",
-                "duplicate",
-                "unchanged",
-                "automatic_speech_disabled",
-                "command_rate_limit",
-            }
             while True:
                 if config.cycles is not None and cycles >= config.cycles:
                     break
@@ -163,10 +197,36 @@ async def run_soak(config: SoakConfig) -> SoakReport:
                     restarts += 1
                     restoration_checks += 1
                 engine.robot.person_present = cycles % 20 >= 10
-                result = await engine.step(Event(kind=kinds[cycles % len(kinds)]))
+                event_kind = kinds[cycles % len(kinds)]
+                cycle_started = time.monotonic()
+                wall_started = time.time()
+                gap = cycle_started - previous_finished
+                max_cycle_gap = max(max_cycle_gap, gap)
+                max_clock_drift = max(max_clock_drift, abs(wall_started - previous_wall - gap))
+                result = await engine.step(Event(kind=event_kind))
+                cycle_finished = time.monotonic()
+                wall_finished = time.time()
+                duration = cycle_finished - cycle_started
+                max_cycle_duration = max(max_cycle_duration, duration)
+                max_clock_drift = max(max_clock_drift, abs(wall_finished - wall_started - duration))
+                previous_finished, previous_wall = cycle_finished, wall_finished
                 cycles += 1
-                if result.code not in allowed or engine.stopped:
+                if result.code not in _ALLOWED_RESULTS or engine.stopped:
                     violations.add("engine_failure")
+                    failure = SoakFailure(
+                        cycle=cycles,
+                        event=event_kind,
+                        result_code=(
+                            result.code
+                            if result.code in _REPORTED_RESULTS
+                            else "unrecognized_result"
+                        ),
+                        engine_state=engine.state,
+                        engine_stopped=engine.stopped,
+                        action_stopped=engine.actions.stopped,
+                        action_faulted=engine.actions.faulted,
+                        lease_lost=engine.actions.lease_lost,
+                    )
                     break
                 results[result.code] += 1
                 history_peak = max(history_peak, len(engine.memory.recent()))
@@ -231,6 +291,10 @@ async def run_soak(config: SoakConfig) -> SoakReport:
             restoration_checks=restoration_checks,
             results=dict(results),
             violations=tuple(sorted(violations)),
+            failure=failure,
+            max_cycle_duration_s=max_cycle_duration,
+            max_cycle_gap_s=max_cycle_gap,
+            max_wall_clock_drift_s=max_clock_drift,
         )
     finally:
         if owns_tracer:

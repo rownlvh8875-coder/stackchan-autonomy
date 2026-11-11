@@ -431,3 +431,32 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Documentation only: source, lockfile, original development brief and environment config
   unchanged. No firmware/device/gateway connection, paid API, new PR or merge was performed.
   User authorized normal upload to the existing feat/transport-soak branch.
+
+## User real24h failure investigation — 2026-11-11
+
+- Received Windows home report:35204.11s/34095cycles, engine_failure, traced growth75247B,
+  no task growth/remaining tasks,136 restart checks, cloud requests0. User confirms no
+  sleep/lid closure/reboot and no preceding warning. Historical root cause remains unknown.
+  Original numeric report is preserved under docs/validation/2026-11-11-windows-home-soak-failed.json.
+- Identified a diagnostic defect: the runner discarded its failing ActionResult and engine
+  flags. Deterministic real-engine/SQLite expiry reproduces the same silent generic report;
+  this demonstrates a possible failure path and does not establish the user's cause.
+- Added bounded first-failure cycle/event/result and pre-cleanup state/flags, plus whole-run
+  cycle duration/gap and paired wall-minus-monotonic drift maxima. Unknown result strings
+  are redacted to a fixed marker. Existing success set, TTLs, timeouts, no-retry behavior,
+  temp DB isolation, cancellation and exit semantics remain unchanged.
+- RED:6 missing-field failures/13 existing passes. GREEN:19 soak tests/5.49s; full suite
+ 272 PASS/45.63s. A privacy fixture initially injected an unknown action code which the
+  existing MemoryRecord already rejects; moved that injection to the engine-result boundary
+  while retaining its actual step/storage effects. No production policy was loosened.
+- Real paced120s:PASS,120.029s/1040cycles/4 restart checks, traced growth75585B, task growth0,
+  remaining tasks0, cloud requests0. Max cycle0.130459s/gap0.160374s/wall drift0.000212s.
+  Controlled real SQLite lease expiry produces device_fault/lease_lost at cycle3, CLI exit1,
+  matching JSON stdout/file and no remaining tasks. Numeric evidence includes the source blob
+  in docs/validation/2026-11-11-soak-diagnostics.json. These are not Windows24h results.
+- Ruff check/format and diff whitespace pass. sdist/wheel build and independent installed
+  Mock/MCP/voice/native Opus/memory/soak console checks pass. No dependencies changed.
+- Fresh read-only review: no Critical/Important/Minor findings; independently19 soak tests,
+  Ruff and whitespace pass. Existing failed JSON still validates with optional diagnostics null.
+- Existing feature-branch upload is authorized; no new PR/merge, device/live API, credentials
+  or environment configuration publication. Hosted Windows/Linux validation follows upload.
