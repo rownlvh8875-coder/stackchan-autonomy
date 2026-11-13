@@ -1,9 +1,10 @@
 {
   "recorded_on": "2026-11-13",
-  "source_base_commit": "f102e1246726e6ef01463ac69ca4e8d108da9988",
+  "source_base_commit": "7d0a156f30033b201a4adc8491554a6e7c18079b",
   "source_blobs": {
     "async_storage.py": "58adf8f90928064b833492074535ce4471bea3b3",
-    "action.py": "62ce0b9f2135830e4ecd494fa69d7711b33147ca",
+    "action.py": "0e48b3c80e9c298855b218f059105b43c9c8315f",
+    "control.py": "da41f0c9afe9fd54a4328c8fc055f3df4341f74c",
     "engine.py": "cbb62a04b4b1d5cf7c119ee4a7039d0e16f72142",
     "models.py": "a22c6632df9e188806254a162111959b939ae9cd",
     "soak.py": "cfe812085e659bbe3e2dd07b0cab967bcaaf50fa"
@@ -11,7 +12,7 @@
   "default_ttl_slow_memory": {
     "lease_ttl_s": 10,
     "injected_memory_delay_s": 12,
-    "elapsed_s": 12.014085866998357,
+    "elapsed_s": 12.019489109996357,
     "successful_renewals": 3,
     "result_code": "executed",
     "lease_lost": false,
@@ -20,13 +21,13 @@
   },
   "paced_120s": {
     "passed": true,
-    "cycles": 1009,
-    "measured_cycles": 909,
-    "wall_elapsed_s": 120.03753541300102,
+    "cycles": 1026,
+    "measured_cycles": 926,
+    "wall_elapsed_s": 120.0306989709934,
     "virtual_elapsed_s": null,
     "requested_duration_s": 120.0,
-    "python_traced_growth_bytes": 8701,
-    "python_traced_peak_bytes": 1165809,
+    "python_traced_growth_bytes": 17026,
+    "python_traced_peak_bytes": 1166009,
     "max_live_tasks": 2,
     "task_growth": 0,
     "remaining_tasks": 0,
@@ -37,16 +38,16 @@
     "restoration_checks": 4,
     "cloud_requests": 0,
     "results": {
-      "executed": 254,
-      "idle": 203,
-      "unchanged": 101,
-      "speech_cooldown": 451
+      "executed": 258,
+      "idle": 206,
+      "unchanged": 103,
+      "speech_cooldown": 459
     },
     "violations": [],
     "failure": null,
-    "max_cycle_duration_s": 1.7292820479997317,
-    "max_cycle_gap_s": 0.24784762299532304,
-    "max_wall_clock_drift_s": 0.00036868172173853964
+    "max_cycle_duration_s": 0.06408329099940602,
+    "max_cycle_gap_s": 0.14437808199727442,
+    "max_wall_clock_drift_s": 0.00011199090658919886
   },
-  "scope": "Offline controlled validation only. Exact Windows OS/storage trigger unproven; user real24h still FAIL/pending retry."
+  "scope": "Offline controlled validation after hosted deadline refinement. Exact Windows OS/storage trigger unproven; no user real24h PASS."
 }

@@ -44,6 +44,61 @@ async def test_control_deadline_is_checked_even_if_loop_cannot_schedule_timer(mo
         await executor.aclose()
 
 
+async def test_cold_unowned_acquisition_can_return_fresh_lease_after_slow_setup(monkeypatch):
+    executor = ActionExecutor(FakeRobotAdapter(), Settings(lease_ttl_s=1.5))
+    original = executor.lease.acquire
+
+    def cold_acquire():
+        time.sleep(2)  # Before the DB computes the lease timestamp; no ownership yet.
+        return original()
+
+    monkeypatch.setattr(executor.lease, "acquire", cold_acquire)
+    try:
+        assert await executor.claim_control()
+        assert not executor.faulted
+    finally:
+        await executor.aclose()
+
+
+async def test_valid_verification_uses_remaining_lifetime_not_a_fixed_fraction(monkeypatch):
+    executor = ActionExecutor(FakeRobotAdapter(), Settings(lease_ttl_s=1.5))
+    assert await executor.claim_control()
+    original = executor.lease.check
+
+    def delayed_check(handle):
+        result = original(handle)
+        time.sleep(0.6)  # Longer than TTL/4, still within the verified live lease.
+        return result
+
+    monkeypatch.setattr(executor.lease, "check", delayed_check)
+    try:
+        assert await executor.claim_control()
+        assert not executor.faulted
+    finally:
+        await executor.aclose()
+
+
+async def test_heartbeat_schedules_from_remaining_lifetime_after_slow_acquire(monkeypatch):
+    settings = Settings(lease_ttl_s=1.5)
+    executor = ActionExecutor(FakeRobotAdapter(), settings)
+    original = executor.lease.acquire
+
+    def slow_commit_delivery():
+        handle = original()
+        time.sleep(1)  # Only about0.5s of this lease remains when the caller sees it.
+        return handle
+
+    monkeypatch.setattr(executor.lease, "acquire", slow_commit_delivery)
+    try:
+        assert await executor.claim_control()
+        await asyncio.sleep(1)
+        assert not executor.faulted
+        contender = ControlLease(settings.state_path, settings.control_resource)
+        assert contender.acquire() is None
+    finally:
+        await executor.aclose()
+
+
 async def test_cancelled_slow_acquire_is_drained_and_its_late_handle_released(monkeypatch):
     settings = Settings(command_interval_s=0)
     executor = ActionExecutor(FakeRobotAdapter(), settings)
@@ -155,9 +210,10 @@ async def test_late_successful_control_io_cannot_authorize_dispatch(monkeypatch,
 
     def blocked(*args):
         started.set()
-        release.wait(2)
+        result = original(*args)
+        release.wait(2)  # Delay delivery after the lease was actually verified.
         try:
-            return original(*args)
+            return result
         finally:
             finished.set()
 
@@ -165,7 +221,9 @@ async def test_late_successful_control_io_cannot_authorize_dispatch(monkeypatch,
     try:
         result = await executor.execute(Decision(intent="look", yaw_delta_deg=5))
         assert not result.executed and not executor.robot.history
-        assert executor.faulted and not finished.is_set()
+        assert executor.faulted
+        if phase == "check":
+            assert not finished.is_set()
         assert executor.control_loss_reason == phase + "_timeout"
         release.set()
         await executor.aclose()
@@ -222,12 +280,12 @@ async def test_two_executors_cannot_dispatch_same_resource_until_release():
 
 
 async def test_live_heartbeat_renews_ownership_until_close():
-    settings = Settings(lease_ttl_s=0.15, command_interval_s=0)
+    settings = Settings(lease_ttl_s=1.5, command_interval_s=0)
     executor = ActionExecutor(FakeRobotAdapter(), settings)
-    contender = ControlLease(settings.state_path, settings.control_resource, ttl_s=0.15)
+    contender = ControlLease(settings.state_path, settings.control_resource, ttl_s=1.5)
     try:
         assert await executor.claim_control()
-        await asyncio.sleep(0.35)
+        await asyncio.sleep(3.2)  # Longer than the initial lease, independent of disk speed.
         assert contender.acquire() is None
     finally:
         await executor.aclose()
@@ -236,15 +294,15 @@ async def test_live_heartbeat_renews_ownership_until_close():
 
 async def test_lease_expiry_blocks_next_command_without_reacquisition():
     now = [100.0]
-    settings = Settings(command_interval_s=0, lease_ttl_s=0.2)
+    settings = Settings(command_interval_s=0, lease_ttl_s=1.5)
     lease = ControlLease(
-        settings.state_path, settings.control_resource, ttl_s=0.2, clock=lambda: now[0]
+        settings.state_path, settings.control_resource, ttl_s=1.5, clock=lambda: now[0]
     )
     robot = FakeRobotAdapter()
     executor = ActionExecutor(robot, settings, lease=lease)
     try:
         assert (await executor.execute(Decision(intent="look", yaw_delta_deg=5))).executed
-        now[0] = 101
+        now[0] = 103
         result = await executor.execute(Decision(intent="emote", emotion="happy"))
         assert not result.executed
         assert executor.faulted
@@ -263,19 +321,19 @@ async def test_lease_loss_cancels_active_local_work_and_blocks_queued_commands()
             await asyncio.Event().wait()
             await super().execute(command)
 
-    settings = Settings(command_interval_s=0, lease_ttl_s=0.15)
+    settings = Settings(command_interval_s=0, lease_ttl_s=1.5)
     lease = ControlLease(
-        settings.state_path, settings.control_resource, ttl_s=0.15, clock=lambda: now[0]
+        settings.state_path, settings.control_resource, ttl_s=1.5, clock=lambda: now[0]
     )
     robot = SlowRobot()
     executor = ActionExecutor(robot, settings, lease=lease)
     first = asyncio.create_task(executor.execute(Decision(intent="look", yaw_delta_deg=5)))
     try:
-        await asyncio.wait_for(entered.wait(), 1)
+        await asyncio.wait_for(entered.wait(), 20)
         second = asyncio.create_task(executor.execute(Decision(intent="emote", emotion="happy")))
-        now[0] = 101
-        await asyncio.wait_for(first, 1)
-        assert not (await asyncio.wait_for(second, 1)).executed
+        now[0] = 103
+        await asyncio.wait_for(first, 3)
+        assert not (await asyncio.wait_for(second, 3)).executed
         assert executor.faulted
         assert not robot.history
     finally:
@@ -364,16 +422,16 @@ async def test_lease_loss_stops_idle_engine_before_next_observation():
             await super().execute(command)
             acted.set()
 
-    settings = Settings(lease_ttl_s=0.15, observe_interval_s=60, cooldown_s=0)
+    settings = Settings(lease_ttl_s=1.5, observe_interval_s=60, cooldown_s=0)
     engine = AutonomyEngine(NotifyingRobot(), MockDecisionProvider(), settings)
     engine.actions.lease = ControlLease(
-        settings.state_path, settings.control_resource, ttl_s=0.15, clock=lambda: now[0]
+        settings.state_path, settings.control_resource, ttl_s=1.5, clock=lambda: now[0]
     )
     task = asyncio.create_task(engine.run())
     try:
-        await asyncio.wait_for(acted.wait(), 1)
-        now[0] = 101
-        await asyncio.wait_for(task, 0.5)
+        await asyncio.wait_for(acted.wait(), 20)
+        now[0] = 103
+        await asyncio.wait_for(task, 3)
         assert engine.state == State.ERROR
         assert engine.actions.faulted
     finally:

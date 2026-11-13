@@ -42,6 +42,9 @@ class ActionExecutor:
         self._storage = AsyncStorage()
         self._claim_lock = asyncio.Lock()
         self._close_task: asyncio.Task | None = None
+        self._authorized_until: float | None = None
+        self._observation_sequence = 0
+        self._applied_sequence = 0
         self.lease_lost = False
         self.control_loss_reason: ControlLossReason | None = None
         self.on_control_lost = None
@@ -62,15 +65,41 @@ class ActionExecutor:
         self._lease_handle = self.lease.acquire()
         return self._lease_handle
 
-    async def _lease_io(self, operation, *args):
-        # Include admission wait and commit latency; expiry is computed before commit.
-        timeout = min(self.settings.operation_timeout_s, self.lease.ttl_s / 4)
+    async def _lease_io(self, operation, *args, extends=False):
         started = time.monotonic()
-        async with asyncio.timeout(timeout):
-            result = await self._storage.call(operation, *args)
-        # A descheduled loop may deliver a ready result before its overdue timer.
-        if time.monotonic() - started >= timeout:
+        # Unowned setup has no lease yet. Held ownership must never outlive the
+        # actual verified expiry, including admission, commit and result delivery.
+        timeout = (
+            max(self.settings.operation_timeout_s, self.lease.ttl_s)
+            if self._authorized_until is None
+            else self._authorized_until - started
+        )
+        if timeout <= 0:
             raise TimeoutError
+
+        def observe():
+            result = operation(*args)
+            self._observation_sequence += 1
+            # Capture together inside the serial worker: the next call cannot
+            # overwrite validity metadata before this caller consumes its result.
+            return result, self.lease.valid_until_monotonic, self._observation_sequence
+
+        async with asyncio.timeout(timeout):
+            result, valid_until, sequence = await self._storage.call(observe)
+        # A descheduled loop may deliver a ready result before its overdue timer.
+        finished = time.monotonic()
+        if finished - started >= timeout:
+            raise TimeoutError
+        if result is not None and result is not False:
+            if valid_until is None or valid_until <= finished:
+                raise TimeoutError
+            if sequence > self._applied_sequence:
+                self._authorized_until = (
+                    valid_until
+                    if extends or self._authorized_until is None
+                    else min(self._authorized_until, valid_until)
+                )
+                self._applied_sequence = sequence
         return result
 
     async def claim_control(self) -> bool:
@@ -80,7 +109,7 @@ class ActionExecutor:
             acquiring = self._lease_handle is None
             try:
                 if acquiring:
-                    handle = await self._lease_io(self._acquire_lease)
+                    handle = await self._lease_io(self._acquire_lease, extends=True)
                     if handle is None:
                         return False
                     if self.stopped or self.faulted:
@@ -107,10 +136,14 @@ class ActionExecutor:
 
     async def _renew_control(self):
         while not self.stopped:
-            await asyncio.sleep(self.lease.ttl_s / 3)
+            remaining = (self._authorized_until or 0) - time.monotonic()
+            if remaining <= 0:
+                self._lose_control("renew_timeout")
+                return
+            await asyncio.sleep(min(self.lease.ttl_s, remaining) / 3)
             reason = "renew_rejected"
             try:
-                renewed = await self._lease_io(self.lease.renew, self._lease_handle)
+                renewed = await self._lease_io(self.lease.renew, self._lease_handle, extends=True)
             except TimeoutError:
                 renewed = False
                 reason = "renew_timeout"

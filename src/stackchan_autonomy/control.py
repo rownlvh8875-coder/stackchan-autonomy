@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .state_store import SQLiteState, finite_time
+from .state_store import SQLiteState, StateUnavailable, finite_time
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class ControlLease:
         self._creator_pid = os.getpid()
         self.ttl_s = ttl_s
         self.clock = clock
+        self.valid_until_monotonic: float | None = None
 
     def _time(self, db):
         return self.store.observed_time(db, "lease:" + self.resource, self.clock())
@@ -40,8 +41,10 @@ class ControlLease:
             self._creator_pid = pid
 
     def acquire(self) -> LeaseHandle | None:
+        self.valid_until_monotonic = None
         self._ensure_process_identity()
         with self.store.transaction() as db:
+            observed = time.monotonic()
             now = self._time(db)
             row = db.execute(
                 "SELECT owner,generation,expires_at FROM control_leases WHERE resource=?",
@@ -59,6 +62,7 @@ class ControlLease:
                 "generation=excluded.generation, expires_at=excluded.expires_at",
                 (self.resource, self.owner, generation, now + self.ttl_s),
             )
+            self.valid_until_monotonic = observed + self.ttl_s
             return LeaseHandle(self.resource, self.owner, generation)
 
     def _matches(self, handle):
@@ -66,32 +70,45 @@ class ControlLease:
         return handle.resource == self.resource and handle.owner == self.owner
 
     def check(self, handle: LeaseHandle) -> bool:
+        self.valid_until_monotonic = None
         if not self._matches(handle):
             return False
         with self.store.transaction() as db:
+            observed = time.monotonic()
             now = self._time(db)
-            return (
-                db.execute(
-                    "SELECT 1 FROM control_leases WHERE resource=? AND owner=? "
-                    "AND generation=? AND expires_at>?",
-                    (self.resource, self.owner, handle.generation, now),
-                ).fetchone()
-                is not None
-            )
+            row = db.execute(
+                "SELECT expires_at FROM control_leases WHERE resource=? AND owner=? "
+                "AND generation=? AND expires_at>?",
+                (self.resource, self.owner, handle.generation, now),
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                remaining = finite_time(row[0]) - now
+            except ValueError:
+                raise StateUnavailable("invalid lease expiry") from None
+            self.valid_until_monotonic = observed + remaining
+            return True
 
     def renew(self, handle: LeaseHandle) -> bool:
+        self.valid_until_monotonic = None
         if not self._matches(handle):
             return False
         with self.store.transaction() as db:
+            observed = time.monotonic()
             now = self._time(db)
             cursor = db.execute(
                 "UPDATE control_leases SET expires_at=? WHERE resource=? AND owner=? "
                 "AND generation=? AND expires_at>?",
                 (now + self.ttl_s, self.resource, self.owner, handle.generation, now),
             )
-            return cursor.rowcount == 1
+            if cursor.rowcount != 1:
+                return False
+            self.valid_until_monotonic = observed + self.ttl_s
+            return True
 
     def release(self, handle: LeaseHandle) -> bool:
+        self.valid_until_monotonic = None
         if not self._matches(handle):
             return False
         with self.store.transaction() as db:

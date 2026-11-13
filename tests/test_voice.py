@@ -182,13 +182,13 @@ async def test_lease_loss_while_listening_cancels_input_without_output():
 
     voice, robot, _, _, playback = conversation(microphone=SlowMic())
     voice.engine.actions.lease = ControlLease(
-        voice.settings.state_path, voice.settings.control_resource, ttl_s=0.15, clock=lambda: now[0]
+        voice.settings.state_path, voice.settings.control_resource, ttl_s=1.5, clock=lambda: now[0]
     )
     task = asyncio.create_task(voice.handle(Event(kind=EventKind.TOUCH_TAP)))
     try:
-        await asyncio.wait_for(entered.wait(), 1)
-        now[0] = 101
-        assert (await asyncio.wait_for(task, 1)).code == "stopped"
+        await asyncio.wait_for(entered.wait(), 20)
+        now[0] = 103
+        assert (await asyncio.wait_for(task, 3)).code == "stopped"
         assert cancelled.is_set() and playback.calls == 0 and not robot.history
     finally:
         await voice.engine.aclose()

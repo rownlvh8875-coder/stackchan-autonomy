@@ -71,12 +71,13 @@ provider.usage는 현재 프로세스, budget.snapshot()은 공유 누적 통계
 실제 청구액·계정 전체 사용량 제한은 아니다.
 
 control.ControlLease와 state_store.SQLiteState는 로컬 DB의 owner/generation/만료 시각을
-사용한다. ActionExecutor는 TTL/3 heartbeat와 송신 직전 확인을 수행하고 제어권 소실 시
+사용한다. ActionExecutor는 남은 유효기간의1/3 이하 간격으로 갱신하고 송신 직전 확인하며 제어권 소실 시
 엔진을 ERROR로 종료한다. aclose는 태스크 정리 후 조건부 release한다.
 파일 메모리와 제어권 I/O는 각각 별도 AsyncStorage 채널을 사용한다. 채널마다 실행 중
 Future 하나만 허용하며 실제 작업 완료 전에는 취소된 호출자의 자리를 재사용하지 않는다.
-:memory: 연결은 생성 스레드에 유지한다. 권한 확인/갱신의 대기·실행 시간은
-min(operation_timeout, TTL/4)로 제한하고 반환 뒤 monotonic 시간도 확인한다.
+:memory: 연결은 생성 스레드에 유지한다. DB 시각 검증 시 monotonic 유효 시각을 함께 기록하고,
+보유 중인 권한의 남은 시간 안에서 확인/갱신의 대기·실행·반환을 완료해야 한다.
+미취득 초기 준비 시간과 이미 보유한 권한의 유효기간을 구분하며, 반환 뒤에도 만료를 확인한다.
 저장소 작업이 남은 채 취소되면 새 명령을 차단하고, 종료는 원자적 작업 완료와 늦은
 취득의 release를 기다린 뒤 파일을 정리한다. FULL durability와 기본10초 TTL은 유지한다.
 CLI는 제어권 경합/저장소 오류 시 외부 명령 없이 종료 코드 2를 반환한다.

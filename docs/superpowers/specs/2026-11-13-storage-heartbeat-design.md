@@ -40,9 +40,13 @@ Tracked async file operations cover the Mock path while preserving fail-closed b
 - Executor: acquire/check/renew/release go through a separate storage worker. Serialize
   claims; a late acquire handle remains owned by the executor for cleanup. Recheck stop/fault
   after each new await before dispatch. Cancellation during ownership verification latches
-  stop, with no subsequent commands. Acquire/check/renew deadlines include admission and
-  IO and are at most min(operation timeout,TTL/4); late completion cannot authorize dispatch
-  or clear the latched fault. Lease loss is latched idempotently to avoid repeat cancellation.
+  stop, with no subsequent commands. ControlLease records conservative monotonic validity
+  at the DB clock observation before commit. Result/deadline/sequence are captured together
+  inside the serial worker. Checks never extend authorization; timely renewals can extend it.
+  Held IO includes admission/commit/delivery within the known validity. Unowned acquisition
+  has a bounded max(operation timeout,TTL) setup wait, then must return a still-live observation.
+  Renewal sleeps at most one third of remaining life. Post-return checks reject late results;
+  a fault cannot be cleared by a late success. Loss is latched idempotently.
 - Cleanup: synchronous stop latch first; idempotent shielded cleanup waits for in-flight
   atomic DB operations and releases a late acquired handle before filesystem removal.
   Persistent OS-level IO hangs can delay final cleanup; they never authorize more commands.
@@ -67,3 +71,13 @@ connection affinity, repeated close and no task/history/heap regression are requ
 Full tests, independent installed wheel, default10s-TTL/12s delayed memory probe, paced
 run, one final read-only review and Windows/Linux CI precede normal feature-branch upload.
 No claim of Windows real24h PASS is made without the user's completed run.
+
+## Hosted evidence refinement
+
+The first hosted candidate7d0a156 passed Linux but failed Windows tests with37.5–50ms
+control budgets (TTL/4 of test-only150–200ms leases), plus a default-lifetime history check
+and a fixed startup poll. Cold DB setup can precede the actual lease timestamp; a fixed
+fraction misclassifies still-live authorization. The revised observation contract above
+replaces that fraction, without adding grace or changing expiry/generation conditions.
+Legacy tests now wait for real completion and use realistic runtime leases; logical expiry
+still uses controlled DB clocks. This material change gets a fresh limited deadline review.

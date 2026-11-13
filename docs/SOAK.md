@@ -118,9 +118,14 @@ submit nothing. Slow memory cannot fill the shared executor or queue renewal beh
 The :memory: connection stays on its creating thread; async engine snapshot/recent APIs
 also keep the soak runner's history/restart reads off the loop.
 
-Ownership IO deadlines include admission/commit latency and are at most
-min(operation_timeout_s,lease.ttl_s/4), with a post-return monotonic check for delayed loop
-timers. The10s default lease, FULL SQLite durability, expiry/generation checks and no replay
+ControlLease records monotonic validity alongside its DB clock observation, before commit.
+The serial worker captures the result, validity and observation sequence together. Held
+ownership IO must finish admission/commit/delivery within that known validity; a check
+never extends it, and a renewal cannot revive it after expiry. Renewal scheduling uses
+remaining life instead of sleeping a full TTL/3 after a slow result. Initial unowned
+setup may wait up to max(operation_timeout_s,lease.ttl_s), then must return a still-live
+observation. Post-return checks also reject overdue results when loop timers are delayed.
+The10s default lease, FULL SQLite durability, expiry/generation checks and no replay
 remain. A canceled/failed ownership check latches stop; a late successful result cannot
 clear it or dispatch a command. Pending memory IO at cycle timeout/cancellation also stops
 the engine instead of starting another cycle behind uncertain work.
@@ -132,11 +137,19 @@ more commands. Whole-process stalls, slow control storage and external gateway f
 separate limitations; unsafe ownership still stops. The paid provider's synchronous budget
 path is outside this offline fix. No real device/cloud/24h success is implied.
 
-Local final validation:287 tests pass. With the default10s TTL and15s cycle timeout,
-a single12s file-memory delay completed with3 successful renewals and no control loss.
-A real120.038s paced run completed1009cycles/4restart checks, growth8701B, no task growth,
+Local final validation after hosted refinement:290 tests pass. With the default10s TTL and15s cycle timeout,
+a single12s file-memory delay completed in12.019s with3 successful renewals and no control loss.
+A real120.031s paced run completed1026cycles/4restart checks, growth17026B, no task growth,
 remaining tasks0 and cloud requests0. [Numeric evidence](validation/2026-11-13-storage-heartbeat.json)
 records matching source blobs. These are short controlled checks, not a user Windows24h PASS.
+
+The first hosted candidate passed Linux but exposed too-short Windows control budgets
+and startup assumptions. The fixed TTL/4 policy was replaced by the actual validity
+contract above. New tests accept slow setup before acquisition and slow but still-valid
+verification, while rejecting stale acquired/verified results and never reviving a fault.
+Small runtime-test leases were scaled from150–200ms to1.5s; logical expiry still advances
+past that lifetime, and the healthy heartbeat test runs longer than its initial lease.
+Scheduler tests wait for completed records, and every history-test cycle must remain healthy.
 
 ### Retry from an existing Windows cmd checkout
 

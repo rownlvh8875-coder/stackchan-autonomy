@@ -501,3 +501,31 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   storage or whole-process stalls still fail closed; paid budget IO remains outside scope.
 - Normal existing feature-branch upload and hosted verification follow. No new PR/merge,
   live device/API, credential changes or cloud environment publication.
+
+### Hosted deadline refinement — 2026-11-13
+
+- First hosted candidate7d0a156 / run43362521047 passed Linux. Windows3.11 had8 failures
+  and3.12 had5: legacy150–200ms lease tests encountered37.5–50ms fractional IO budgets;
+  there was also a default history-loop fault and fixed startup polling. No failure was
+  marked PASS and no safety stop was disabled.
+- Ruling: replace arbitrary TTL/4 latency with the actual DB-observed monotonic validity,
+  sampled before commit. Cold schema/setup before acquisition is not elapsed owned lifetime.
+  Capture result/deadline/sequence together in the serialized worker. Checks cannot extend
+  authority; renewal results must arrive before known expiry, and late results cannot revive
+  faults. Schedule from remaining life, including already elapsed acquisition/commit latency.
+  Unowned setup has a bounded max(operation timeout,TTL) wait, followed by a live-result check.
+- Added three observed RED regressions for cold setup returning fresh authority, still-valid
+  slow verification and renewal scheduling after slow acquisition. Updated stale-result tests
+  to delay delivery after actual verification (not unowned setup). Held IO still has no grace.
+- Runtime lease fixtures scaled150–200ms to1.5s to remove disk-speed assumptions; healthy
+  heartbeat test waits3.2s (longer than initial TTL), and fake DB clocks still cross expiry.
+  Scheduler waits for completed records rather than100 polling iterations. Every history
+  cycle now asserts a healthy result, so an early fault cannot masquerade as bounded soak.
+  Recorder timeout20ms remains unchanged and is exercised after control acquisition.
+- New evidence justified a fresh limited deadline review: no findings; independently40
+  lease/runtime/coordination tests PASS outside the default sandbox. An initial sandbox run
+  stalled in durable SQLite acquisition; rerunning in the actual execution environment passed.
+- Full290 PASS/59.81s, Ruff/format/diff pass. Rebuilt wheel and all independent console checks
+  pass. Final default10sTTL probe: one12s memory delay/12.019s,3 renewals/no loss/tasks.
+  Final paced120.031s:1026cycles/4restarts,17026B growth, tasks0/cloud0. Regenerated numeric
+  evidence includes control.py plus all changed runtime source blobs. Hosted retry follows.

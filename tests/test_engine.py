@@ -236,11 +236,19 @@ async def test_t10_bounded_histories_no_overlapping_tasks_under_1000_cycles():
     tracemalloc.start()
     try:
         for _ in range(100):
-            await engine.step(robot.touch_event())
+            result = await engine.step(robot.touch_event())
+            assert result.code in {"executed", "speech_cooldown"}, (
+                result.code,
+                engine.actions.control_loss_reason,
+            )
         gc.collect()
         baseline_memory = tracemalloc.get_traced_memory()[0]
         for _ in range(1000):
-            await engine.step(robot.touch_event())
+            result = await engine.step(robot.touch_event())
+            assert result.code in {"executed", "speech_cooldown"}, (
+                result.code,
+                engine.actions.control_loss_reason,
+            )
         gc.collect()
         growth = tracemalloc.get_traced_memory()[0] - baseline_memory
         assert len(engine.memory.recent()) <= 20
@@ -257,18 +265,30 @@ async def test_t10_bounded_histories_no_overlapping_tasks_under_1000_cycles():
     assert len(asyncio.all_tasks()) <= baseline_tasks
 
 
-async def test_scheduler_runs_then_stops_without_leftover_tasks():
+async def test_scheduler_runs_then_stops_without_leftover_tasks(monkeypatch):
     engine = AutonomyEngine(
         FakeRobotAdapter(), MockDecisionProvider(), settings(observe_interval_s=0.01)
     )
+    recorded = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    original_record = engine.memory.record
+
+    def record(*args, **kwargs):
+        original_record(*args, **kwargs)
+        loop.call_soon_threadsafe(recorded.set)
+
+    monkeypatch.setattr(engine.memory, "record", record)
     run = asyncio.create_task(engine.run())
+    completed = asyncio.create_task(recorded.wait())
     try:
-        for _ in range(100):
-            if engine.memory.recent():
-                break
-            await asyncio.sleep(0.005)
-        assert engine.memory.recent()
+        done, _ = await asyncio.wait(
+            (run, completed), timeout=20, return_when=asyncio.FIRST_COMPLETED
+        )
+        assert completed in done, (engine.state, engine.actions.control_loss_reason)
+        assert await engine.memory_recent()
         engine.stop()
-        await asyncio.wait_for(run, 1)
+        await asyncio.wait_for(run, 3)
     finally:
+        completed.cancel()
+        await asyncio.gather(completed, return_exceptions=True)
         await engine.aclose()
