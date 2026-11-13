@@ -1,4 +1,6 @@
+import asyncio
 import sqlite3
+import threading
 
 import pytest
 
@@ -8,6 +10,117 @@ from stackchan_autonomy.memory import Memory
 from stackchan_autonomy.models import Decision, Event, EventKind, RobotStatus, State
 from stackchan_autonomy.robot import FakeRobotAdapter
 from stackchan_autonomy.settings import Settings
+
+
+async def test_file_memory_wait_allows_real_control_heartbeat_to_progress(monkeypatch, tmp_path):
+    engine = AutonomyEngine(
+        FakeRobotAdapter(),
+        MockDecisionProvider(),
+        settings(tmp_path / "slow-memory.sqlite3", lease_ttl_s=2, operation_timeout_s=5),
+    )
+    waiting, renewed, release = threading.Event(), threading.Event(), threading.Event()
+    original_snapshot = engine.memory.snapshot
+    original_renew = engine.actions.lease.renew
+
+    def slow_snapshot():
+        waiting.set()
+        release.wait(3)  # Simulate a slow file call without changing lease/engine clocks.
+        return original_snapshot()
+
+    def renewal_during_storage_wait(handle):
+        result = original_renew(handle)  # Real SQLite expiry/ownership checks remain active.
+        if waiting.is_set():
+            if result:
+                renewed.set()
+            release.set()
+        return result
+
+    try:
+        assert (await engine.step(Event(kind=EventKind.VOICE_REQUEST))).executed
+        monkeypatch.setattr(engine.memory, "snapshot", slow_snapshot)
+        monkeypatch.setattr(engine.actions.lease, "renew", renewal_during_storage_wait)
+        result = await engine.step(Event(kind=EventKind.VOICE_REQUEST))
+        assert renewed.is_set(), "file-backed memory blocked the control heartbeat"
+        assert result.executed and not engine.actions.lease_lost
+    finally:
+        release.set()
+        await engine.aclose()
+
+
+async def test_stop_during_file_read_blocks_dispatch_and_close_waits_for_io(monkeypatch, tmp_path):
+    engine = AutonomyEngine(
+        FakeRobotAdapter(), MockDecisionProvider(), settings(tmp_path / "closing.sqlite3")
+    )
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    closed_too_soon = []
+    original_snapshot, original_close = engine.memory.snapshot, engine.memory.close
+
+    def slow_snapshot():
+        started.set()
+        release.wait(3)
+        try:
+            return original_snapshot()
+        finally:
+            finished.set()
+
+    def close():
+        if not finished.is_set():
+            closed_too_soon.append(True)
+        original_close()
+
+    monkeypatch.setattr(engine.memory, "snapshot", slow_snapshot)
+    monkeypatch.setattr(engine.memory, "close", close)
+    cycle = asyncio.create_task(engine.step(Event(kind=EventKind.VOICE_REQUEST)))
+    closer = None
+    try:
+        async with asyncio.timeout(4):
+            while not started.is_set():
+                await asyncio.sleep(0.001)
+        engine.stop()
+        assert (await cycle).code == "stopped"
+        assert not engine.robot.history
+        closer = asyncio.create_task(engine.aclose())
+        await asyncio.sleep(0.02)
+        assert not closer.done(), "cleanup abandoned an active file operation"
+        closer.cancel()
+        await asyncio.sleep(0)
+        closer.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await closer
+        assert finished.is_set() and not closed_too_soon
+        assert not engine.robot.history
+    finally:
+        release.set()
+        await asyncio.gather(cycle, *([closer] if closer else []), return_exceptions=True)
+        await engine.aclose()
+
+
+async def test_file_io_timeout_faults_instead_of_starting_another_cycle(monkeypatch, tmp_path):
+    engine = AutonomyEngine(
+        FakeRobotAdapter(),
+        MockDecisionProvider(),
+        settings(tmp_path / "timeout.sqlite3", operation_timeout_s=0.1),
+    )
+    started, release = threading.Event(), threading.Event()
+    original = engine.memory.recent
+    calls = []
+
+    def blocked_recent():
+        calls.append(1)
+        started.set()
+        release.wait(2)
+        return original()
+
+    monkeypatch.setattr(engine.memory, "recent", blocked_recent)
+    try:
+        result = await engine.step(Event(kind=EventKind.VOICE_REQUEST))
+        assert result.code == "cycle_unavailable" and engine.state == State.ERROR
+        assert (await engine.step(Event(kind=EventKind.VOICE_REQUEST))).code == "stopped"
+        assert calls == [1] and not engine.robot.history
+    finally:
+        release.set()
+        await engine.aclose()
 
 
 def settings(path, **overrides):

@@ -61,6 +61,7 @@ async def test_soak_records_disconnection_result_before_cleanup(monkeypatch):
         "action_stopped": True,
         "action_faulted": False,
         "lease_lost": False,
+        "control_loss_reason": None,
     }
     assert report.remaining_tasks == 0
     assert "private-device-error-detail" not in report.model_dump_json()
@@ -95,11 +96,12 @@ async def test_soak_classifies_real_expired_lease_without_retry(monkeypatch):
     assert report.failure.event.value == "VOICE_REQUEST"
     assert report.failure.engine_state.value == "ERROR"
     assert report.failure.lease_lost and report.failure.action_faulted
+    assert report.failure.control_loss_reason == "lease_invalid"
     assert report.failure.engine_stopped and report.failure.action_stopped
     assert report.remaining_tasks == 0 and report.cloud_requests == 0
 
 
-async def test_soak_distinguishes_sqlite_lock_failure_from_control_loss(monkeypatch):
+async def test_soak_distinguishes_sqlite_verification_error_from_expired_lease(monkeypatch):
     import sqlite3
 
     from stackchan_autonomy import soak
@@ -136,9 +138,10 @@ async def test_soak_distinguishes_sqlite_lock_failure_from_control_loss(monkeypa
     assert not report.passed and report.violations == ("engine_failure",)
     assert report.cycles == 3
     assert report.failure.result_code == "cycle_unavailable"
-    assert report.failure.engine_state.value == "IDLE"
-    assert not report.failure.lease_lost and not report.failure.action_faulted
-    assert not report.failure.engine_stopped  # Capture precedes diagnostic cleanup's stop.
+    assert report.failure.engine_state.value == "ERROR"
+    assert report.failure.lease_lost and report.failure.action_faulted
+    assert report.failure.control_loss_reason == "verification_error"
+    assert report.failure.engine_stopped
     assert report.remaining_tasks == 0
 
 

@@ -6,6 +6,7 @@ import time
 from collections import deque
 
 from .action import ActionExecutor
+from .async_storage import AsyncStorage, finish_cleanup
 from .memory import Memory
 from .memory_store import MemoryUnavailable
 from .models import ActionResult, Decision, DecisionContext, Event, EventKind, State
@@ -80,6 +81,8 @@ class AutonomyEngine:
         self._runner: asyncio.Task | None = None
         self._scheduler: asyncio.Task | None = None
         self._person_present = False
+        self._memory_storage = AsyncStorage()
+        self._close_task: asyncio.Task | None = None
         self._analysis_succeeded = False
         self._last_analysis_at: float | None = None
 
@@ -118,9 +121,31 @@ class AutonomyEngine:
             for t in (self._active, self._scheduler, self._runner)
             if t is not None and t is not current
         }
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(
+                self._close(tasks), name="stackchan-engine-cleanup"
+            )
+        await finish_cleanup(self._close_task)
+
+    async def _close(self, tasks):
         await asyncio.gather(*tasks, return_exceptions=True)
-        await self.actions.aclose()
-        self.memory.close()
+        try:
+            await self.actions.aclose()
+        finally:
+            await self._memory_storage.aclose()
+            self.memory.close()
+
+    async def _memory_call(self, operation, *args, **kwargs):
+        if self.settings.memory_path is None:
+            # The optional :memory: connection belongs to this loop's creating thread.
+            return operation(*args, **kwargs)
+        return await self._memory_storage.call(operation, *args, **kwargs)
+
+    async def memory_snapshot(self):
+        return await self._memory_call(self.memory.snapshot)
+
+    async def memory_recent(self):
+        return await self._memory_call(self.memory.recent)
 
     async def _schedule(self) -> None:
         while not self.stopped:
@@ -189,7 +214,7 @@ class AutonomyEngine:
                         DecisionContext(
                             event=event,
                             status=status,
-                            recent=self.memory.recent(),
+                            recent=await self.memory_recent(),
                             personality=self.personality,
                             max_step_deg=self.settings.max_step_deg,
                         ),
@@ -208,7 +233,7 @@ class AutonomyEngine:
                         return ActionResult(
                             code="device_fault" if self.actions.faulted else "lease_busy"
                         )
-                    snapshot = self.memory.snapshot()
+                    snapshot = await self.memory_snapshot()
                     last_spoken = snapshot.last_speech_guard_at
                     if (
                         decision.intent == "speak"
@@ -232,7 +257,8 @@ class AutonomyEngine:
                         result = await self.actions.execute(
                             decision, explicit_request=event.kind == EventKind.VOICE_REQUEST
                         )
-                    self.memory.record(
+                    await self._memory_call(
+                        self.memory.record,
                         self.clock(),
                         event.kind,
                         decision.intent,
@@ -249,6 +275,8 @@ class AutonomyEngine:
             except asyncio.CancelledError:
                 if self.stopped:
                     return ActionResult(code="stopped")
+                if self._memory_storage.pending:
+                    self._fault()
                 raise
             except ConnectionError:
                 self._fault()
@@ -257,6 +285,11 @@ class AutonomyEngine:
                 self._fault()
                 logger.warning("autonomy_memory_unavailable")
                 return ActionResult(code="memory_unavailable")
+            except TimeoutError:
+                if self._memory_storage.pending or self.actions.faulted:
+                    self._fault()
+                logger.warning("autonomy_cycle_unavailable")
+                return ActionResult(code="cycle_unavailable")
             except Exception:
                 self._analysis_succeeded = False
                 if self.actions.faulted:

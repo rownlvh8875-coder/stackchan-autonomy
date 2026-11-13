@@ -1,0 +1,52 @@
+{
+  "recorded_on": "2026-11-13",
+  "source_base_commit": "f102e1246726e6ef01463ac69ca4e8d108da9988",
+  "source_blobs": {
+    "async_storage.py": "58adf8f90928064b833492074535ce4471bea3b3",
+    "action.py": "62ce0b9f2135830e4ecd494fa69d7711b33147ca",
+    "engine.py": "cbb62a04b4b1d5cf7c119ee4a7039d0e16f72142",
+    "models.py": "a22c6632df9e188806254a162111959b939ae9cd",
+    "soak.py": "cfe812085e659bbe3e2dd07b0cab967bcaaf50fa"
+  },
+  "default_ttl_slow_memory": {
+    "lease_ttl_s": 10,
+    "injected_memory_delay_s": 12,
+    "elapsed_s": 12.014085866998357,
+    "successful_renewals": 3,
+    "result_code": "executed",
+    "lease_lost": false,
+    "cloud_requests": 0,
+    "remaining_tasks": 0
+  },
+  "paced_120s": {
+    "passed": true,
+    "cycles": 1009,
+    "measured_cycles": 909,
+    "wall_elapsed_s": 120.03753541300102,
+    "virtual_elapsed_s": null,
+    "requested_duration_s": 120.0,
+    "python_traced_growth_bytes": 8701,
+    "python_traced_peak_bytes": 1165809,
+    "max_live_tasks": 2,
+    "task_growth": 0,
+    "remaining_tasks": 0,
+    "history_peak": 100,
+    "transition_peak": 100,
+    "robot_history_peak": 64,
+    "restarts": 4,
+    "restoration_checks": 4,
+    "cloud_requests": 0,
+    "results": {
+      "executed": 254,
+      "idle": 203,
+      "unchanged": 101,
+      "speech_cooldown": 451
+    },
+    "violations": [],
+    "failure": null,
+    "max_cycle_duration_s": 1.7292820479997317,
+    "max_cycle_gap_s": 0.24784762299532304,
+    "max_wall_clock_drift_s": 0.00036868172173853964
+  },
+  "scope": "Offline controlled validation only. Exact Windows OS/storage trigger unproven; user real24h still FAIL/pending retry."
+}

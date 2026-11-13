@@ -15,7 +15,7 @@ from pydantic import Field, model_validator
 
 from .decision import MockDecisionProvider
 from .engine import AutonomyEngine
-from .models import Event, EventKind, State, StrictModel
+from .models import ControlLossReason, Event, EventKind, State, StrictModel
 from .robot import FakeRobotAdapter
 from .settings import Settings
 
@@ -50,6 +50,7 @@ class SoakFailure(StrictModel):
     action_stopped: bool
     action_faulted: bool
     lease_lost: bool
+    control_loss_reason: ControlLossReason | None = None
 
 
 class SoakReport(StrictModel):
@@ -189,10 +190,10 @@ async def run_soak(config: SoakConfig) -> SoakReport:
                 ):
                     break
                 if cycles and cycles % config.restart_every == 0:
-                    before = engine.memory.snapshot()
+                    before = await engine.memory_snapshot()
                     await engine.aclose()
                     engine = create_engine()
-                    if engine.memory.snapshot() != before:
+                    if await engine.memory_snapshot() != before:
                         violations.add("restart_metadata_mismatch")
                     restarts += 1
                     restoration_checks += 1
@@ -226,10 +227,11 @@ async def run_soak(config: SoakConfig) -> SoakReport:
                         action_stopped=engine.actions.stopped,
                         action_faulted=engine.actions.faulted,
                         lease_lost=engine.actions.lease_lost,
+                        control_loss_reason=engine.actions.control_loss_reason,
                     )
                     break
                 results[result.code] += 1
-                history_peak = max(history_peak, len(engine.memory.recent()))
+                history_peak = max(history_peak, len(await engine.memory_recent()))
                 transition_peak = max(transition_peak, len(engine.transitions))
                 robot_peak = max(robot_peak, len(engine.robot.history))
                 live_tasks = len(asyncio.all_tasks() - initial_tasks)

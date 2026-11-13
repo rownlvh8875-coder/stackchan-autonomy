@@ -56,6 +56,11 @@ exit1. The report now includes `failure` (null on normal completion), captured
   any unexpected string. No exception message or arbitrary result string is exported.
 - `engine_state`, `engine_stopped`, `action_stopped`, `action_faulted`, `lease_lost`:
   state/flags at the failure boundary. Control loss is not proof of a particular OS cause.
+- `control_loss_reason` (added2026-11-13): fixed optional code. `lease_invalid` means an
+  ownership/expiry check rejected the handle; `acquire_timeout`/`check_timeout` mean the
+  ownership IO deadline elapsed. `renew_timeout`, `renew_rejected`, `renew_error` distinguish
+  heartbeat deadline/rejection/exception; `verification_cancelled`/`verification_error`
+  distinguish canceled/failed ownership verification. No exception text is exported.
 
 Three numeric observations cover the whole run, including warmup:
 
@@ -90,6 +95,68 @@ original failed JSON. Use a fresh report filename and retain any preceding fixed
 warnings. Windows **cmd** supports `%RANDOM%` in a report filename; PowerShell uses
 the timestamp variable example in the [arrival guide](DEVICE_ARRIVAL_RUNBOOK.ko.md).
 Copy commands one at a time; don't concatenate `uv sync` with `uv run`.
+
+## User Windows run received 2026-11-13 — control loss, FAIL
+
+The [second numeric report](validation/2026-11-13-windows-home-soak-control-loss.json) stopped
+at33853.172s (9h24m13s) /32870cycles. Its failure is stopped/ERROR, action_faulted=true,
+lease_lost=true. Largest cycle11.796s, inter-cycle gap1.656s, observed wall drift0.021237s.
+The10s default lease is shorter than that largest cycle. Traced growth116610B, task growth0,
+remaining tasks0,131 restart checks and no cloud requests. This is not a24h PASS.
+
+Control authorization was lost. The maxima cover the whole run and do not identify the
+specific failed-cycle IO call. They do not prove which Windows/disk/OS operation was slow.
+Separately, a controlled slow file-memory call reproduced event-loop starvation and loss
+of a real SQLite lease. The runtime fix below addresses that demonstrated mechanism.
+
+### Runtime file IO isolation — 2026-11-13
+
+Runtime file-memory reads/writes and lease acquire/check/renew/release use separate tracked
+executor channels. Each channel admits at most one submitted Future. Cancellation of a caller
+does not release that admission slot until its atomic operation finishes; canceled waiters
+submit nothing. Slow memory cannot fill the shared executor or queue renewal behind itself.
+The :memory: connection stays on its creating thread; async engine snapshot/recent APIs
+also keep the soak runner's history/restart reads off the loop.
+
+Ownership IO deadlines include admission/commit latency and are at most
+min(operation_timeout_s,lease.ttl_s/4), with a post-return monotonic check for delayed loop
+timers. The10s default lease, FULL SQLite durability, expiry/generation checks and no replay
+remain. A canceled/failed ownership check latches stop; a late successful result cannot
+clear it or dispatch a command. Pending memory IO at cycle timeout/cancellation also stops
+the engine instead of starting another cycle behind uncertain work.
+
+Shutdown latches stop before waiting, drains atomic workers, releases late acquired handles
+and closes memory before temporary directory removal. Repeated caller cancellation is
+propagated after cleanup finishes. An OS-level IO hang can delay cleanup; it does not permit
+more commands. Whole-process stalls, slow control storage and external gateway fencing are
+separate limitations; unsafe ownership still stops. The paid provider's synchronous budget
+path is outside this offline fix. No real device/cloud/24h success is implied.
+
+Local final validation:287 tests pass. With the default10s TTL and15s cycle timeout,
+a single12s file-memory delay completed with3 successful renewals and no control loss.
+A real120.038s paced run completed1009cycles/4restart checks, growth8701B, no task growth,
+remaining tasks0 and cloud requests0. [Numeric evidence](validation/2026-11-13-storage-heartbeat.json)
+records matching source blobs. These are short controlled checks, not a user Windows24h PASS.
+
+### Retry from an existing Windows cmd checkout
+
+Run one command at a time. This form works from the home folder too:
+
+```cmd
+git -C "%USERPROFILE%\stackchan-soak-24h" pull --ff-only
+```
+
+After a successful update, run the10-minute check first. The absolute uv path supports
+the portable ZIP installation without depending on the new cmd window's PATH.
+
+```cmd
+"%USERPROFILE%\.local\bin\uv.exe" --directory "%USERPROFILE%\stackchan-soak-24h" run --frozen stackchan-soak --duration-s 600 --interval-s 0.2 --report ".local/soak/storage-10m-%RANDOM%-%RANDOM%.json"
+```
+
+Only after that result passes, start a fresh24h run using the same form with
+`--duration-s 86400 --interval-s 1` and a new report prefix. Never concatenate commands or
+reuse an unset `%SOAK_REPORT%`; cmd can leave it as a literal filename in the current folder.
+Keep any test already running until it finishes unless explicitly choosing to interrupt it.
 
 ## Recorded validation — 2026-11-06
 

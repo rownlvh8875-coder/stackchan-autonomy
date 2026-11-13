@@ -78,6 +78,18 @@ class ActionResult(StrictModel):
     code: str = "idle"
 
 
+ControlLossReason = Literal[
+    "lease_invalid",
+    "acquire_timeout",
+    "check_timeout",
+    "renew_timeout",
+    "renew_rejected",
+    "renew_error",
+    "verification_cancelled",
+    "verification_error",
+]
+
+
 class MemoryRecord(StrictModel):
     at: float = Field(ge=0, strict=True)
     event: EventKind

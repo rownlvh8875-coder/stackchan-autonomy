@@ -460,3 +460,44 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   Ruff and whitespace pass. Existing failed JSON still validates with optional diagnostics null.
 - Existing feature-branch upload is authorized; no new PR/merge, device/live API, credentials
   or environment configuration publication. Hosted Windows/Linux validation follows upload.
+
+## Keep storage off the heartbeat loop — 2026-11-13
+
+- Received another Windows report:33853.172s/32870cycles, stopped/ERROR with action fault
+  and lease_lost=true; max cycle11.796s versus default10s TTL, max gap1.656s/drift0.021237s.
+  Growth116610B, tasks0,131 restart checks, cloud0. Preserved as numeric FAIL evidence.
+  Maxima do not identify the exact failed IO call or prove the Windows OS/disk trigger.
+- Real-engine/SQLite RED: a slow file-memory snapshot starved renewal and lost ownership.
+  Added separate async admission channels for runtime file memory and control operations;
+  only one submitted Future per channel, slot retained until actual completion, ContextVars
+  copied and abandoned errors consumed. In-memory SQLite remains on its creating thread.
+- Control acquire/check/renew deadlines include admission+IO and a post-return monotonic
+  check, bounded by min(operation timeout,TTL/4). Stop/fault rechecked after awaits; late
+  acquisitions retained inside workers for release. Idempotent loss latches closed reason
+  codes. Pending file work on cycle timeout/cancel stops further cycles. Async history and
+  restart reads keep the soak sampler off the heartbeat loop too.
+- Cleanup latches stop immediately, drains atomic workers and late acquisitions, releases
+  by owner/generation and closes memory before directory removal; caller cancellation is
+  deferred until cleanup finishes. FULL durability,10s default TTL,15s cycle budget,
+  no replay/reacquisition, physical/media blocks and dependency lock are unchanged.
+- Builder review rulings adopted: async admission before submission (avoid pool starvation),
+  deadlines on delayed successful IO, late-handle retention, repeated-cancel cleanup and
+  in-memory affinity. Targeted initial RED9+4, additional overdue-timer RED1; GREEN55.
+- First full run exposed two deliberate report-contract updates: optional control reason
+  defaultsNone; ownership storage verification failure now faults/ERROR rather than IDLE.
+  Updated assertions to require fail-closed behavior and distinguish verification_error.
+- Initial12s probe inadvertently delayed both recent() delegation and explicit snapshot,
+  totaling24s and correctly triggering the15s timeout. Corrected fixture to one12s delay;
+  no production timeout/TTL was relaxed. Default10s TTL then maintained3 renewals.
+- Final reviewer Important: drain can spin on a completed Future before its callback runs
+  under Python3.12 eager gather behavior. Independently reproduced with a bounded subprocess
+  (RED4s timeout), fixed idempotent completion plus completed-Future pruning. No second review.
+- Final56 target PASS/12.63s; full287 PASS/47.88s. Ruff/format and whitespace pass. Final
+  default-TTL12s delay probe:12.014s,3 renewals, executed, no loss/tasks/API calls.
+  Final paced120.038s:1009cycles/4restarts,8701B growth, task growth0/remaining0, cloud0.
+  Numeric proof records all changed source blobs in validation/2026-11-13-storage-heartbeat.json.
+- Final sdist/wheel and independently installed Mock/MCP/voice/native Opus/memory/soak CLIs
+  pass. This proves the reproduced mechanism fix, not a real Windows24h PASS. Slow control
+  storage or whole-process stalls still fail closed; paid budget IO remains outside scope.
+- Normal existing feature-branch upload and hosted verification follow. No new PR/merge,
+  live device/API, credential changes or cloud environment publication.

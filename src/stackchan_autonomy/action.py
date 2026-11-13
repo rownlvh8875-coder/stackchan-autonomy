@@ -5,8 +5,9 @@ import time
 
 from pydantic import ValidationError
 
+from .async_storage import AsyncStorage, finish_cleanup
 from .control import ControlLease
-from .models import ActionResult, Decision
+from .models import ActionResult, ControlLossReason, Decision
 from .ports import RobotAdapter
 from .safety import SafetyPolicy, UnsafeDecision
 from .settings import Settings
@@ -38,39 +39,86 @@ class ActionExecutor:
         )
         self._lease_handle = None
         self._heartbeat: asyncio.Task | None = None
+        self._storage = AsyncStorage()
+        self._claim_lock = asyncio.Lock()
+        self._close_task: asyncio.Task | None = None
         self.lease_lost = False
+        self.control_loss_reason: ControlLossReason | None = None
         self.on_control_lost = None
 
-    def _lose_control(self):
+    def _lose_control(self, reason: ControlLossReason = "lease_invalid"):
+        if self.lease_lost:
+            return
+        self.control_loss_reason = reason
         self.lease_lost = self.faulted = True
         self.stop()
         if self.on_control_lost is not None:
             self.on_control_lost()
 
-    async def claim_control(self) -> bool:
+    def _acquire_lease(self):
         if self.stopped or self.faulted:
-            return False
-        if self._lease_handle is None:
-            self._lease_handle = self.lease.acquire()
-            if self._lease_handle is None:
+            return None
+        # Retain a late result inside the tracked worker, even if its caller cancels.
+        self._lease_handle = self.lease.acquire()
+        return self._lease_handle
+
+    async def _lease_io(self, operation, *args):
+        # Include admission wait and commit latency; expiry is computed before commit.
+        timeout = min(self.settings.operation_timeout_s, self.lease.ttl_s / 4)
+        started = time.monotonic()
+        async with asyncio.timeout(timeout):
+            result = await self._storage.call(operation, *args)
+        # A descheduled loop may deliver a ready result before its overdue timer.
+        if time.monotonic() - started >= timeout:
+            raise TimeoutError
+        return result
+
+    async def claim_control(self) -> bool:
+        async with self._claim_lock:
+            if self.stopped or self.faulted:
                 return False
-            self._heartbeat = asyncio.create_task(
-                self._renew_control(), name="stackchan-lease-heartbeat"
-            )
-        elif not self.lease.check(self._lease_handle):
-            self._lose_control()
-            return False
-        return True
+            acquiring = self._lease_handle is None
+            try:
+                if acquiring:
+                    handle = await self._lease_io(self._acquire_lease)
+                    if handle is None:
+                        return False
+                    if self.stopped or self.faulted:
+                        return False
+                    self._heartbeat = asyncio.create_task(
+                        self._renew_control(), name="stackchan-lease-heartbeat"
+                    )
+                elif not await self._lease_io(self.lease.check, self._lease_handle):
+                    self._lose_control()
+                    return False
+            except TimeoutError:
+                if not self.stopped:
+                    self._lose_control("acquire_timeout" if acquiring else "check_timeout")
+                raise StateUnavailable("control verification timed out") from None
+            except StateUnavailable:
+                if self._lease_handle is not None and not self.stopped:
+                    self._lose_control("verification_error")
+                raise
+            except asyncio.CancelledError:
+                if not self.stopped:
+                    self._lose_control("verification_cancelled")
+                raise
+            return not self.stopped and not self.faulted
 
     async def _renew_control(self):
         while not self.stopped:
             await asyncio.sleep(self.lease.ttl_s / 3)
+            reason = "renew_rejected"
             try:
-                renewed = self.lease.renew(self._lease_handle)
+                renewed = await self._lease_io(self.lease.renew, self._lease_handle)
+            except TimeoutError:
+                renewed = False
+                reason = "renew_timeout"
             except Exception:
                 renewed = False
+                reason = "renew_error"
             if not renewed:
-                self._lose_control()
+                self._lose_control(reason)
                 return
 
     async def execute(self, decision: Decision, *, explicit_request: bool = False) -> ActionResult:
@@ -117,13 +165,24 @@ class ActionExecutor:
             for t in (self._worker, self._heartbeat)
             if t is not None and t is not asyncio.current_task()
         ]
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(
+                self._close(tasks), name="stackchan-action-cleanup"
+            )
+        await finish_cleanup(self._close_task)
+
+    async def _close(self, tasks):
         await asyncio.gather(*tasks, return_exceptions=True)
-        if self._lease_handle is not None:
-            try:
-                self.lease.release(self._lease_handle)
-            except StateUnavailable:
-                pass  # Leave expiry in place; never erase another owner's lease.
-            self._lease_handle = None
+        try:
+            await self._storage.drain()
+            if self._lease_handle is not None:
+                try:
+                    await self._storage.call(self.lease.release, self._lease_handle)
+                except StateUnavailable:
+                    pass  # Leave expiry in place; never erase another owner's lease.
+                self._lease_handle = None
+        finally:
+            await self._storage.aclose()
 
     async def _consume(self) -> None:
         while True:
@@ -200,9 +259,10 @@ class ActionExecutor:
                 for command in commands:
                     if self.stopped:
                         return ActionResult(code="stopped")
-                    if not self.lease.check(self._lease_handle):
-                        self._lose_control()
-                        return ActionResult(code="device_fault")
+                    if not await self.claim_control():
+                        return ActionResult(code="device_fault" if self.faulted else "stopped")
+                    if self.stopped or self.faulted:
+                        return ActionResult(code="device_fault" if self.faulted else "stopped")
                     await self.robot.execute(command)
                 return ActionResult(executed=True, code="executed")
         except (UnsafeDecision, ValidationError):

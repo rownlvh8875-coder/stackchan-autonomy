@@ -2,6 +2,8 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -10,6 +12,197 @@ from stackchan_autonomy.control import ControlLease
 from stackchan_autonomy.models import Decision
 from stackchan_autonomy.robot import FakeRobotAdapter
 from stackchan_autonomy.settings import Settings
+
+
+async def test_control_deadline_is_checked_even_if_loop_cannot_schedule_timer(monkeypatch):
+    from types import SimpleNamespace
+
+    from stackchan_autonomy import action
+    from stackchan_autonomy.state_store import StateUnavailable
+
+    executor = ActionExecutor(FakeRobotAdapter(), Settings(lease_ttl_s=1.5))
+    assert await executor.claim_control()
+    offset = [0.0]
+    original_call = executor._storage.call
+
+    async def delayed_delivery(*args, **kwargs):
+        value = await original_call(*args, **kwargs)
+        offset[0] += 2  # Model a descheduled loop after the DB result is ready.
+        return value
+
+    monkeypatch.setattr(
+        action, "time", SimpleNamespace(monotonic=lambda: time.monotonic() + offset[0])
+    )
+    monkeypatch.setattr(executor._storage, "call", delayed_delivery)
+    try:
+        with pytest.raises(StateUnavailable):
+            await executor.claim_control()
+        assert executor.control_loss_reason == "check_timeout"
+        assert not executor.robot.history
+    finally:
+        monkeypatch.setattr(executor._storage, "call", original_call)
+        await executor.aclose()
+
+
+async def test_cancelled_slow_acquire_is_drained_and_its_late_handle_released(monkeypatch):
+    settings = Settings(command_interval_s=0)
+    executor = ActionExecutor(FakeRobotAdapter(), settings)
+    started, release = threading.Event(), threading.Event()
+    original = executor.lease.acquire
+
+    def blocked_acquire():
+        started.set()
+        release.wait(3)
+        return original()
+
+    monkeypatch.setattr(executor.lease, "acquire", blocked_acquire)
+    claim = asyncio.create_task(executor.claim_control())
+    closer = None
+    try:
+        async with asyncio.timeout(4):
+            while not started.is_set():
+                await asyncio.sleep(0.001)
+        claim.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await claim
+        assert executor.faulted
+        closer = asyncio.create_task(executor.aclose())
+        await asyncio.sleep(0.02)
+        assert not closer.done()
+        release.set()
+        await closer
+        assert not executor.robot.history
+        contender = ControlLease(settings.state_path, settings.control_resource)
+        assert contender.acquire() is not None
+    finally:
+        release.set()
+        await asyncio.gather(claim, *([closer] if closer else []), return_exceptions=True)
+        await executor.aclose()
+
+
+async def test_stop_during_successful_verification_cannot_dispatch(monkeypatch):
+    executor = ActionExecutor(FakeRobotAdapter(), Settings(command_interval_s=0))
+    assert await executor.claim_control()
+    started, release = threading.Event(), threading.Event()
+    original = executor.lease.check
+
+    def blocked_check(handle):
+        started.set()
+        release.wait(3)
+        return original(handle)
+
+    monkeypatch.setattr(executor.lease, "check", blocked_check)
+    operation = asyncio.create_task(executor.execute(Decision(intent="look", yaw_delta_deg=5)))
+    try:
+        async with asyncio.timeout(4):
+            while not started.is_set():
+                await asyncio.sleep(0.001)
+        executor.stop()
+        release.set()
+        assert not (await operation).executed
+        assert not executor.robot.history
+    finally:
+        release.set()
+        await asyncio.gather(operation, return_exceptions=True)
+        await executor.aclose()
+
+
+async def test_delayed_successful_renewal_times_out_and_cannot_clear_fault(monkeypatch):
+    settings = Settings(command_interval_s=0, lease_ttl_s=1.5)
+    lease = ControlLease(
+        settings.state_path, settings.control_resource, ttl_s=1.5, clock=lambda: 100
+    )
+    executor = ActionExecutor(FakeRobotAdapter(), settings, lease=lease)
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original = lease.renew
+
+    def blocked_renew(handle):
+        started.set()
+        release.wait(4)
+        try:
+            return original(handle)  # Frozen lease clock permits a deliberately late True.
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(lease, "renew", blocked_renew)
+    try:
+        assert await executor.claim_control()
+        async with asyncio.timeout(5):
+            while not executor.faulted:
+                await asyncio.sleep(0.005)
+        assert started.is_set() and not finished.is_set(), "renewal blocked the fault deadline"
+        assert not (await executor.execute(Decision(intent="look", yaw_delta_deg=5))).executed
+        release.set()
+        await executor.aclose()
+        assert finished.is_set() and executor.faulted and executor.lease_lost
+        assert not executor.robot.history
+    finally:
+        release.set()
+        await executor.aclose()
+
+
+@pytest.mark.parametrize("phase", ["acquire", "check"])
+async def test_late_successful_control_io_cannot_authorize_dispatch(monkeypatch, phase):
+    settings = Settings(command_interval_s=0, lease_ttl_s=1.5)
+    lease = ControlLease(
+        settings.state_path, settings.control_resource, ttl_s=1.5, clock=lambda: 100
+    )
+    executor = ActionExecutor(FakeRobotAdapter(), settings, lease=lease)
+    if phase == "check":
+        assert await executor.claim_control()
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original = getattr(lease, phase)
+
+    def blocked(*args):
+        started.set()
+        release.wait(2)
+        try:
+            return original(*args)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(lease, phase, blocked)
+    try:
+        result = await executor.execute(Decision(intent="look", yaw_delta_deg=5))
+        assert not result.executed and not executor.robot.history
+        assert executor.faulted and not finished.is_set()
+        assert executor.control_loss_reason == phase + "_timeout"
+        release.set()
+        await executor.aclose()
+        assert finished.is_set()
+        assert ControlLease(settings.state_path, settings.control_resource).acquire() is not None
+    finally:
+        release.set()
+        await executor.aclose()
+
+
+@pytest.mark.parametrize("phase", ["acquire", "check"])
+async def test_stopped_direct_claim_cannot_return_permission(monkeypatch, phase):
+    executor = ActionExecutor(FakeRobotAdapter(), Settings(command_interval_s=0))
+    if phase == "check":
+        assert await executor.claim_control()
+    started, release = threading.Event(), threading.Event()
+    original = getattr(executor.lease, phase)
+
+    def blocked(*args):
+        started.set()
+        release.wait(2)
+        return original(*args)
+
+    monkeypatch.setattr(executor.lease, phase, blocked)
+    task = asyncio.create_task(executor.claim_control())
+    try:
+        async with asyncio.timeout(3):
+            while not started.is_set():
+                await asyncio.sleep(0.001)
+        executor.stop()
+        release.set()
+        assert not await task
+        assert not executor.robot.history
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        await executor.aclose()
 
 
 async def test_two_executors_cannot_dispatch_same_resource_until_release():
