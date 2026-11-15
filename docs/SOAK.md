@@ -10,7 +10,7 @@ It never connects a robot, opens a public port or calls a paid API.
 uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --report .local/soak/virtual-24h.json
 # Real10-minute paced run, with periodic engine close/recreation.
 uv run --frozen stackchan-soak --duration-s 600 --interval-s 0.2 --report .local/soak/realtime-600s.json
-# Optional real24-hour run on a PC that will stay awake; not executed in this task.
+# Real24-hour PC run; completed user evidence is linked below.
 uv run --frozen stackchan-soak --duration-s 86400 --interval-s 1 --report .local/soak/realtime-24h.json
 ```
 
@@ -43,6 +43,30 @@ Engine closes before its temporary DB directory is removed, including cancellati
 CI runs the accelerated scenario on Windows/Linux × Python3.11/3.12, plus a short
 independently installed wheel/console-entry test. JUnit and the numeric JSON are the
 only artifacts, retained7days. CI does not run a real24-hour soak on each push.
+
+## User Windows run received 2026-11-15 (KST) — real24h PASS
+
+The [original uploaded numeric report](validation/2026-11-15-windows-home-soak-24h-passed.json)
+(`storage-24h-8681-28727.json`) completed the requested86400 real seconds with
+`passed=true`, `virtual_elapsed_s=null`, `violations=[]` and `failure=null`.
+
+| Observation | Result |
+|---|---|
+| Monotonic elapsed | 86400.047s (24h +0.047s) |
+| Cycles / measured after warmup | 83157 /83057 |
+| Engine restarts / restoration checks | 332 /332 |
+| Warmed Python traced growth / peak | 20697B /1138986B |
+| Task growth / remaining tasks | 0 /0 |
+| Memory / transition / fake command history peaks | 100 /100 /64 |
+| Cloud requests | 0 |
+| Maximum cycle / gap / observed wall drift | 4.688s /2.0s /0.016269s |
+
+The preceding operator transcript confirms updating to `f659b39` and passing the
+10-minute check before this retry. The JSON itself has no source SHA or start/end
+timestamps; the date above is receipt date, not an inferred execution date. Its elapsed
+measurement does not independently prove absence of sleep. Preserve both earlier FAIL
+reports as history. This is a completed Windows PC Fake/Mock real-duration test; total
+RSS/native memory, real hardware, media and paid API operation remain separate checks.
 
 ## Failure details — added 2026-11-11
 
@@ -135,7 +159,8 @@ and closes memory before temporary directory removal. Repeated caller cancellati
 propagated after cleanup finishes. An OS-level IO hang can delay cleanup; it does not permit
 more commands. Whole-process stalls, slow control storage and external gateway fencing are
 separate limitations; unsafe ownership still stops. The paid provider's synchronous budget
-path is outside this offline fix. No real device/cloud/24h success is implied.
+path is outside this offline fix. These mechanisms do not by themselves establish
+real device/cloud/24h success; the completed PC24h evidence is recorded above.
 
 Local final validation after hosted refinement:290 tests pass. With the default10s TTL and15s cycle timeout,
 a single12s file-memory delay completed in12.019s with3 successful renewals and no control loss.

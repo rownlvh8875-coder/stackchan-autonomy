@@ -529,3 +529,23 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   pass. Final default10sTTL probe: one12s memory delay/12.019s,3 renewals/no loss/tasks.
   Final paced120.031s:1026cycles/4restarts,17026B growth, tasks0/cloud0. Regenerated numeric
   evidence includes control.py plus all changed runtime source blobs. Hosted retry follows.
+
+## User Windows PC real24h acceptance — received 2026-11-15 (KST)
+
+- Confirmed remote feat/transport-soak at f659b39062ac9b00b2d022336705e3a2fc823c79 and
+  hosted run43367322867 completed successfully. This is the code the operator updated
+  before the successful10-minute check and subsequent real-duration retry.
+- Preserved uploaded storage-24h-8681-28727.json byte-for-byte as
+  validation/2026-11-15-windows-home-soak-24h-passed.json. Validated against SoakReport:
+  passed=true,86400.047 real seconds, virtual_elapsed_s=null,83157cycles/83057measured,
+  332engine restarts/restoration checks,20697B traced growth, tasks0, cloud0, no violations
+  or failure. Cycle/gap/drift maxima4.688s/2.0s/0.016269s. Earlier FAIL evidence is retained.
+- Updated SOAK, test report, next steps and arrival guide to record PC Fake/Mock real24h
+  completion. Receipt date is not an inferred run date; the JSON has no source SHA or
+  start/end timestamps and cannot independently establish absence of sleep. It does not
+  establish total RSS/native memory or real hardware/media/paid API acceptance.
+- Verification: original-byte equality and report schema/count/duration assertions pass;
+  five changed Markdown files pass33 local-link checks, code-fence and whitespace checks.
+  The original JSON retains its Windows CRLF newline; patch whitespace verification uses
+  core.whitespace=trailing-space,space-before-tab,cr-at-eol to recognize that line ending.
+  This update changes evidence/documentation only; no new runtime test result is claimed.

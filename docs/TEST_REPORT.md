@@ -8,7 +8,15 @@
 기존 실시간10분/가상24시간 PASS와 구분한다. Windows 집 노트북 보고서는 9시간46분에
 `engine_failure`로 종료됐다. 두 번째 보고서는9시간24분에 제어권 상실이 확인됐고,
 최대 순환11.796초를 기록했다. 동기 파일 저장이 갱신을 막는 경로를 재현·수정했으며
-정확한 Windows 지연 원인과 실시간24시간 성공은 아직 미검증이다.
+정확한 과거 Windows 지연 원인은 미확정이다. 후속 집 노트북 시험은 실제24시간을 통과했다.
+최신 사용자 보고서 접수일: **2026-11-15 (한국 시간)**.
+[원본 JSON](validation/2026-11-15-windows-home-soak-24h-passed.json)은86400.047초,
+83157회, 엔진 재시작·복원332회, Python 추적 메모리 증가20697B, 태스크 증가/잔류0,
+클라우드 요청0, `passed=true`, `violations=[]`, `failure=null`이다.
+PC Fake/Mock의 실시간24시간 PASS이며 실물 장치·매체·유료 API 검증은 포함하지 않는다.
+보고서 자체에 실행 SHA/시작·종료 시각은 없다. 직전 사용자 로그의 업데이트는 `f659b39`이다.
+[해당 코드의 원격 CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/43367322867)는
+Windows/Linux × Python3.11/3.12 모두 통과했다. 상세 범위는 [SOAK](SOAK.md)를 참고한다.
 아래 2026-11-06 수치는 이전 단계 이력이다.
 후속 HTTP23개·안정성14개를 추가했다. [HTTP 검증](TRANSPORT_TEST_REPORT.md),
 [실시간10분/가상24시간 결과](SOAK.md)를 참고한다.
@@ -173,5 +181,5 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 | 실제 MCP HTTP/auth/ESP32 세션/장치 도구 | BLOCKED: 장치/gateway 없음; 메모리 내 SDK 경로만 PASS |
 | 실물 서보/센서/사진/음성/긴급 정지 | BLOCKED: 장치 없음 및 물리 테스트 승인 없음 |
 | Windows 및 Python 3.11 실행 | 후속 CI PASS: 네 조합 설치/테스트/빌드/wheel; Windows fork/libopus는 SKIP |
-| Phase 5 | 오프라인 음성/API 어댑터·변환은 Mock 검증; 실제 음성/face tracking/dashboard/24h 운영은 미검증 |
+| Phase 5 | 오프라인 음성/API 어댑터·변환은 Mock 검증, Windows PC Mock 실제24h PASS; 실제 음성/face tracking/dashboard/실물24h 운영은 미검증 |
 | 게시된 이전 snapshot 복원 | PASS: 새 환경에서 파일·의존성과 기존 60개 테스트 확인; 이번 후속 변경은 미게시 |
