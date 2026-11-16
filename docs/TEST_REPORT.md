@@ -10,8 +10,12 @@ CLI 연결·초기화·도구 목록 응답 이후 실제 도구 호출과 로�
 원본과 바이트가 같은 보고서, 손상·누락 시 고정 오류, 두 도구의 독립 호출 횟수,
 경로 인자 차단을 검증했다. 독립 wheel 설치에서도 실제 로컬 WebSocket/SDK를 통해
 시험 요약을 조회했고, wheel/sdist의 원본 보고서 무결성과 기존 CLI 동작도 통과했다.
-추가 요약 도구의 현장 음성 확인과 최신 hosted 결과는
-[검증 기록](validation/2026-11-17-official-mcp-soak-summary.json)에 별도로 기록한다.
+최신 [hosted CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/43961041890)는
+925443e에서 Windows/Linux × Python3.11/3.12 모두 통과했다. Linux는 각각360 PASS,
+Windows는 각각358 PASS와 기존 fork/libopus2 SKIP이며, 대상70개는 네 조합 모두 PASS다.
+가속2880회 가상24시간·독립 설치 검증도 모두 통과했다. 네 결과 파일의 수치는
+[검증 기록](validation/2026-11-17-official-mcp-soak-summary.json)에 보관한다.
+추가 요약 도구의 현장 음성 확인은 아직 사용자 확인 대기다.
 원래24시간 시험을 다시 실행한 결과가 아니라, 보관된 PC Fake/Mock 결과를 조회하는 기능 검증이다.
 
 초기 PC MCP 연결 자동 검증 이력: **2026-11-16 / Python3.12 / Linux**.

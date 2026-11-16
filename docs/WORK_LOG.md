@@ -683,3 +683,10 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Fresh whole-change reviewer found no Critical/Important/Minor issues. Independently
   verified source/wheel/sdist bytes and `core.autocrlf=true` resource behavior. No fix
   pass needed. Hosted matrix and operator voice acceptance remain separate checks.
+- Pushed verified source925443e to the existing feature branch. Hosted run43961041890
+  passed all four Windows/Linux Python3.11/3.12 jobs, including build and independent
+  installed connection/summary tools. Downloaded all four JUnit/soak artifacts.
+- Linux:360 PASS each (60.507s/63.449s); Windows:358 PASS +2 expected platform skips
+  each (115.681s/161.816s). Target70 PASS in every job. Accelerated2880-cycle virtual
+  24h scenario PASS in each, no remaining tasks/cloud requests/failure. These CI
+  simulations are not a new real24h or physical-device run. Final update is docs only.

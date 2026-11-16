@@ -89,7 +89,7 @@ records invocations, including unavailable calls; invalid arguments do not count
   expect zero failures. Build with `uv build --out-dir .local/soak-summary-dist`,
   run `uv run --frozen python scripts/ci_verify.py --wheel-dir .local/soak-summary-dist --require-opus`;
   expect installed checks PASS, no real endpoint/device/API used.
-- [ ] Commit; fresh whole-change review, one tested fix pass if necessary, then
+- [x] Commit; fresh whole-change review, one tested fix pass if necessary, then
   normal push to existing `feat/transport-soak` (already authorized), verify all four
   existing Windows/Linux Python3.11/3.12 CI jobs. Record evidence and hand off one
   Windows command at a time. Do not create a PR, merge main or publish environment.

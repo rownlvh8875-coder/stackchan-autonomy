@@ -26,7 +26,76 @@
   "new_24h_test_executed": false,
   "final_review": "passed_no_critical_important_or_minor_findings",
   "hosted_ci": {
-    "status": "pending"
+    "status": "passed",
+    "run_id": 43961041890,
+    "url": "https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/43961041890",
+    "tested_commit": "925443ea27d3be76c5ec9b5a04d259e199e8fe07",
+    "matrix": [
+      {
+        "artifact": "verification-ubuntu-latest-py3.11",
+        "tests_passed": 360,
+        "tests_skipped": 0,
+        "tests_failed": 0,
+        "test_elapsed_s": 60.507,
+        "target_passed": 70,
+        "virtual_soak": {
+          "passed": true,
+          "cycles": 2880,
+          "virtual_elapsed_s": 86400.0,
+          "wall_elapsed_s": 36.20843646899999,
+          "remaining_tasks": 0,
+          "cloud_requests": 0
+        }
+      },
+      {
+        "artifact": "verification-ubuntu-latest-py3.12",
+        "tests_passed": 360,
+        "tests_skipped": 0,
+        "tests_failed": 0,
+        "test_elapsed_s": 63.449,
+        "target_passed": 70,
+        "virtual_soak": {
+          "passed": true,
+          "cycles": 2880,
+          "virtual_elapsed_s": 86400.0,
+          "wall_elapsed_s": 33.62506027399999,
+          "remaining_tasks": 0,
+          "cloud_requests": 0
+        }
+      },
+      {
+        "artifact": "verification-windows-latest-py3.11",
+        "tests_passed": 358,
+        "tests_skipped": 2,
+        "tests_failed": 0,
+        "test_elapsed_s": 115.681,
+        "target_passed": 70,
+        "virtual_soak": {
+          "passed": true,
+          "cycles": 2880,
+          "virtual_elapsed_s": 86400.0,
+          "wall_elapsed_s": 213.45299999999986,
+          "remaining_tasks": 0,
+          "cloud_requests": 0
+        }
+      },
+      {
+        "artifact": "verification-windows-latest-py3.12",
+        "tests_passed": 358,
+        "tests_skipped": 2,
+        "tests_failed": 0,
+        "test_elapsed_s": 161.816,
+        "target_passed": 70,
+        "virtual_soak": {
+          "passed": true,
+          "cycles": 2880,
+          "virtual_elapsed_s": 86400.0,
+          "wall_elapsed_s": 438.93799999999993,
+          "remaining_tasks": 0,
+          "cloud_requests": 0
+        }
+      }
+    ]
   },
   "live_summary_voice_acceptance": "pending_operator_confirmation",
   "reviewed_implementation_commit": "4eb5ef9e76a4c782d6d5e45490a3af4257c0a763",
