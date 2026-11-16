@@ -49,12 +49,12 @@
 - Produces `async run_bridge(endpoint: str, *, emit: Callable[[str], None]) -> None`.
 - Emits fixed lifecycle lines and one per-run six-digit code; tool calls reuse code and increment count.
 
-- [ ] Write RED tests: invalid URL variants/secret-free failures; a real local WebSocket endpoint initializes the real SDK, lists exactly one no-argument tool and calls twice, verifying stable code/incremented count/no robot capability.
-- [ ] Run `.venv/bin/python -m pytest tests/test_official_mcp.py -q`; expect failures because bridge/API is missing, not unrelated fixture failures.
-- [ ] Add websockets15.0.1 through uv and implement the minimal SDK server/transport with the above interfaces. Use test-only monkeypatching of the outbound connection target to keep CLI production endpoint validation intact.
-- [ ] Add RED cases for pre-initialization calls, extra/unknown tool arguments, bad JSON/binary/oversized frames, invalid order, initialization stall, bounded flooding, disconnect and cancellation cleanup; observe each failing before fixing it.
-- [ ] Ensure request admission bounds SDK work itself; fixed errors/privacy-safe library logging. Status response has only service, check_code, uptime_s, call_count and robot_control_available=false.
-- [ ] Run target tests and Ruff checks; expect all pass. Commit core/dependency/tests as one deliverable.
+- [x] Write RED tests: invalid URL variants/secret-free failures; a real local WebSocket endpoint initializes the real SDK, lists exactly one no-argument tool and calls twice, verifying stable code/incremented count/no robot capability.
+- [x] Run `.venv/bin/python -m pytest tests/test_official_mcp.py -q`; expect failures because bridge/API is missing, not unrelated fixture failures.
+- [x] Add websockets15.0.1 through uv and implement the minimal SDK server/transport with the above interfaces. Use test-only monkeypatching of the outbound connection target to keep CLI production endpoint validation intact.
+- [x] Add RED cases for pre-initialization calls, extra/unknown tool arguments, bad JSON/binary/oversized frames, invalid order, initialization stall, bounded flooding, disconnect and cancellation cleanup; observe each failing before fixing it.
+- [x] Ensure request admission bounds SDK work itself; fixed errors/privacy-safe library logging. Status response has only service, check_code, uptime_s, call_count and robot_control_available=false.
+- [x] Run target tests and Ruff checks; expect all pass. Commit core/dependency/tests as one deliverable.
 
 ### Task 2: Secret-safe Windows CLI, packaging and operator handoff
 

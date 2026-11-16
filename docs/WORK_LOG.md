@@ -569,3 +569,11 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Fresh builder check found nothing important left. Inspected the reference extension's
   raw JSON-RPC WebSocket transport; its SDK2 code is a reference only, not copied into our
   pinned SDK1.30 project. Recorded the required Avatar-to-AI-Agent switch for spoken checks.
+
+## Official MCP PC diagnostic implementation — 2026-11-16 (KST)
+
+- User approved the reviewed design. Created an ignored linked worktree; clean baseline290 PASS/64.22s.
+- Core RED18 then expanded29 missing-feature failures; real local WebSocket plus pinned MCP SDK now passes32 tests/0.83s.
+- Added observed RED2 for valid pre-initialization protocol Ping and standard initialization metadata, then accepted them without allowing pre-init tool calls. Added observed RED1 for arbitrary error text crossing the fixed-code boundary.
+- One read-only per-run code/count tool; serial request admission bounds actual SDK task creation, not merely transport queues. Outbound TLS endpoint validation, hidden-value logging isolation, frame limits, initialization timeout and cancellation cleanup are covered. No real endpoint/token/device/provider was used.
+- Added the direct pinned websockets15.0.1 dependency. Core target Ruff and whitespace checks pass; standalone CLI and full/package/hosted validation are next.
