@@ -646,3 +646,14 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   separate. No cloud-side authenticated/device call, runtime/dependency change or new test.
 - Verified six Markdown-only files, local links/fences, absence of JWT/device identifiers
   in the new field record, unchanged runtime/dependency blobs and patch whitespace.
+
+## Official MCP historical soak summary — design, 2026-11-17 (KST)
+
+- User asked to proceed with the recommended voice query for the completed 24-hour
+  test. Inspected the live-verified bridge, source report, existing protocol tests
+  and independent-wheel verification before proposing the extension.
+- Prepared a small [design](superpowers/specs/2026-11-17-official-mcp-soak-summary-design.md):
+  one additional zero-argument read-only tool serving the fixed historical PC Mock
+  report, separate invocation evidence, strict provenance and installed-package support.
+- Design approval is pending. No runtime, dependency, report or firmware change;
+  no live endpoint/device call. Implementation and live voice acceptance remain pending.
