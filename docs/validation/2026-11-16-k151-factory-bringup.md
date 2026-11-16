@@ -55,4 +55,5 @@ PC Fake/Mock의 실제24시간 PASS는 [별도 기록](../SOAK.md)에 있다.
 초기화/계정 해제를 토큰 폐기 수단으로 안내하지 않는다. 실제 토큰은 운영자가 로컬에서만 입력한다.
 
 다음 개발안은 [공식 MCP PC 연결 진단기 설계](../superpowers/specs/2026-11-16-official-mcp-pc-bridge-design.md)에 있다.
-아직 PC 진단기 구현 또는 실제 endpoint 연결을 통과했다고 판정하지 않는다.
+후속 [PC 진단기](../OFFICIAL_MCP_PC.ko.md)의 오프라인 구현 검증은 별도로 추가했다.
+실제 endpoint 연결·현장 도구 호출은 아직 미검증이다.

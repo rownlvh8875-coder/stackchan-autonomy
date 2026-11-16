@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 
 
@@ -21,6 +22,67 @@ def run(command, *, cwd, env):
         encoding="utf-8",
         timeout=180,
     ).stdout
+
+
+def verify_official_mcp(python, binaries, *, cwd, env):
+    cli = binaries / ("stackchan-pc-mcp.exe" if os.name == "nt" else "stackchan-pc-mcp")
+    run([cli, "--help"], cwd=cwd, env=env)
+    probe = textwrap.dedent("""
+        import asyncio, json
+        from contextlib import asynccontextmanager, suppress
+        from websockets.asyncio.client import connect
+        from websockets.asyncio.server import serve
+        import stackchan_autonomy.official_mcp as bridge
+
+        async def main():
+            reply = asyncio.get_running_loop().create_future()
+            release = asyncio.Event()
+            lines = []
+
+            async def peer(socket):
+                async def rpc(request_id, method, params):
+                    await socket.send(json.dumps({"jsonrpc":"2.0", "id":request_id,
+                                                  "method":method, "params":params}))
+                    return json.loads(await socket.recv())
+                try:
+                    await rpc(1, "initialize", {"protocolVersion":"2024-11-05", "capabilities":{},
+                                               "clientInfo":{"name":"wheel-probe", "version":"1"}})
+                    await socket.send(json.dumps({"jsonrpc":"2.0", "method":"notifications/initialized"}))
+                    listing = await rpc(2, "tools/list", {})
+                    assert [t["name"] for t in listing["result"]["tools"]] == ["stackchan_pc_connection_status"]
+                    called = await rpc(3, "tools/call", {"name":"stackchan_pc_connection_status", "arguments":{}})
+                    reply.set_result(called["result"]["structuredContent"])
+                    await release.wait()
+                except Exception as error:
+                    if not reply.done(): reply.set_exception(error)
+
+            async with serve(peer, "127.0.0.1", 0) as server:
+                port = server.sockets[0].getsockname()[1]
+                @asynccontextmanager
+                async def local_only(uri, **kwargs):
+                    assert uri == "wss://api.xiaozhi.me/mcp/?token=offline-wheel-check"
+                    async with connect(f"ws://127.0.0.1:{port}", proxy=None, **kwargs) as socket:
+                        yield socket
+                bridge.connect = local_only
+                task = asyncio.create_task(bridge.run_bridge(
+                    "wss://api.xiaozhi.me/mcp/?token=offline-wheel-check", emit=lines.append))
+                try:
+                    result = await asyncio.wait_for(reply, 10)
+                    assert result["call_count"] == 1 and result["robot_control_available"] is False
+                    assert len(result["check_code"]) == 6
+                    assert any(result["check_code"] in line for line in lines)
+                finally:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError, bridge.BridgeError): await task
+                    release.set()
+            print(json.dumps({"official_mcp":True, "call_count":1, "robot_control_available":False}))
+
+        asyncio.run(main())
+    """)
+    result = json.loads(run([python, "-I", "-c", probe], cwd=cwd, env=env))
+    if result != {"official_mcp": True, "call_count": 1, "robot_control_available": False}:
+        raise RuntimeError("installed official MCP diagnostic failed its offline contract")
+    print("Installed official MCP CLI / real local WebSocket and SDK dialogue: PASS", flush=True)
 
 
 def main():
@@ -204,6 +266,7 @@ def main():
         ):
             raise RuntimeError("installed soak entry point failed the bounded offline contract")
         print("Isolated installed soak entry point / restart checks: PASS", flush=True)
+        verify_official_mcp(python, binaries, cwd=root, env=env)
     return 0
 
 

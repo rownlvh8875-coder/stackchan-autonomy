@@ -7,7 +7,9 @@
 사용자는 출고 펌웨어/공식 앱을 유지하고 **공식 AI가 PC 기능을 호출하는 MCP 확장**을
 먼저 선택했다. [현장 기록](validation/2026-11-16-k151-factory-bringup.md)과
 [PC 연결 진단기 설계 초안](superpowers/specs/2026-11-16-official-mcp-pc-bridge-design.md)을 참고한다.
-이 확장은 아래 PC 엔진의 실물 제어 어댑터와 별도이며 아직 구현/실제 호출은 미검증이다.
+이 확장은 아래 PC 엔진의 실물 제어 어댑터와 별도다.
+[PC 연결 확인 실행 순서](OFFICIAL_MCP_PC.ko.md)에 따라 목록 등록·실제 호출·음성 코드 일치를
+각각 확인한다. 실제 토큰/장치에서의 호출은 아직 미검증이다.
 
 ## Phase 4 — 계약 검증 후 실제 MCP Adapter
 

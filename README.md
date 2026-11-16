@@ -138,6 +138,10 @@ namespace, 한도**를 설정해야 한다. [설정·복구·보장 범위](docs
 
 ## 실제 장치 연결
 
+출고 펌웨어와 공식 앱을 유지하는 [PC 연결 확인 도구](docs/OFFICIAL_MCP_PC.ko.md)를 제공한다.
+`stackchan-pc-mcp`는 공식 AI에 읽기 전용 PC 도구 하나를 등록하는 별도 확장이다.
+PC OpenAI 엔진의 로봇 직접 제어 또는 음성 backend 교체와는 구분한다.
+
 제품 없이 가능한 [실제 로컬 HTTP 검증](docs/TRANSPORT_TEST_REPORT.md)과
 [장시간 Mock 안정성 도구](docs/SOAK.md)를 제공한다. `stackchan-soak`은 사용자
 설정/DB를 읽지 않고 전용 임시 환경에서 실행하며 실제 시간과 가상 시간을 구분한다.
@@ -146,7 +150,7 @@ namespace, 한도**를 설정해야 한다. [설정·복구·보장 범위](docs
 `discover()`, `status()`, `touch_state()`는 도구·상태·절대 각도·터치의 읽기 전용 점검이다.
 실제 장치의 쓰기/촬영/녹음 경로는 아직 차단돼 있다.
 기본 MCP 주소는 127.0.0.1:8767/mcp이며 추가 ESP32 gateway를 띄우지 않는다.
-네트워크 인증과 실제 HTTP transport는 테스트하지 않았다. 읽기 전용 연결도
+네트워크 인증과 HTTP transport는 로컬 fixture로 검증했다. 실제 장치 gateway의 읽기 전용 연결은
 사용자가 지정한 gateway가 준비된 후에만 수행한다. 이번 작업은 해당 연결을 실행하지 않았다.
 
 `--mode mcp-sim`은 factory가 자체 생성한 메모리 내 server/client만 사용한다.

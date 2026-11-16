@@ -577,3 +577,12 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Added observed RED2 for valid pre-initialization protocol Ping and standard initialization metadata, then accepted them without allowing pre-init tool calls. Added observed RED1 for arbitrary error text crossing the fixed-code boundary.
 - One read-only per-run code/count tool; serial request admission bounds actual SDK task creation, not merely transport queues. Outbound TLS endpoint validation, hidden-value logging isolation, frame limits, initialization timeout and cancellation cleanup are covered. No real endpoint/token/device/provider was used.
 - Added the direct pinned websockets15.0.1 dependency. Core target Ruff and whitespace checks pass; standalone CLI and full/package/hosted validation are next.
+- CLI RED11 then GREEN: hidden input/EOF/warning failures, non-TTY behavior, no app dotenv,
+  invalid URL before dial, secret argv without argparse echo, fixed error exits and Ctrl+C130.
+  Combined target43 PASS/1.31s; full333 PASS/67.38s. Ruff/format/whitespace checks pass.
+- Built sdist/wheel and independently installed it with locked dependencies. Existing
+  Mock/MCP/voice/native Opus/memory/soak checks and the new installed console plus actual
+  local WebSocket/SDK initialize/list/call all pass. No real endpoint/token/device was used.
+- Added one-command-at-a-time Korean operator flow, local-only secret entry, distinct
+  registration/invocation/spoken-code acceptance and Avatar-to-AI-Agent guidance.
+  Final independent review and hosted Windows/Linux validation follow before user handoff.
