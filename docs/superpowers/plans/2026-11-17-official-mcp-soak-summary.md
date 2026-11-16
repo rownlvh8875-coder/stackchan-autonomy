@@ -1,6 +1,6 @@
 # Official MCP soak summary implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Let the official robot AI query the completed home PC 24-hour soak report.
 
@@ -46,17 +46,17 @@ Reads only the fixed `importlib.resources` package resource with a 16KiB bound.
 SHA-256 `8ddbad0964b2249ed4d2b474b90836585f547b6e53d980c6d99f60eccc1cb728`
 identifies the validated original bytes/fields. Pin both report paths to `-text`.
 
-- [ ] Write `test_summary_is_historical_pc_mock_wall_clock_evidence`: assert receipt
+- [x] Write `test_summary_is_historical_pc_mock_wall_clock_evidence`: assert receipt
   date/basis, scope, historical/time mode, hardware=false, memory scope, PASS,
   86400.047 actual/86400 requested seconds, 83157 cycles, 332 restarts/restorations,
   20697 traced bytes, zero tasks/cloud and no failure/violations; no extra file text.
-- [ ] Write `test_resource_matches_original_evidence_bytes` and parameterized
+- [x] Write `test_resource_matches_original_evidence_bytes` and parameterized
   `test_unavailable_resource_never_becomes_pass_or_discloses_contents` using real
   temporary resources: missing file, malformed/extra/changed JSON, invalid numeric
   types, non-finite values, wrong duration/scope and >16KiB. Assert fixed error only.
-- [ ] Run `uv run --frozen pytest -q tests/test_soak_summary.py`; observe missing
+- [x] Run `uv run --frozen pytest -q tests/test_soak_summary.py`; observe missing
   feature failures, then implement the loader and package the unmodified bytes.
-- [ ] Run the same command to PASS; commit `feat: package verified historical soak summary`.
+- [x] Run the same command to PASS; commit `feat: package verified historical soak summary`.
 
 ### Task 2: MCP tool, installed wheel proof and operator guide
 
