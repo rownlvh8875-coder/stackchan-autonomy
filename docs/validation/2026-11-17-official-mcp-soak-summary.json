@@ -5,8 +5,17 @@
   "source_report": "2026-11-15-windows-home-soak-24h-passed.json",
   "source_sha256": "8ddbad0964b2249ed4d2b474b90836585f547b6e53d980c6d99f60eccc1cb728",
   "scope": "offline_local_websocket_and_pinned_mcp_sdk",
-  "target_tests": {"passed": 70, "failed": 0, "elapsed_s": 1.41},
-  "full_tests": {"passed": 360, "failed": 0, "skipped": 0, "elapsed_s": 62.0},
+  "target_tests": {
+    "passed": 70,
+    "failed": 0,
+    "elapsed_s": 1.41
+  },
+  "full_tests": {
+    "passed": 360,
+    "failed": 0,
+    "skipped": 0,
+    "elapsed_s": 62.0
+  },
   "lint_and_format": "passed",
   "wheel_and_sdist_original_report_bytes": "passed",
   "independent_wheel_connection_and_summary_calls": "passed",
@@ -15,7 +24,11 @@
   "paid_api_called": false,
   "device_actuated": false,
   "new_24h_test_executed": false,
-  "final_review": "pending",
-  "hosted_ci": {"status": "pending"},
-  "live_summary_voice_acceptance": "pending_operator_confirmation"
+  "final_review": "passed_no_critical_important_or_minor_findings",
+  "hosted_ci": {
+    "status": "pending"
+  },
+  "live_summary_voice_acceptance": "pending_operator_confirmation",
+  "reviewed_implementation_commit": "4eb5ef9e76a4c782d6d5e45490a3af4257c0a763",
+  "independent_review_autocrlf_true_resource_check": "passed"
 }
