@@ -614,3 +614,20 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Ruling: support the pinned SDK's valid post-initialize-response request lifecycle instead
   of requiring an extra client notification gate. Cost: initialization readiness accepts
   the same post-response sequence as the SDK; calls before initialization stay blocked.
+
+### Hosted Windows scheduler fixture refinement
+
+- Runtime85f4230 hosted run43884297524 passed both Linux jobs and Windows3.11. Windows3.12
+  reported340 tests,1 failure,2 skips: the existing remaining-lifetime heartbeat test
+  failed its not-faulted assertion. Its report does not identify a control-loss reason
+  or the exact slow Windows operation; the new PC bridge tests did not fail.
+- The fixture left about0.5s of a1.5s lease after real acquisition delivery, then required
+  actual disk renewal to keep ownership. A controlled0.45s renewal delay reproduced
+  failure with the correct renew_timeout safety stop. Do not turn that valid stop into PASS.
+- Ruling: isolate this one scheduling-policy test with a controlled monotonic clock,
+  lease and inline storage. It requires renewal strictly after delivery and before known
+  expiry; a mutation using the old full-TTL/3 schedule was observed RED, while the correct
+  policy passes. Existing real SQLite heartbeat/contender/expiry tests remain unchanged.
+  Cost: this unit tests scheduling rather than incidental filesystem throughput.
+- Revised full suite340 PASS/61.31s. Production runtime modules are byte-identical to
+  the verified release wheel; no TTL/timeouts/durability/runtime change. Hosted retry follows.

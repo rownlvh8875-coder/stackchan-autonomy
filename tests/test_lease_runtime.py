@@ -79,22 +79,69 @@ async def test_valid_verification_uses_remaining_lifetime_not_a_fixed_fraction(m
 
 
 async def test_heartbeat_schedules_from_remaining_lifetime_after_slow_acquire(monkeypatch):
+    from types import SimpleNamespace
+
+    from stackchan_autonomy import action
+    from stackchan_autonomy.control import LeaseHandle
+
+    # Isolate scheduling policy from filesystem latency. Real SQLite renewal and
+    # expiry are covered by test_live_heartbeat_renews_ownership_until_close and
+    # test_lease_expiry_blocks_next_command_without_reacquisition below.
+    now = [0.0]
+    renewed = asyncio.Event()
+    park = asyncio.Event()
+    renew_times = []
     settings = Settings(lease_ttl_s=1.5)
-    executor = ActionExecutor(FakeRobotAdapter(), settings)
-    original = executor.lease.acquire
 
-    def slow_commit_delivery():
-        handle = original()
-        time.sleep(1)  # Only about0.5s of this lease remains when the caller sees it.
-        return handle
+    class ControlledLease:
+        ttl_s = 1.5
+        valid_until_monotonic = None
+        handle = LeaseHandle(settings.control_resource, "controlled-owner", 1)
 
-    monkeypatch.setattr(executor.lease, "acquire", slow_commit_delivery)
+        def acquire(self):
+            self.valid_until_monotonic = 1.5
+            now[0] = 1.0  # Only0.5s remains when the caller receives this lease.
+            return self.handle
+
+        def check(self, handle):
+            return handle == self.handle and now[0] < self.valid_until_monotonic
+
+        def renew(self, handle):
+            if not self.check(handle):
+                return False
+            renew_times.append(now[0])
+            self.valid_until_monotonic = now[0] + self.ttl_s
+            renewed.set()
+            return True
+
+        def release(self, handle):
+            return handle == self.handle
+
+    class ControlledAsyncio:
+        def __getattr__(self, name):
+            return getattr(asyncio, name)
+
+        async def sleep(self, delay):
+            if renew_times:
+                await park.wait()
+            else:
+                now[0] += delay
+                await asyncio.sleep(0)
+
+    async def inline_storage(operation, *args, **kwargs):
+        return operation(*args, **kwargs)
+
+    monkeypatch.setattr(action, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(action, "asyncio", ControlledAsyncio())
+    executor = ActionExecutor(FakeRobotAdapter(), settings, lease=ControlledLease())
+    monkeypatch.setattr(executor._storage, "call", inline_storage)
+
     try:
         assert await executor.claim_control()
-        await asyncio.sleep(1)
-        assert not executor.faulted
-        contender = ControlLease(settings.state_path, settings.control_resource)
-        assert contender.acquire() is None
+        await asyncio.wait_for(renewed.wait(), 2)
+        assert not executor.faulted, executor.control_loss_reason
+        assert len(renew_times) == 1
+        assert 1.0 < renew_times[0] < 1.5
     finally:
         await executor.aclose()
 
