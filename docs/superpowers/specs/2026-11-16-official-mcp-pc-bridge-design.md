@@ -1,6 +1,6 @@
 # Official MCP PC connection diagnostic — design
 
-Date: 2026-11-16 (KST). Status: DRAFT, implementation approval pending.
+Date: 2026-11-16 (KST). Status: APPROVED for implementation by the user in chat.
 Fresh builder check completed: nothing important left.
 
 ## 사용자에게 보이는 결과
@@ -125,7 +125,7 @@ Until those observations arrive, report live integration as unverified.
 
 ## Remaining work and builder decisions
 
-Implementation has not started. The builder owns internal task supervision, test transport
+The user approved implementing this design. The builder owns internal task supervision, test transport
 seams, exact WebSocket version and small naming details consistent with this contract.
 The single read-only tool is the whole initial scope. Other PC functions, automatic startup,
 24h service management, motor/media control and the independent PC OpenAI engine are follow-ups.
