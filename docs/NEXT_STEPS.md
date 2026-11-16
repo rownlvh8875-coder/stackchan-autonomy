@@ -3,6 +3,12 @@
 제품 도착 후 사용자 작업 순서는 [상세 작업설명서](DEVICE_ARRIVAL_RUNBOOK.ko.md)의 D00–D10을
 따른다. 아래 개발 과제는 D03–D04의 호환성/물리 어댑터 체크포인트에서 실행한다.
 
+2026-11-16: K151 V1.6.2의 제조사 서비스·PC Ping·공식 앱 Local Network를 확인했다.
+사용자는 출고 펌웨어/공식 앱을 유지하고 **공식 AI가 PC 기능을 호출하는 MCP 확장**을
+먼저 선택했다. [현장 기록](validation/2026-11-16-k151-factory-bringup.md)과
+[PC 연결 진단기 설계 초안](superpowers/specs/2026-11-16-official-mcp-pc-bridge-design.md)을 참고한다.
+이 확장은 아래 PC 엔진의 실물 제어 어댑터와 별도이며 아직 구현/실제 호출은 미검증이다.
+
 ## Phase 4 — 계약 검증 후 실제 MCP Adapter
 
 현재 구현: MCPRobotAdapter.connect/discover/status/touch_state, 공개 Tool 스키마와

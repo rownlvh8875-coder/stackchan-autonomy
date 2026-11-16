@@ -549,3 +549,23 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   The original JSON retains its Windows CRLF newline; patch whitespace verification uses
   core.whitespace=trailing-space,space-before-tab,cr-at-eol to recognize that line ending.
   This update changes evidence/documentation only; no new runtime test result is claimed.
+
+## K151 factory bring-up and PC extension direction — 2026-11-16 (KST)
+
+- User confirmed K151, photographed firmware V1.6.2 and mobile app v1.2.12. Factory
+  service checks show Xiaozhi and M5Stack HTTP200. After an initial host-unreachable
+  Ping, ARP was present and the target answered4/4 with67–253ms. Exact initial cause
+  is unknown. User confirmed Local Network in the official Motion page.
+- Rechecked official main SHA28b9f0c8bd6acd81cb3c70f1a93c3e373b39d400 against GitHub.
+  Source shows robot-to-phone LAN connection, separate external MCP tool endpoint,
+  app-version display and empty-tool-list Offline rendering. Production Avatar client
+  compatibility cannot be inferred from the public example URL/key configuration.
+- Read manufacturer issue126 answer and linked external endpoint example. Official
+  MCP extensions preserve firmware/app but retain the official voice/AI pipeline.
+  User explicitly selected that PC-function extension before direct PC OpenAI control.
+- Recorded redacted field evidence and a one-tool PC connection diagnostic design.
+  No runtime implementation, dependencies, token use, device/paid API calls, firmware
+  changes or account resets. Full hardware acceptance and live PC tool use remain pending.
+- Fresh builder check found nothing important left. Inspected the reference extension's
+  raw JSON-RPC WebSocket transport; its SDK2 code is a reference only, not copied into our
+  pinned SDK1.30 project. Recorded the required Avatar-to-AI-Agent switch for spoken checks.
