@@ -49,7 +49,7 @@ Official MCP endpoint (hidden input):
 |---|---|
 | `OFFICIAL_MCP_CONNECTING` | 접속 시도 중 |
 | `OFFICIAL_MCP_CONNECTED` | WebSocket 연결 성공; 도구 등록은 아직 별도 |
-| `OFFICIAL_MCP_INITIALIZED` | MCP 초기화 안내 수신 |
+| `OFFICIAL_MCP_INITIALIZED` | 초기화 응답 후 정상 완료 알림 또는 후속 요청 확인 |
 | `PC_CHECK_CODE=123456` | 이 실행의 6자리 진단 코드; 실행마다 달라짐 |
 | `OFFICIAL_MCP_TOOLS_LISTED` | 서버가 PC 도구 목록을 요청했고 응답을 보냄 |
 | `PC_TOOL_CALLED=1` | 실제 PC 연결 확인 도구가 한 번 호출됨 |
@@ -81,11 +81,14 @@ Official MCP endpoint (hidden input):
 | `OFFICIAL_MCP_INVALID_ENDPOINT` | 앱 복사 버튼의 전체 주소인지 확인; 토큰 없이 주소를 재작성하지 않음 |
 | `OFFICIAL_MCP_SECRET_INPUT_UNAVAILABLE` | 일반 cmd에서 직접 실행; 숨김 입력을 지원하지 않는 리디렉션/도구 사용 여부 확인 |
 | `OFFICIAL_MCP_ARGUMENTS_INVALID` | 실행 명령 뒤에 주소나 다른 값을 붙였는지 확인 |
-| `OFFICIAL_MCP_INITIALIZATION_TIMEOUT` | 연결 후30초 동안 초기화가 오지 않음; 앱 접속점 상태와 공식 서비스 확인 |
+| `OFFICIAL_MCP_INITIALIZATION_TIMEOUT` | 연결 후30초 동안 초기화와 후속 통신이 완료되지 않음; 앱 접속점 상태와 공식 서비스 확인 |
 | `OFFICIAL_MCP_REMOTE_CLOSED` / `OFFICIAL_MCP_CONNECTION_FAILED` | 네트워크·인증·공식 서비스 상태 확인; 주소/원시 예외를 공유하지 않음 |
 | `OFFICIAL_MCP_PROTOCOL_FAILED` | 지원하지 않는 메시지/순서/크기; 고정 코드와 발생 단계로 조사 |
+| `OFFICIAL_MCP_REDIRECT_REJECTED` | 접속점이 다른 주소로 이동을 요구함; 앱의 최신 주소와 공식 서비스 안내 확인 |
 
 잘못된 입력은 종료 코드2, 연결/프로토콜 오류는1이다. 오류에 토큰·원시 응답·traceback을 출력하지 않는다.
+허용한 접속주소를 벗어나지 않도록 자동 리다이렉트도 따라가지 않는다.
+이미 끝난 호출에 대한 정상 취소 알림은 연결을 끊지 않고 처리한다.
 프로그램 자체는 OpenAI API를 호출하지 않는다. 로봇의 공식 음성·AI 서비스 이용 조건은 별도다.
 
 노출된 토큰의 폐기는 제조사 지원으로 확인한다. 새 토큰 요청이나 계정 해제/초기화가 이전 토큰을

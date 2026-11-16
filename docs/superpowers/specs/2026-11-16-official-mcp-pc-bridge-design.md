@@ -129,3 +129,16 @@ The user approved implementing this design. The builder owns internal task super
 seams, exact WebSocket version and small naming details consistent with this contract.
 The single read-only tool is the whole initial scope. Other PC functions, automatic startup,
 24h service management, motor/media control and the independent PC OpenAI engine are follow-ups.
+
+## Implementation decisions after independent review
+
+- Pinned SDK1.30 typed-validation errors also use root logging. The dedicated bridge
+  mutes named library and root handlers during its lifecycle, then restores them.
+  Embedding alongside unrelated logging is outside the standalone process contract.
+- Validate standard initialized/cancelled notifications. Late/unknown cancellation is
+  harmless after serial response admission and does not enqueue additional SDK work.
+- Reject automatic WebSocket redirects to keep every dial at the approved endpoint.
+  A valid future service redirect requires checking the operator's current app endpoint.
+- Match the pinned SDK's accepted lifecycle: after the initialize response, a client
+  may list/call tools before sending initialized notification. Accept that sequence and
+  one later valid notification; keep rejecting tool calls before an initialize response.

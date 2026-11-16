@@ -586,3 +586,31 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Added one-command-at-a-time Korean operator flow, local-only secret entry, distinct
   registration/invocation/spoken-code acceptance and Avatar-to-AI-Agent guidance.
   Final independent review and hosted Windows/Linux validation follow before user handoff.
+- Fresh whole-branch reviewer independently ran43 target tests and identified Important2:
+  SDK typed-validation failures leak via root logging, and normal late cancellation
+  disconnects the session. Reproduced both with the real SDK, including unknown methods
+  and malformed initialization metadata. The dedicated process now protects root handlers
+  as well as named loggers, validates initialization and tolerates valid late/unknown cancellation.
+- Reviewer set redirects aside without a demonstrated failure. A new two-local-server
+  reproduction showed automatic connection to a nonapproved redirect destination.
+  Ruling: grade as Important under the endpoint allowlist and reject all automatic redirects;
+  cost: a legitimate future redirect needs an updated operator endpoint instead of transparent following.
+- One fix pass observed6 RED regressions, then combined target49 PASS/1.60s. Full suite,
+  rebuilt package and installed-wheel checks of the fixed source follow; no second review.
+- Review rulings: outer URL whitespace trimming remains intentional; unknown nonstandard
+  notifications remain fixed protocol failures (future extension messages may need support).
+  The bridge is a dedicated single-session process, so scoped suppression of unrelated root
+  logs is accepted; concurrent embedding is unsupported. Live service/Windows console/spoken
+  acceptance requires operator/CI evidence. Hardware/media/OpenAI direct control remains excluded.
+- The pinned SDK accepts tool requests immediately after its initialize response, while
+  our first transport added a stricter notification gate. A further observed RED regression
+  now covers that supported sequence and one later valid notification. It passes without
+  permitting tool calls before initialization or emitting the check code twice.
+  Final target50 PASS/1.33s; final full/package verification is being recorded below.
+- Final fixed source: target50 PASS/1.33s, full340 PASS/64.46s, Ruff/format88files and
+  whitespace/docs checks pass. Rebuilt sdist/wheel; both runtime modules match wheel bytes.
+  Independent installed Mock/MCP/voice/native Opus/memory/soak and new local WebSocket/SDK
+  tool dialogue pass. These supersede pre-fix333/339-suite results. Hosted publication follows.
+- Ruling: support the pinned SDK's valid post-initialize-response request lifecycle instead
+  of requiring an extra client notification gate. Cost: initialization readiness accepts
+  the same post-response sequence as the SDK; calls before initialization stay blocked.

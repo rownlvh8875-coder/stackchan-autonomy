@@ -70,7 +70,7 @@
 - [x] Add independent wheel smoke for installed entry point and an offline MCP dialogue using the installed bridge; no real endpoint.
 - [x] Write Korean instructions with one command per block: update checkout, then standalone run, hidden local endpoint input, MCP catalog check, switch body from Avatar to AI Agent, spoken-code match. Separate registration/call/spoken acceptance and explain official AI pipeline/PC uptime requirement.
 - [x] Run target tests, then full `pytest -q`, Ruff check/format, diff checks, build and independent wheel verification. Expect no regressions; record exact outcomes.
-- [ ] Commit implementation/docs. Obtain one fresh whole-branch review; fix Important/Critical findings with observed RED→GREEN and one green full-suite pass. Do not add unrelated polish.
+- [x] Commit implementation/docs. Obtain one fresh whole-branch review; fix Important/Critical findings with observed RED→GREEN and one green full-suite pass. Do not add unrelated polish.
 - [ ] Normal push to existing feat/transport-soak, inspect hosted Windows/Linux matrix and numeric/JUnit artifacts. Give the user only the next one-command update step after those gates pass; live tool use remains pending operator evidence.
 
 ## Execution ruling

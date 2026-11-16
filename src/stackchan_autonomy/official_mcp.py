@@ -11,7 +11,7 @@ import anyio
 from mcp import types
 from mcp.server import Server
 from mcp.shared.message import SessionMessage
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import connect as _WebSocketConnect
 from websockets.exceptions import ConnectionClosed
 
 INITIALIZATION_TIMEOUT_S = 30.0
@@ -26,6 +26,7 @@ _ERROR_CODES = frozenset(
         "OFFICIAL_MCP_REMOTE_CLOSED",
         "OFFICIAL_MCP_INITIALIZATION_TIMEOUT",
         "OFFICIAL_MCP_OUTPUT_FAILED",
+        "OFFICIAL_MCP_REDIRECT_REJECTED",
         "PC_TOOL_UNSUPPORTED",
     }
 )
@@ -37,6 +38,17 @@ class BridgeError(Exception):
     def __init__(self, code: str):
         self.code = code if code in _ERROR_CODES else "OFFICIAL_MCP_CONNECTION_FAILED"
         super().__init__(self.code)
+
+
+class _SingleEndpointConnect(_WebSocketConnect):
+    def process_redirect(self, error: Exception) -> Exception | str:
+        result = super().process_redirect(error)
+        if isinstance(result, str):
+            return BridgeError("OFFICIAL_MCP_REDIRECT_REJECTED")
+        return result
+
+
+connect = _SingleEndpointConnect
 
 
 def validate_endpoint(value: str) -> str:
@@ -83,6 +95,9 @@ def _private_library_logs():
         if isinstance(logger, logging.Logger)
         and any(name == root or name.startswith(root + ".") for root in roots)
     ]
+    # MCP1.30 also calls logging.warning/debug directly for typed validation.
+    # This is a dedicated process; protect and later restore the root handlers too.
+    loggers.append(logging.getLogger())
     previous = [(logger, logger.handlers[:], logger.propagate) for logger in loggers]
     try:
         for logger in loggers:
@@ -172,12 +187,21 @@ async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
         initialized = anyio.Event()
         stage = "new"
         init_response_sent = False
+        initialized_notification_seen = False
         pending_id: str | int | None = None
         pending_method: str | None = None
         response_sent: anyio.Event | None = None
 
+        def mark_ready():
+            nonlocal stage
+            stage = "ready"
+            if not initialized.is_set():
+                initialized.set()
+                report("OFFICIAL_MCP_INITIALIZED")
+                report(f"PC_CHECK_CODE={check_code}")
+
         async def read_socket():
-            nonlocal stage, pending_id, pending_method, response_sent
+            nonlocal stage, pending_id, pending_method, response_sent, initialized_notification_seen
             while True:
                 try:
                     frame = await socket.recv()
@@ -195,8 +219,13 @@ async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
                         if stage != "new":
                             raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
                         stage = "initializing"
-                    elif root.method != "ping" and stage != "ready":
-                        raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
+                    else:
+                        # MCP1.30 accepts requests after the initialize reply. Some
+                        # compatible clients list tools before sending the notification.
+                        if stage == "initializing" and init_response_sent:
+                            mark_ready()
+                        if root.method != "ping" and stage != "ready":
+                            raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
                     pending_id, pending_method = root.id, root.method
                     response_sent = anyio.Event()
                     await incoming.send(SessionMessage(message))
@@ -207,14 +236,28 @@ async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
                 elif (
                     isinstance(root, types.JSONRPCNotification)
                     and root.method == "notifications/initialized"
-                    and stage == "initializing"
+                    and stage in {"initializing", "ready"}
                     and init_response_sent
+                    and not initialized_notification_seen
                 ):
-                    stage = "ready"
+                    try:
+                        types.InitializedNotification.model_validate(root.model_dump())
+                    except Exception:
+                        raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED") from None
+                    initialized_notification_seen = True
                     await incoming.send(SessionMessage(message))
-                    initialized.set()
-                    report("OFFICIAL_MCP_INITIALIZED")
-                    report(f"PC_CHECK_CODE={check_code}")
+                    mark_ready()
+                elif (
+                    isinstance(root, types.JSONRPCNotification)
+                    and root.method == "notifications/cancelled"
+                ):
+                    try:
+                        types.CancelledNotification.model_validate(root.model_dump())
+                    except Exception:
+                        raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED") from None
+                    # The serial reader cannot process cancellation until the prior
+                    # response is written. Completed/unknown IDs are harmless no-ops;
+                    # forwarding them would add unnecessary SDK notification work.
                 else:
                     raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
 

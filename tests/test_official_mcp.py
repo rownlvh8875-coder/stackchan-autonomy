@@ -191,6 +191,35 @@ async def test_initialized_notification_accepts_standard_metadata(monkeypatch):
         assert len(listing["result"]["tools"]) == 1
 
 
+async def test_catalog_after_initialize_reply_matches_sdk_compatible_clients(monkeypatch):
+    module = bridge_module()
+
+    async def peer(socket):
+        response = await request(
+            socket,
+            1,
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "sdk-compatible-endpoint", "version": "1"},
+            },
+        )
+        assert "result" in response
+        listing = await request(socket, 2, "tools/list", {})
+        assert len(listing["result"]["tools"]) == 1
+        await socket.send(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        return await request(
+            socket, 3, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
+        )
+
+    async with local_endpoint(module, monkeypatch, peer) as (task, result, lines):
+        called = await asyncio.wait_for(result, 5)
+        assert not task.done()
+        assert called["result"]["structuredContent"]["call_count"] == 1
+        assert len([line for line in lines if line.startswith("PC_CHECK_CODE=")]) == 1
+
+
 async def test_rejected_tool_calls_cannot_increment_real_call_count(monkeypatch):
     module = bridge_module()
 
@@ -318,6 +347,149 @@ async def test_library_logging_and_connection_exceptions_do_not_leak_endpoint(
     assert "synthetic-endpoint-secret" not in observed
     assert "private server reason" not in observed
     assert "api.xiaozhi.me" not in observed
+
+
+@pytest.mark.parametrize(
+    "method,params",
+    [
+        ("tools/call", {"name": ["synthetic-review-secret"]}),
+        ("synthetic-review-secret", {}),
+    ],
+)
+async def test_sdk_typed_validation_cannot_leak_via_root_logger(
+    monkeypatch, caplog, capsys, method, params
+):
+    module = bridge_module()
+
+    async def peer(socket):
+        await initialize(socket)
+        invalid = await request(socket, 2, method, params)
+        assert "error" in invalid
+        return await request(
+            socket, 3, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
+        )
+
+    with caplog.at_level(logging.DEBUG):
+        async with local_endpoint(module, monkeypatch, peer) as (_, result, lines):
+            valid = await asyncio.wait_for(result, 5)
+            assert valid["result"]["structuredContent"]["call_count"] == 1
+        observed = caplog.text + str(capsys.readouterr()) + "\n".join(lines)
+    assert "synthetic-review-secret" not in observed
+
+
+async def test_malformed_initialized_notification_is_private_and_not_marked_ready(
+    monkeypatch, caplog, capsys
+):
+    module = bridge_module()
+
+    async def peer(socket):
+        await request(
+            socket,
+            1,
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "offline-endpoint", "version": "1"},
+            },
+        )
+        await socket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized",
+                    "params": {"_meta": ["synthetic-review-secret"]},
+                }
+            )
+        )
+        await socket.wait_closed()
+
+    with caplog.at_level(logging.DEBUG):
+        async with local_endpoint(module, monkeypatch, peer) as (task, _, lines):
+            with pytest.raises(module.BridgeError):
+                await asyncio.wait_for(asyncio.shield(task), 2)
+            assert "OFFICIAL_MCP_INITIALIZED" not in lines
+        observed = caplog.text + str(capsys.readouterr()) + "\n".join(lines)
+    assert "synthetic-review-secret" not in observed
+
+
+@pytest.mark.parametrize("cancelled_id", [2, 999])
+async def test_standard_late_or_unknown_cancellation_keeps_session_usable(
+    monkeypatch, cancelled_id
+):
+    module = bridge_module()
+
+    async def peer(socket):
+        await initialize(socket)
+        first = await request(
+            socket, 2, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
+        )
+        await socket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/cancelled",
+                    "params": {"requestId": cancelled_id, "reason": "user cancelled"},
+                }
+            )
+        )
+        second = await request(
+            socket, 3, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
+        )
+        return first["result"]["structuredContent"], second["result"]["structuredContent"]
+
+    async with local_endpoint(module, monkeypatch, peer) as (task, result, _):
+        first, second = await asyncio.wait_for(result, 5)
+        assert not task.done()
+        assert [first["call_count"], second["call_count"]] == [1, 2]
+        assert first["check_code"] == second["check_code"]
+
+
+async def test_automatic_redirect_cannot_reach_a_nonofficial_endpoint(monkeypatch):
+    from http import HTTPStatus
+
+    from websockets.asyncio.server import serve
+
+    module = bridge_module()
+    original_connect = module.connect
+    target_reached = asyncio.Event()
+
+    async def target(socket):
+        target_reached.set()
+        await socket.wait_closed()
+
+    async with serve(target, "127.0.0.1", 0) as target_server:
+        target_port = target_server.sockets[0].getsockname()[1]
+
+        async def redirect(connection, request):
+            response = connection.respond(HTTPStatus.FOUND, "")
+            response.headers["Location"] = f"ws://127.0.0.1:{target_port}/?token=synthetic-redirect"
+            return response
+
+        async with serve(target, "127.0.0.1", 0, process_request=redirect) as redirect_server:
+            port = redirect_server.sockets[0].getsockname()[1]
+
+            def dial(uri, **kwargs):
+                return original_connect(f"ws://127.0.0.1:{port}", proxy=None, **kwargs)
+
+            monkeypatch.setattr(module, "connect", dial)
+            task = asyncio.create_task(module.run_bridge(ENDPOINT, emit=lambda line: None))
+            reached = asyncio.create_task(target_reached.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    {task, reached}, timeout=3, return_when=asyncio.FIRST_COMPLETED
+                )
+                assert done, "connection/redirect decision did not finish"
+                assert not target_reached.is_set(), "redirect reached an unapproved endpoint"
+                with pytest.raises(module.BridgeError):
+                    await task
+            finally:
+                task.cancel()
+                reached.cancel()
+                with suppress(asyncio.CancelledError, module.BridgeError):
+                    await task
+                with suppress(asyncio.CancelledError):
+                    await reached
 
 
 async def test_cancellation_drains_the_real_sdk_and_websocket_tasks(monkeypatch):
