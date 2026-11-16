@@ -1,4 +1,4 @@
-"""A single read-only PC tool served to the official AI over an outbound WebSocket."""
+"""Bounded read-only PC tools served to the official AI over an outbound WebSocket."""
 
 import logging
 import secrets
@@ -14,10 +14,13 @@ from mcp.shared.message import SessionMessage
 from websockets.asyncio.client import connect as _WebSocketConnect
 from websockets.exceptions import ConnectionClosed
 
+from .soak_summary import SoakSummaryUnavailable, load_soak_summary
+
 INITIALIZATION_TIMEOUT_S = 30.0
 _INPUT_LIMIT = 16 * 1024
 _OUTPUT_LIMIT = 64 * 1024
 _TOOL_NAME = "stackchan_pc_connection_status"
+_SUMMARY_TOOL_NAME = "stackchan_pc_soak_report_summary"
 _ERROR_CODES = frozenset(
     {
         "OFFICIAL_MCP_INVALID_ENDPOINT",
@@ -28,6 +31,7 @@ _ERROR_CODES = frozenset(
         "OFFICIAL_MCP_OUTPUT_FAILED",
         "OFFICIAL_MCP_REDIRECT_REJECTED",
         "PC_TOOL_UNSUPPORTED",
+        "PC_SOAK_REPORT_UNAVAILABLE",
     }
 )
 
@@ -134,6 +138,7 @@ async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
     check_code = str(secrets.randbelow(900000) + 100000)
     started_at = time.monotonic()
     call_count = 0
+    summary_call_count = 0
     server = Server("stackchan-pc", version="0.1.0")
 
     def report(line: str):
@@ -152,14 +157,35 @@ async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
                 annotations=types.ToolAnnotations(
                     readOnlyHint=True, destructiveHint=False, openWorldHint=False
                 ),
-            )
+            ),
+            types.Tool(
+                name=_SUMMARY_TOOL_NAME,
+                description=(
+                    "24시간 시험 결과 알려줘: 2026-11-15에 접수된 과거 PC 가상 로봇(Fake/Mock) "
+                    "시험 보고서의 통과 여부와 수치를 조회합니다. 실제 경과 시간 시험이며 "
+                    "실물 로봇 24시간 검증이나 현재 실행 상태가 아닙니다. 날짜는 실행일이 아닌 "
+                    "보고서 접수일이고 메모리는 Python 추적 증가량입니다. 응답 시 이 범위를 설명하세요."
+                ),
+                inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+                annotations=types.ToolAnnotations(
+                    readOnlyHint=True, destructiveHint=False, openWorldHint=False
+                ),
+            ),
         ]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict):
-        nonlocal call_count
-        if name != _TOOL_NAME or arguments:
+        nonlocal call_count, summary_call_count
+        if name not in {_TOOL_NAME, _SUMMARY_TOOL_NAME} or arguments:
             raise BridgeError("PC_TOOL_UNSUPPORTED")
+        if name == _SUMMARY_TOOL_NAME:
+            summary_call_count += 1
+            report(f"PC_SOAK_REPORT_CALLED={summary_call_count}")
+            try:
+                return load_soak_summary()
+            except SoakSummaryUnavailable:
+                report("PC_SOAK_REPORT_UNAVAILABLE")
+                raise BridgeError("PC_SOAK_REPORT_UNAVAILABLE") from None
         call_count += 1
         report(f"PC_TOOL_CALLED={call_count}")
         return {

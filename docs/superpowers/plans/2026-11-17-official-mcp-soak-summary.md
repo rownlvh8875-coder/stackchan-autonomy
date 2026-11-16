@@ -70,21 +70,21 @@ object schema and `additionalProperties=false`; uses the existing SDK error path
 with the fixed unavailable code. A separate per-process summary call counter
 records invocations, including unavailable calls; invalid arguments do not count.
 
-- [ ] Add real WebSocket/SDK tests for the two-tool catalog, interleaved calls,
+- [x] Add real WebSocket/SDK tests for the two-tool catalog, interleaved calls,
   literal expected summary fields and separate counts; update earlier catalog sizes.
-- [ ] Add tests passing path/URL/extra arguments: error without invocation marker;
+- [x] Add tests passing path/URL/extra arguments: error without invocation marker;
   then normal call returns the historical report. Supply a real missing/corrupt
   resource and prove fixed unavailable, safe console/log output and a still-working
   connection diagnostic. Run target tests and observe new-feature RED.
-- [ ] Implement catalog/dispatch/counter and fixed error handling; run target tests
+- [x] Implement catalog/dispatch/counter and fixed error handling; run target tests
   to PASS. Existing transport/lifecycle/secret protections stay unchanged.
-- [ ] Extend `scripts/ci_verify.py` to call the installed summary through the real
+- [x] Extend `scripts/ci_verify.py` to call the installed summary through the real
   local WebSocket/SDK dialogue from outside the source tree and verify original
   report hash/bytes and literal scope/numbers. Retain the connection-code probe.
-- [ ] Update Korean guide: stop old bridge with Ctrl+C, pull once, run same command,
+- [x] Update Korean guide: stop old bridge with Ctrl+C, pull once, run same command,
   enter endpoint privately, ask “24시간 시험 결과 알려줘”, check new marker/numbers
   and PC Fake/Mock scope. Mark new live voice acceptance pending until user confirms.
-- [ ] Run `uv run --frozen pytest -q`, `uv run --frozen ruff check .`,
+- [x] Run `uv run --frozen pytest -q`, `uv run --frozen ruff check .`,
   `uv run --frozen ruff format --check .`, Markdown links/whitespace checks;
   expect zero failures. Build with `uv build --out-dir .local/soak-summary-dist`,
   run `uv run --frozen python scripts/ci_verify.py --wheel-dir .local/soak-summary-dist --require-opus`;

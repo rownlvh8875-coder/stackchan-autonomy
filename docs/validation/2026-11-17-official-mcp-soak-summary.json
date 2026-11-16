@@ -1,0 +1,21 @@
+{
+  "recorded_date": "2026-11-17",
+  "timezone": "Asia/Seoul",
+  "component": "official_mcp_historical_soak_summary",
+  "source_report": "2026-11-15-windows-home-soak-24h-passed.json",
+  "source_sha256": "8ddbad0964b2249ed4d2b474b90836585f547b6e53d980c6d99f60eccc1cb728",
+  "scope": "offline_local_websocket_and_pinned_mcp_sdk",
+  "target_tests": {"passed": 70, "failed": 0, "elapsed_s": 1.41},
+  "full_tests": {"passed": 360, "failed": 0, "skipped": 0, "elapsed_s": 62.0},
+  "lint_and_format": "passed",
+  "wheel_and_sdist_original_report_bytes": "passed",
+  "independent_wheel_connection_and_summary_calls": "passed",
+  "existing_installed_cli_checks_including_native_opus": "passed",
+  "real_endpoint_used": false,
+  "paid_api_called": false,
+  "device_actuated": false,
+  "new_24h_test_executed": false,
+  "final_review": "pending",
+  "hosted_ci": {"status": "pending"},
+  "live_summary_voice_acceptance": "pending_operator_confirmation"
+}

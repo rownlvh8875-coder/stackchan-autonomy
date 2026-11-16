@@ -139,7 +139,8 @@ namespace, 한도**를 설정해야 한다. [설정·복구·보장 범위](docs
 ## 실제 장치 연결
 
 출고 펌웨어와 공식 앱을 유지하는 [PC 연결 확인 도구](docs/OFFICIAL_MCP_PC.ko.md)를 제공한다.
-`stackchan-pc-mcp`는 공식 AI에 읽기 전용 PC 도구 하나를 등록하는 별도 확장이다.
+`stackchan-pc-mcp`는 공식 AI에 PC 연결 확인과 보관된24시간 시험 요약의 읽기 전용 도구
+두 개를 등록하는 별도 확장이다. 시험 요약은 PC Fake/Mock의 과거 실시간 시험을 설명한다.
 PC OpenAI 엔진의 로봇 직접 제어 또는 음성 backend 교체와는 구분한다.
 
 제품 없이 가능한 [실제 로컬 HTTP 검증](docs/TRANSPORT_TEST_REPORT.md)과

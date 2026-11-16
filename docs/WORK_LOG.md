@@ -657,3 +657,26 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   report, separate invocation evidence, strict provenance and installed-package support.
 - Design approval is pending. No runtime, dependency, report or firmware change;
   no live endpoint/device call. Implementation and live voice acceptance remain pending.
+
+## Official MCP historical soak summary — implementation, 2026-11-17 (KST)
+
+- User approved the proposed design. Preserved native inline execution and reused
+  the clean linked worktree, fast-forwarded to the design commit. Baseline340 PASS/61.64s.
+- Loader/resource tests observed14 RED then14 PASS. The fixed original CRLF bytes
+  are bundled with the package; bounded reads and a pinned SHA-256 reject corrupt,
+  missing, oversized or changed evidence. Exact integrity checking validates the
+  known original fields without importing engine settings/providers or parsing arbitrary reports.
+- Pinned the two report paths to `-text` so Windows checkout does not change provenance.
+  The authoritative report was not edited. Packaged/source parity is checked in tests
+  and wheel/sdist checks; no arbitrary file/path/URL arguments are accepted.
+- Real WebSocket/SDK tests observed10 RED/46 PASS before adding the summary dispatch;
+  final target70 PASS/1.41s, full360 PASS/62.00s. Existing connection code/count remain
+  independent of summary calls. Missing/corrupt evidence returns a fixed unavailable
+  error while connection checks keep working. No raw resource/path/token is exposed.
+- The installed-wheel probe rejects the old one-tool wheel (observed catalog assertion
+  RED), then passes the new wheel from outside the checkout. Existing Mock/MCP/voice/
+  native Opus/memory/soak checks pass. Wheel runtime bytes match source; wheel and sdist
+  both contain the exact original evidence. Ruff/format93 files and whitespace pass.
+- Updated the Korean operator guide with restart/update steps, voice request, separate
+  marker and historical PC Fake/Mock scope. New live voice acceptance is pending;
+  the earlier PC connection live PASS remains valid. Final review/hosted checks follow.

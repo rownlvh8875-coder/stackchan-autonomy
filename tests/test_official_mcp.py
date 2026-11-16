@@ -127,16 +127,25 @@ def test_error_boundary_cannot_turn_arbitrary_exception_text_into_a_public_code(
     assert "synthetic-endpoint-secret" not in str(error) + error.code
 
 
-async def test_real_mcp_dialogue_lists_and_invokes_only_connection_status(monkeypatch):
+async def test_real_mcp_dialogue_lists_two_readonly_tools_and_preserves_connection_status(
+    monkeypatch,
+):
     module = bridge_module()
 
     async def peer(socket):
         await initialize(socket)
         listing = await request(socket, 2, "tools/list", {})
         tools = listing["result"]["tools"]
-        assert [tool["name"] for tool in tools] == ["stackchan_pc_connection_status"]
-        assert tools[0]["inputSchema"]["additionalProperties"] is False
-        assert tools[0]["inputSchema"]["properties"] == {}
+        assert [tool["name"] for tool in tools] == [
+            "stackchan_pc_connection_status",
+            "stackchan_pc_soak_report_summary",
+        ]
+        for tool in tools:
+            assert tool["inputSchema"]["additionalProperties"] is False
+            assert tool["inputSchema"]["properties"] == {}
+            assert tool["annotations"]["readOnlyHint"] is True
+            assert tool["annotations"]["destructiveHint"] is False
+            assert tool["annotations"]["openWorldHint"] is False
         first = await request(
             socket, 3, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
         )
@@ -176,7 +185,7 @@ async def test_protocol_ping_is_allowed_before_initialization(monkeypatch):
 
     async with local_endpoint(module, monkeypatch, peer) as (_, result, _):
         listing = await asyncio.wait_for(result, 5)
-        assert len(listing["result"]["tools"]) == 1
+        assert len(listing["result"]["tools"]) == 2
 
 
 async def test_initialized_notification_accepts_standard_metadata(monkeypatch):
@@ -188,7 +197,7 @@ async def test_initialized_notification_accepts_standard_metadata(monkeypatch):
 
     async with local_endpoint(module, monkeypatch, peer) as (_, result, _):
         listing = await asyncio.wait_for(result, 5)
-        assert len(listing["result"]["tools"]) == 1
+        assert len(listing["result"]["tools"]) == 2
 
 
 async def test_catalog_after_initialize_reply_matches_sdk_compatible_clients(monkeypatch):
@@ -207,7 +216,7 @@ async def test_catalog_after_initialize_reply_matches_sdk_compatible_clients(mon
         )
         assert "result" in response
         listing = await request(socket, 2, "tools/list", {})
-        assert len(listing["result"]["tools"]) == 1
+        assert len(listing["result"]["tools"]) == 2
         await socket.send(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}))
         return await request(
             socket, 3, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
@@ -554,3 +563,125 @@ async def test_blocked_response_applies_backpressure_before_more_tool_work(monke
         assert sorted(
             response["result"]["structuredContent"]["call_count"] for response in responses
         ) == list(range(1, 33))
+
+
+async def test_soak_summary_calls_report_historical_evidence_with_independent_counts(monkeypatch):
+    module = bridge_module()
+
+    async def peer(socket):
+        await initialize(socket)
+        await request(socket, 2, "tools/list", {})
+        replies = []
+        for number, name in enumerate(
+            ["stackchan_pc_connection_status", "stackchan_pc_soak_report_summary"] * 2, 3
+        ):
+            response = await request(socket, number, "tools/call", {"name": name, "arguments": {}})
+            replies.append(response["result"]["structuredContent"])
+        return replies
+
+    async with local_endpoint(module, monkeypatch, peer) as (task, result, lines):
+        first, summary, second, repeated = await asyncio.wait_for(result, 5)
+        assert not task.done()
+        assert summary == repeated
+        assert summary["passed"] is True
+        assert summary["wall_elapsed_s"] == 86400.047
+        assert summary["requested_duration_s"] == 86400.0
+        assert summary["cycles"] == 83157
+        assert summary["restarts"] == summary["restoration_checks"] == 332
+        assert summary["python_traced_growth_bytes"] == 20697
+        assert summary["recorded_date"] == "2026-11-15"
+        assert summary["recorded_date_basis"] == "report_received"
+        assert summary["historical"] is True
+        assert summary["test_scope"] == "pc_fake_mock"
+        assert summary["time_mode"] == "wall_clock"
+        assert summary["robot_hardware_tested"] is False
+        assert [first["call_count"], second["call_count"]] == [1, 2]
+        assert first["check_code"] == second["check_code"]
+        assert [line for line in lines if line.startswith("PC_SOAK_REPORT_CALLED=")] == [
+            "PC_SOAK_REPORT_CALLED=1",
+            "PC_SOAK_REPORT_CALLED=2",
+        ]
+        assert [line for line in lines if line.startswith("PC_TOOL_CALLED=")] == [
+            "PC_TOOL_CALLED=1",
+            "PC_TOOL_CALLED=2",
+        ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"path": "private/operator-report.json"},
+        {"url": "https://example.invalid/private-report.json"},
+        {"report": "private-report-text"},
+    ],
+)
+async def test_soak_summary_cannot_select_caller_files_or_urls(arguments, monkeypatch):
+    module = bridge_module()
+
+    async def peer(socket):
+        await initialize(socket)
+        invalid = await request(
+            socket,
+            2,
+            "tools/call",
+            {"name": "stackchan_pc_soak_report_summary", "arguments": arguments},
+        )
+        valid = await request(
+            socket,
+            3,
+            "tools/call",
+            {"name": "stackchan_pc_soak_report_summary", "arguments": {}},
+        )
+        return invalid, valid
+
+    async with local_endpoint(module, monkeypatch, peer) as (_, result, lines):
+        invalid, valid = await asyncio.wait_for(result, 5)
+        assert invalid["result"]["isError"] is True
+        assert valid["result"]["structuredContent"]["cycles"] == 83157
+        assert [line for line in lines if line.startswith("PC_SOAK_REPORT_CALLED=")] == [
+            "PC_SOAK_REPORT_CALLED=1"
+        ]
+
+
+@pytest.mark.parametrize("corruption", ["missing", "corrupt"])
+async def test_soak_unavailable_is_fixed_private_and_does_not_break_connection_tool(
+    corruption, monkeypatch, tmp_path, caplog
+):
+    module = bridge_module()
+    summary_module = importlib.import_module("stackchan_autonomy.soak_summary")
+    private = "private-report-content-no-echo"
+    if corruption == "corrupt":
+        resource = tmp_path / "data/windows-home-soak-24h-passed.json"
+        resource.parent.mkdir()
+        resource.write_text(private)
+    monkeypatch.setattr(summary_module, "files", lambda package: tmp_path)
+
+    async def peer(socket):
+        await initialize(socket)
+        unavailable = await request(
+            socket,
+            2,
+            "tools/call",
+            {"name": "stackchan_pc_soak_report_summary", "arguments": {}},
+        )
+        connection = await request(
+            socket,
+            3,
+            "tools/call",
+            {"name": "stackchan_pc_connection_status", "arguments": {}},
+        )
+        return unavailable, connection
+
+    async with local_endpoint(module, monkeypatch, peer) as (task, result, lines):
+        unavailable, connection = await asyncio.wait_for(result, 5)
+        assert not task.done()
+        error = unavailable["result"]
+        assert error["isError"] is True
+        assert error["content"] == [{"type": "text", "text": "PC_SOAK_REPORT_UNAVAILABLE"}]
+        assert "structuredContent" not in error
+        assert connection["result"]["structuredContent"]["call_count"] == 1
+        assert "PC_SOAK_REPORT_CALLED=1" in lines
+        observed = json.dumps(unavailable) + "\n".join(lines) + caplog.text
+        assert private not in observed
+        assert str(tmp_path) not in observed
+        assert "synthetic-endpoint-secret" not in observed

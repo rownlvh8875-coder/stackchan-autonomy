@@ -1,6 +1,7 @@
 """Install the built wheel independently and exercise offline CLI modes on any OS."""
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -28,8 +29,9 @@ def verify_official_mcp(python, binaries, *, cwd, env):
     cli = binaries / ("stackchan-pc-mcp.exe" if os.name == "nt" else "stackchan-pc-mcp")
     run([cli, "--help"], cwd=cwd, env=env)
     probe = textwrap.dedent("""
-        import asyncio, json
+        import asyncio, hashlib, json
         from contextlib import asynccontextmanager, suppress
+        from importlib.resources import files
         from websockets.asyncio.client import connect
         from websockets.asyncio.server import serve
         import stackchan_autonomy.official_mcp as bridge
@@ -49,9 +51,12 @@ def verify_official_mcp(python, binaries, *, cwd, env):
                                                "clientInfo":{"name":"wheel-probe", "version":"1"}})
                     await socket.send(json.dumps({"jsonrpc":"2.0", "method":"notifications/initialized"}))
                     listing = await rpc(2, "tools/list", {})
-                    assert [t["name"] for t in listing["result"]["tools"]] == ["stackchan_pc_connection_status"]
+                    assert [t["name"] for t in listing["result"]["tools"]] == [
+                        "stackchan_pc_connection_status", "stackchan_pc_soak_report_summary"]
                     called = await rpc(3, "tools/call", {"name":"stackchan_pc_connection_status", "arguments":{}})
-                    reply.set_result(called["result"]["structuredContent"])
+                    summary = await rpc(4, "tools/call", {"name":"stackchan_pc_soak_report_summary", "arguments":{}})
+                    reply.set_result((called["result"]["structuredContent"],
+                                      summary["result"]["structuredContent"]))
                     await release.wait()
                 except Exception as error:
                     if not reply.done(): reply.set_exception(error)
@@ -67,22 +72,48 @@ def verify_official_mcp(python, binaries, *, cwd, env):
                 task = asyncio.create_task(bridge.run_bridge(
                     "wss://api.xiaozhi.me/mcp/?token=offline-wheel-check", emit=lines.append))
                 try:
-                    result = await asyncio.wait_for(reply, 10)
+                    result, summary = await asyncio.wait_for(reply, 10)
                     assert result["call_count"] == 1 and result["robot_control_available"] is False
                     assert len(result["check_code"]) == 6
                     assert any(result["check_code"] in line for line in lines)
+                    assert "PC_SOAK_REPORT_CALLED=1" in lines
+                    assert summary["passed"] is True and summary["cycles"] == 83157
+                    assert summary["wall_elapsed_s"] == 86400.047
+                    assert summary["requested_duration_s"] == 86400.0
+                    assert summary["restarts"] == summary["restoration_checks"] == 332
+                    assert summary["python_traced_growth_bytes"] == 20697
+                    assert summary["recorded_date"] == "2026-11-15"
+                    assert summary["recorded_date_basis"] == "report_received"
+                    assert summary["historical"] is True
+                    assert summary["test_scope"] == "pc_fake_mock"
+                    assert summary["time_mode"] == "wall_clock"
+                    assert summary["robot_hardware_tested"] is False
                 finally:
                     task.cancel()
                     with suppress(asyncio.CancelledError, bridge.BridgeError): await task
                     release.set()
-            print(json.dumps({"official_mcp":True, "call_count":1, "robot_control_available":False}))
+            raw = files("stackchan_autonomy").joinpath(
+                "data", "windows-home-soak-24h-passed.json").read_bytes()
+            print(json.dumps({"official_mcp":True, "call_count":1,
+                              "robot_control_available":False, "soak_summary":True,
+                              "report_sha256":hashlib.sha256(raw).hexdigest()}))
 
         asyncio.run(main())
     """)
     result = json.loads(run([python, "-I", "-c", probe], cwd=cwd, env=env))
-    if result != {"official_mcp": True, "call_count": 1, "robot_control_available": False}:
+    original = (
+        Path(__file__).resolve().parents[1]
+        / "docs/validation/2026-11-15-windows-home-soak-24h-passed.json"
+    )
+    if result != {
+        "official_mcp": True,
+        "call_count": 1,
+        "robot_control_available": False,
+        "soak_summary": True,
+        "report_sha256": hashlib.sha256(original.read_bytes()).hexdigest(),
+    }:
         raise RuntimeError("installed official MCP diagnostic failed its offline contract")
-    print("Installed official MCP CLI / real local WebSocket and SDK dialogue: PASS", flush=True)
+    print("Installed official MCP CLI / connection + soak summary / exact report: PASS", flush=True)
 
 
 def main():
