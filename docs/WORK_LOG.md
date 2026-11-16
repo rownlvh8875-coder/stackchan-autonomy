@@ -631,3 +631,18 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   Cost: this unit tests scheduling rather than incidental filesystem throughput.
 - Revised full suite340 PASS/61.31s. Production runtime modules are byte-identical to
   the verified release wheel; no TTL/timeouts/durability/runtime change. Hosted retry follows.
+
+## Official AI to PC tool live acceptance — 2026-11-17 (KST)
+
+- User pulled the existing feature checkout to83a8cde and ran stackchan-pc-mcp on the
+  home Windows laptop. Provided CONNECTED/INITIALIZED/TOOLS_LISTED CLI output and the
+  per-run diagnostic code293386. No endpoint/token is copied into repository evidence.
+- After switching to the official voice-agent flow, user explicitly confirmed the PC
+  invocation marker/count increase and the robot speaking the same code. Recorded live
+  PASS for this read-only official-AI-to-PC extension. Exact final call count and a separate
+  app-catalog screenshot were not supplied; do not invent them.
+- Updated the runbook, execution guide, next steps and test report with the field evidence.
+  PC OpenAI direct robot control, physical adapter/STOP/media and real-device24h remain
+  separate. No cloud-side authenticated/device call, runtime/dependency change or new test.
+- Verified six Markdown-only files, local links/fences, absence of JWT/device identifiers
+  in the new field record, unchanged runtime/dependency blobs and patch whitespace.

@@ -1,6 +1,11 @@
 # Test Report
 
-최신 PC MCP 확장 검증: **2026-11-16 / Python3.12 / Linux**.
+최신 현장 확인: **2026-11-17 / 사용자 Windows 노트북 + K151 / 공식 MCP PC 도구 PASS**.
+CLI 연결·초기화·도구 목록 응답 이후 실제 도구 호출과 로봇이 읽은 진단 코드293386의
+일치를 사용자가 확인했다. [현장 확인 기록](validation/2026-11-17-official-mcp-pc-live.md) 참고.
+출고 펌웨어/공식 앱의 AI가 PC 도구를 호출하는 범위이며 PC 엔진의 직접 로봇 제어는 아니다.
+
+최신 PC MCP 확장 자동 검증: **2026-11-16 / Python3.12 / Linux**.
 새 연결·CLI 대상 **50 PASS /1.33초**, 전체 **340 PASS /61.31초**, 실패·skip0.
 실제 로컬 WebSocket과 고정 MCP SDK로 초기화·도구 목록·호출·진단 코드·취소·제한을 검증했다.
 토큰/URL/원시 오류의 로그 노출과 숨김 입력 실패 시 echo fallback도 차단했다.
@@ -10,8 +15,8 @@
 첫 hosted 실행의 Windows3.12에서 기존 짧은 제어권 조율 테스트1개가 실패했다.
 해당 테스트의 실제 디스크 속도 가정을 제어된 시계·lease로 대체했고, 이전 잘못된 스케줄링을
 여전히 검출하는 것을 확인했다. 실제 SQLite 갱신·만료 검사는 유지하며 제품 코드는 바꾸지 않았다.
-[실행 설명서](OFFICIAL_MCP_PC.ko.md)를 참고한다. 실제 공식 endpoint·사용자 토큰·장치·음성
-호출은 미실행이며, 위 결과는 현장 PC 연결 성공이나 로봇 직접 제어를 뜻하지 않는다.
+[실행 설명서](OFFICIAL_MCP_PC.ko.md)를 참고한다. 클라우드/CI의 위 숫자는 로컬 가상 접속점
+검증이며, 사용자가 수행한 실제 연결 결과는 위 현장 기록과 구분한다. 로봇 직접 제어는 미검증이다.
 
 최신 저장/제어권 회귀 실행일: 2026-11-13 / Python 3.12 / Linux 클라우드 환경.
 해당 단계 로컬 전체 pytest: **290 PASS, 0 FAIL, 0 SKIP**, 59.81초.
@@ -22,7 +27,7 @@
 `engine_failure`로 종료됐다. 두 번째 보고서는9시간24분에 제어권 상실이 확인됐고,
 최대 순환11.796초를 기록했다. 동기 파일 저장이 갱신을 막는 경로를 재현·수정했으며
 정확한 과거 Windows 지연 원인은 미확정이다. 후속 집 노트북 시험은 실제24시간을 통과했다.
-최신 사용자 보고서 접수일: **2026-11-15 (한국 시간)**.
+최신 사용자 soak 보고서 접수일: **2026-11-15 (한국 시간)**.
 [원본 JSON](validation/2026-11-15-windows-home-soak-24h-passed.json)은86400.047초,
 83157회, 엔진 재시작·복원332회, Python 추적 메모리 증가20697B, 태스크 증가/잔류0,
 클라우드 요청0, `passed=true`, `violations=[]`, `failure=null`이다.
@@ -42,8 +47,8 @@ CI 추가 후 독립 임시 venv에 wheel을 설치해 Mock/MCP/음성/Opus 실�
 지속형 제어권/예산 작업에서 31개를 추가했다. 아래 117개 결과는 MCP 단계의 이력이다.
 게시 후 새 환경에서 기존 60개 테스트가 통과했고, MCP 관련 57개를 추가했다.
 최초 MVP의 60 PASS / 7.73초와 JUnit 10.16초 기록은 아래 이력에 해당한다.
-현재 범위의 최종 판정: **MOCK_MVP_PASS**.
-실제 K151/OpenAI 계정/펌웨어 검증 결과를 뜻하지 않는다.
+자율 엔진 Mock 범위의 판정: **MOCK_MVP_PASS**.
+위 공식 MCP 확장의 현장 확인과 별도이며, 실물 자율 동작/OpenAI 계정/펌웨어 교체 검증을 뜻하지 않는다.
 이전 음성/CI 커밋의 GitHub Actions는 Windows/Linux × Python3.11/3.12 네 조합 모두 PASS다.
 Linux는 각각194 PASS, Windows는 각각192 PASS와 fork/libopus 2 SKIP이다.
 영속 메모리 브랜치의 원격 결과는 [해당 Actions 실행](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions?query=branch%3Afeat%2Fpersistent-memory)에서 구분한다.
