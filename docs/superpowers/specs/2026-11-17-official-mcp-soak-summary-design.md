@@ -1,6 +1,6 @@
 # Official MCP: completed 24-hour soak summary
 
-Date: 2026-11-17 (KST). Status: PROPOSED; awaiting user design approval.
+Date: 2026-11-17 (KST). Status: APPROVED by the user in chat ("그래").
 Small extension to the existing, live-verified official AI → PC tool bridge.
 
 ## Intent
@@ -20,7 +20,7 @@ structured result; the PC bridge does not need an OpenAI or speech API.
    reports, but adds path setup, file validation and report-selection mistakes
    to this first voice feature.
 
-Assistant's proposed choice: option 1, matching the already completed test the
+Approved choice: option 1, matching the already completed test the
 user wants to hear about. No report/path argument is exposed to the AI. Updating
 the selected historical report is a later deliberate repository change.
 
