@@ -3,6 +3,10 @@
 PC MCP 자동 재연결 추가: 로컬 전체485 PASS, Windows 전용2 SKIP /69.59초.
 검토 수정 후 대상146 PASS+2 SKIP, 린트·배포·독립 설치의 로컬 실제 WebSocket 재연결과 SDK 검증 PASS.
 처리 중 연결을 끊은 요청의 자동 재전송 없음과 사용량 보존을 확인했다.
+고정 소스8f0ad66의 [CI44186371845](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44186371845)는
+Linux·Windows × Python3.11/3.12 네 조합 모두 **485 PASS,2 SKIP,실패0**이다.
+각 조합의 복구22개, Windows의 실행 파일2개, 배포·독립 설치·가상24h도 PASS다.
+첫 Windows 시험 환경의 pywin32 경로 누락과 진단·수정 내역은 검증 기록에 남겼다.
 [검토·플랫폼별 기록](validation/2026-11-17-mcp-reconnect.md),
 [Windows 간편 실행과 현장 확인](MCP_RECONNECT.ko.md)을 참고한다.
 이는 실제 인터넷 장애·유료 API·로봇 음성 복구의 현장 판정은 아니다.

@@ -847,3 +847,15 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 
   - Corrected full485PASS+2Windows-onlySKIP69.59s, lint/format, distribution and installed
     recovery/GPT/observer probes PASS. No runtime/firmware dependency changed.
+  - Hosted first run44184962160: both Linux PASS; both Windows484PASS+2SKIP+1FAIL
+    in the prepared launcher fixture. Diagnostic run44185692645 exposed missing
+    pywintypes: PYTHONPATH did not execute installed pywin32 .pth setup. Fixed only
+    test fixture site initialization after network denial; kept import precondition,
+    assertions and cold-cache checks. No runtime/launcher change for this correction.
+  - Final source8f0ad66, CI44186371845 attempt1: Linux/Windows × Python3.11/3.12
+    all485PASS+2SKIP, zero failures/errors. Each recovery22PASS; Windows launcher2PASS.
+    Downloaded all four JUnit/soak artifacts; each virtual24h2880cycles/86400s PASS,
+    zero cloud requests/remaining tasks. Lint/build/independent installed probes PASS.
+    Exact hashes and prior failures are in validation/2026-11-17-mcp-reconnect-ci.json.
+    Actual Wi-Fi outage/robot speech recovery and GUI interrupt acceptance remain
+    operator checks; one cleanup-inclusive delay-reset minor remains disclosed.

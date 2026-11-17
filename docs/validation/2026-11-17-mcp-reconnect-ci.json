@@ -1,0 +1,115 @@
+{
+  "date": "2026-11-17",
+  "source_commit": "8f0ad666e84baf82299d76e216137d0a5b800bcb",
+  "run_url": "https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44186371845",
+  "run_attempt": 1,
+  "conclusion": "success",
+  "jobs": [
+    {
+      "job": "ubuntu-latest-py3.11",
+      "passed": 485,
+      "skipped": 2,
+      "failures": 0,
+      "errors": 0,
+      "duration_s": 59.536,
+      "junit_sha256": "c038c988c2742cc4f37dee2971499c6b0117698742feb03e38a900fb0dec1dfc",
+      "recovery_cases_passed": 22,
+      "windows_launcher_cases_passed": 0,
+      "skip_reasons": [
+        "Windows CMD launcher integration",
+        "Windows CMD launcher integration"
+      ],
+      "virtual_soak": {
+        "passed": true,
+        "cycles": 2880,
+        "virtual_elapsed_s": 86400.0,
+        "cloud_requests": 0,
+        "remaining_tasks": 0
+      }
+    },
+    {
+      "job": "ubuntu-latest-py3.12",
+      "passed": 485,
+      "skipped": 2,
+      "failures": 0,
+      "errors": 0,
+      "duration_s": 79.498,
+      "junit_sha256": "a1c94140369cf207709ba9f8997e523fcb5005d8266c7cc0297c0809772e705b",
+      "recovery_cases_passed": 22,
+      "windows_launcher_cases_passed": 0,
+      "skip_reasons": [
+        "Windows CMD launcher integration",
+        "Windows CMD launcher integration"
+      ],
+      "virtual_soak": {
+        "passed": true,
+        "cycles": 2880,
+        "virtual_elapsed_s": 86400.0,
+        "cloud_requests": 0,
+        "remaining_tasks": 0
+      }
+    },
+    {
+      "job": "windows-latest-py3.11",
+      "passed": 485,
+      "skipped": 2,
+      "failures": 0,
+      "errors": 0,
+      "duration_s": 137.032,
+      "junit_sha256": "9faa2bc7923ef33f22877b408913913f6af53ecf0fabf286902d9f151beda63a",
+      "recovery_cases_passed": 22,
+      "windows_launcher_cases_passed": 2,
+      "skip_reasons": [
+        "trusted system libopus unavailable",
+        "fork unavailable; spawn races tested separately"
+      ],
+      "virtual_soak": {
+        "passed": true,
+        "cycles": 2880,
+        "virtual_elapsed_s": 86400.0,
+        "cloud_requests": 0,
+        "remaining_tasks": 0
+      }
+    },
+    {
+      "job": "windows-latest-py3.12",
+      "passed": 485,
+      "skipped": 2,
+      "failures": 0,
+      "errors": 0,
+      "duration_s": 143.884,
+      "junit_sha256": "f3da3c653725c065a1c23235b6e66a4025e19a4c60c5dfb88367d9810008bef5",
+      "recovery_cases_passed": 22,
+      "windows_launcher_cases_passed": 2,
+      "skip_reasons": [
+        "trusted system libopus unavailable",
+        "fork unavailable; spawn races tested separately"
+      ],
+      "virtual_soak": {
+        "passed": true,
+        "cycles": 2880,
+        "virtual_elapsed_s": 86400.0,
+        "cloud_requests": 0,
+        "remaining_tasks": 0
+      }
+    }
+  ],
+  "all_jobs_lint_build_and_installed_probes_passed": true,
+  "prior_failed_runs": [
+    {
+      "run": 44184962160,
+      "source": "f173ec22d2ebb7c8c65b49a1e26b365d677a705a",
+      "result": "Both Windows: 484 passed,2 skipped,1 prepared-launcher failure; both Linux passed"
+    },
+    {
+      "run": 44185692645,
+      "source": "9bcc7fc2c3a1d287b9e8fb3dea9c324f12ff23a1",
+      "result": "Diagnostic import precondition reproduced missing pywintypes in test fixture"
+    }
+  ],
+  "fixture_correction": "Process installed dependency .pth files with site.addsitedir after network-denial hook; no runtime/launcher change",
+  "physical_device_accessed": false,
+  "paid_api_called": false,
+  "actual_wifi_outage_and_robot_voice_acceptance": "pending operator",
+  "deferred_minor": "60-second reset includes awaited cleanup time; near threshold the next delay can reset early"
+}

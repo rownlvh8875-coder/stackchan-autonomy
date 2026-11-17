@@ -82,10 +82,10 @@ Reviewer set-aside items and executor rulings:
 | Windows GUI/interrupt/codepage | Hosted headless path/config/cold-cache coverage; actual double-click/Ctrl+C and robot sound remain operator checks |
 | CI/artifacts/publication | Verify after tested fixes and record the exact source commit; authorized normal branch push only |
 
-No second review is requested. Final corrected full suite **485 PASS,2 Windows-only
+No second review was performed. Corrected local full suite **485 PASS,2 Windows-only
 SKIP /69.59s**, lint/format, distributions and all independent installed-wheel probes
-PASS. Hosted results are recorded below after completion. Actual internet outage and robot voice recovery remain operator
-checks in [the guide](../MCP_RECONNECT.ko.md).
+PASS. Final hosted results follow below. Actual internet outage and robot voice
+recovery remain operator checks in [the guide](../MCP_RECONNECT.ko.md).
 
 ## Hosted Windows fixture diagnosis
 
@@ -97,4 +97,31 @@ only through PYTHONPATH, which does not process pywin32's required .pth bootstra
 It was not actually a prepared environment. The test-only network-denial hook now
 uses site.addsitedir for the already installed dependency directory. Network blocking,
 empty cache/no-download checks and the import precondition remain; neither launcher
-nor runtime behavior changed for this correction. Final hosted evidence follows.
+nor runtime behavior changed for this correction.
+
+## Final hosted verification
+
+Source **8f0ad666e84baf82299d76e216137d0a5b800bcb** passed all four jobs in
+[CI44186371845, attempt1](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44186371845).
+Downloaded JUnit and soak artifacts were checked individually; exact durations,
+hashes, prior failed runs and scope are in [the evidence JSON](2026-11-17-mcp-reconnect-ci.json).
+
+| Platform | Full suite | Recovery cases | Windows launcher cases |
+|---|---|---|---|
+| Linux / Python3.11 | 485 PASS,2 SKIP,0 failures/errors | 22 PASS | 2 platform skips |
+| Linux / Python3.12 | 485 PASS,2 SKIP,0 failures/errors | 22 PASS | 2 platform skips |
+| Windows / Python3.11 | 485 PASS,2 SKIP,0 failures/errors | 22 PASS | 2 PASS |
+| Windows / Python3.12 | 485 PASS,2 SKIP,0 failures/errors | 22 PASS | 2 PASS |
+
+Windows skips are the existing system-Opus and fork cases. Both real CMD launcher
+cases passed with Korean/spaced paths and an unrelated working directory: missing
+Python environment and prepared environment/missing config. No network marker or
+uv cache was created. This is headless CMD coverage, not a double-click/interrupt
+or physical robot acceptance claim.
+
+All four jobs also passed lint/format, distribution build, independent installed
+MCP/GPT/recovery/observer probes and accelerated virtual24h (2880 cycles,
+86400 virtual seconds,0 cloud requests,0 remaining tasks). This does not replace
+the already recorded actual Windows24h run or establish real device24h behavior.
+The final completion commit changes documentation only; its runtime/tests match
+this tested source. Stock firmware and official app remain unchanged.
