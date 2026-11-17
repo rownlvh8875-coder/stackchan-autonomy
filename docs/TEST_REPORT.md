@@ -1,5 +1,10 @@
 # Test Report
 
+추가 호환성 검토: [원본 백업·복구 준비와 근거](validation/2026-11-17-k151-recovery-compatibility.md).
+공식 저장소 기여자가 공개 빌드의 제품 인증 구현/설정 경로 미공개를 확인했다.
+LCD C/E 분기와 native USB 회로 경로는 소스로 확인했으나 실제 기기 판정은 미실행이다.
+사용자가 외출 중이므로 COM·보호 상태·flash 읽기·해시·복구 성공은 아직 확인하지 않았다.
+
 최신 추가 개발 검증: **USB 관찰 확장 / 전체459 PASS /71.01초**, 대상155 PASS,
 독립 wheel 설치의 합성 USB→이미지 SDK 및 기존 MCP/GPT 경로 PASS.
 관찰 모듈을 포함한 **실제 ESP32-S3 빌드 PASS**이며 소스·SDK·설정·결과 해시는

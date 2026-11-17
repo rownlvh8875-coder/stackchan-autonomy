@@ -804,3 +804,20 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
     Linux459, each Windows457+2SKIP, target155 all platforms. Windows3.12's initial
     existing1.5s heartbeat assertion and unchanged-code retry PASS are recorded with
     the uninstrumented cause, not mislabeled as a runtime fix.
+- 2026-11-17: K151 backup/recovery preparation and compatibility disposition
+  - User asked to proceed; reports USB connected but currently away, so no laptop
+    command output or physical access is available. Prepared the next home COM query.
+  - Rechecked live official manual, linked schematics and unchanged official source
+    SHA28b9f0c. Confirmed source C/E LCD detection/init and GPIO19/20 native USB nets;
+    actual unit LCD/COM/peripheral/driver behavior remains unverified.
+  - Found official-repository contributor response issue134 (2026-11-12): production
+    auth implementation is absent, no SDKCONFIG switch or published auth component;
+    Xiaozhi AI.Agent has a separate connection. Official-app preservation stays BLOCKED
+    for the prototype, not a condition solved by a full-flash backup.
+  - Added Windows one-command-at-a-time stock readback/recovery guide: pinned esptool,
+    manual download entry/re-enumeration, chip/security/16MB gates, ROM A/B reads in one
+    bootloader session, local lengths/hash comparison, private second copy and stock
+    reboot check. Distinguishes matching backups from successful restore and flash from
+    eFuse/cloud/external controller state. No executable write/erase procedure is issued.
+  - Documentation only; no runtime/lock changes, device calls, secret/NVS extraction,
+    public issue/comment, installation or paid API. Hardware evidence remains pending.

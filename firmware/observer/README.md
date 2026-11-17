@@ -4,6 +4,10 @@
 Source rebuilds may lose official service/app compatibility; backup/restore, board/LCD/
 USB routing, camera driver recovery and exact-image approval remain unresolved.
 See [operator HOLD and later procedure](../../docs/USB_OBSERVER.ko.md).
+The official-repository contributor [confirms](https://github.com/m5stack/StackChan/issues/134#issuecomment-6812198686)
+that production auth is absent from public builds, with no SDKCONFIG switch or published
+component. A stock flash backup is not an auth implementation for this rebuilt image.
+See [recovery preparation and compatibility findings](../../docs/K151_BACKUP_RECOVERY.ko.md).
 
 `core/` is the portable production SCOB codec/dispatcher and fresh-frame lease helper.
 `esp/` uses HAL cached events, isolated quiet camera capture and native USB Serial/JTAG. Only HELLO,
