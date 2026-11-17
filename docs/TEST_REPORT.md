@@ -2,7 +2,9 @@
 
 최신 개발 검증: **2026-11-17 / GPT API 답변 → 공식 MCP → 로봇 음성 경로**.
 실제 OpenAI SDK의 로컬 HTTP 응답과 실제 SQLite/WebSocket/MCP로 검증했다.
-전체 **404 PASS /63.27초**, GPT·연결·CLI·보고서 대상114개 모두 PASS다.
+전체 **415 PASS /61.74초**, GPT·연결·CLI·보고서 대상125개 모두 PASS다.
+독립 검토에서 발견한 응답 완료·블록 검증 문제를 재현하고 수정했다. 불완전/오류/null/
+예상 밖 도구 응답은 고정 오류이며 성공 표시를 내지 않는다. 정상 추론 블록은 지원한다.
 이 수치는 유료 API나 실제 GPT 음성 시험이 아니다. 노트북의 키·모델 설정 후
 [GPT 실행 설명서](GPT_ROBOT.ko.md)에 따라 CALLED/ANSWERED와 실제 로봇 답변을 확인한다.
 상세 오프라인/설치/hosted/live 상태는 [GPT 검증 기록](validation/2026-11-17-gpt-robot-reply.json)에 구분한다.

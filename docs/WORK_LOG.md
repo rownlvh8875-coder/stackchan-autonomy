@@ -736,3 +736,14 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Operator guide covers private local .env setup, same MCP hidden endpoint, explicit
   GPT request and optional existing-agent Character description. New paid API/voice
   acceptance remains pending. No firmware reset, motor/media call or environment publication.
+- Fresh whole-change review identified Important1: top-level completed alone accepted
+  incomplete messages/error envelopes/unknown or unsolicited tool blocks. Null nested
+  items exposed raw SDK AttributeError; parent reproduced those plus an additional
+  valid-reasoning rejection. Observed11 RED before the single fix pass.
+- Validate envelope, exactly one completed assistant message, text-only content and
+  usage shape; allow legitimate reasoning items. Target125 PASS/3.41s; revised full
+  **415 PASS/61.74s** supersedes pre-review404. No deferred minors or second review.
+  Independent installed-package verification of the fixed release follows.
+- Fixed release rebuilt and independently installed: all existing CLI checks and
+  real local WebSocket/MCP + OpenAI SDK answer probe PASS. Runtime module bytes match
+  the wheel. No actual key/account/device was used. Hosted verification follows.

@@ -837,3 +837,39 @@ async def test_default_mode_cannot_invoke_gpt_or_charge_an_api(monkeypatch):
         rejected = await asyncio.wait_for(result, 5)
         assert rejected["result"]["isError"] is True
         assert not any(line.startswith("PC_GPT_") for line in lines)
+
+
+@pytest.mark.parametrize("kind", ["incomplete_message", "null_output_item"])
+async def test_malformed_gpt_response_never_emits_answered_or_raw_sdk_error(
+    monkeypatch, tmp_path, kind
+):
+    import httpx2 as httpx
+    from test_gpt_chat import PRIVATE, malformed_response, service
+
+    module = bridge_module()
+
+    async def peer(socket):
+        await initialize(socket)
+        failed = await request(
+            socket,
+            2,
+            "tools/call",
+            {"name": "stackchan_gpt_reply", "arguments": {"question": "응답 확인"}},
+        )
+        connected = await request(
+            socket, 3, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
+        )
+        return failed, connected
+
+    async with service(
+        tmp_path, lambda request: httpx.Response(200, json=malformed_response(kind))
+    ) as chat:
+        async with local_endpoint(module, monkeypatch, peer, gpt=chat) as (task, result, lines):
+            failed, connected = await asyncio.wait_for(result, 5)
+            assert not task.done()
+            assert failed["result"]["isError"] is True
+            assert failed["result"]["content"] == [{"type": "text", "text": "PC_GPT_UNAVAILABLE"}]
+            assert "PC_GPT_UNAVAILABLE" in lines
+            assert not any(line.startswith("PC_GPT_ANSWERED=") for line in lines)
+            assert connected["result"]["structuredContent"]["call_count"] == 1
+            assert PRIVATE not in json.dumps(failed) + "\n".join(lines)

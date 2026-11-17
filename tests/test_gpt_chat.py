@@ -348,3 +348,64 @@ async def test_explicit_reasoning_setting_reaches_sdk_for_supported_models(tmp_p
     async with service(tmp_path, api, gpt_reasoning_effort=effort) as chat:
         await chat.ask("짧게 대답해 줘")
     assert sent[0]["reasoning"] == {"effort": effort}
+
+
+BAD_RESPONSES = [
+    "incomplete_message",
+    "error_envelope",
+    "incomplete_details",
+    "unknown_content",
+    "unexpected_tool",
+    "null_output_item",
+    "null_content_item",
+    "malformed_usage",
+]
+
+
+def malformed_response(kind):
+    data = response_payload()
+    if kind == "incomplete_message":
+        data["output"][0]["status"] = "incomplete"
+    elif kind == "error_envelope":
+        data["error"] = {"code": "server_error", "message": PRIVATE}
+    elif kind == "incomplete_details":
+        data["incomplete_details"] = {"reason": "max_output_tokens"}
+    elif kind == "unknown_content":
+        data["output"][0]["content"].append({"type": "unknown", "secret": PRIVATE})
+    elif kind == "unexpected_tool":
+        data["output"].append(
+            {
+                "type": "function_call",
+                "id": "fc_test",
+                "call_id": "call_test",
+                "name": "unrequested",
+                "arguments": PRIVATE,
+            }
+        )
+    elif kind == "null_output_item":
+        data["output"].append(None)
+    elif kind == "null_content_item":
+        data["output"][0]["content"].append(None)
+    elif kind == "malformed_usage":
+        data["usage"] = []
+    return data
+
+
+@pytest.mark.parametrize("kind", BAD_RESPONSES)
+async def test_inconsistent_or_malformed_api_shape_is_a_fixed_failure(tmp_path, kind, caplog):
+    async with service(
+        tmp_path, lambda request: httpx.Response(200, json=malformed_response(kind))
+    ) as chat:
+        with pytest.raises(module().GPTChatError, match="^PC_GPT_UNAVAILABLE$") as caught:
+            await chat.ask("응답 경계 확인")
+        assert chat.budget.snapshot().requests == 1
+    assert PRIVATE not in str(caught.value) + caplog.text
+
+
+async def test_valid_completed_reasoning_item_can_precede_answer(tmp_path):
+    data = response_payload()
+    data["output"].insert(0, {"type": "reasoning", "id": "rs_valid", "summary": []})
+    async with service(tmp_path, lambda request: httpx.Response(200, json=data)) as chat:
+        assert (await chat.ask("유효한 추론 응답"))[
+            "answer"
+        ] == "안녕하세요. GPT가 만든 답변입니다."

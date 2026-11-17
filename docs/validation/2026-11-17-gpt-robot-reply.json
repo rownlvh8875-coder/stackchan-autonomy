@@ -5,15 +5,15 @@
   "route": "official_voice_to_pc_responses_to_official_voice",
   "scope": "offline_real_sdk_local_http_sqlite_websocket_mcp",
   "full_tests": {
-    "passed": 404,
+    "passed": 415,
     "failed": 0,
     "skipped": 0,
-    "elapsed_s": 63.27
+    "elapsed_s": 61.74
   },
-  "target_tests_passed": 114,
+  "target_tests_passed": 125,
   "lint_and_format": "passed",
   "wheel_source_runtime_bytes": "passed",
-  "independent_installed_wheel": "passed_default_and_gpt_with_local_http_only",
+  "independent_installed_wheel": "passed_fixed_release_default_and_gpt_local_sdk",
   "real_openai_account_used_in_cloud": false,
   "real_user_mcp_endpoint_used_in_cloud": false,
   "paid_api_called_in_cloud": false,
@@ -23,9 +23,13 @@
   "suggested_model_example": "gpt-6-luna",
   "suggested_reasoning_example": "none",
   "runtime_model_is_operator_configured": true,
-  "final_review": "pending",
+  "final_review": "important_response_validation_fixed_with_observed_red_green_and_full_suite",
   "hosted_ci": {
     "status": "pending"
   },
-  "live_gpt_api_voice_acceptance": "pending_operator"
+  "live_gpt_api_voice_acceptance": "pending_operator",
+  "target_tests_elapsed_s": 3.41,
+  "reviewed_pre_fix_commit": "e9e11fb8baf1414552ea9f20ac19427866d6856b",
+  "review_regression_red_count": 11,
+  "deferred_minors": []
 }

@@ -55,6 +55,45 @@ def _text(value: str, maximum: int) -> str:
     return value
 
 
+def _completed_answer(response) -> str:
+    if (
+        getattr(response, "status", None) != "completed"
+        or getattr(response, "error", None) is not None
+        or getattr(response, "incomplete_details", None) is not None
+    ):
+        raise ValueError
+    output = getattr(response, "output", None)
+    if not isinstance(output, list) or not output:
+        raise ValueError
+    messages = 0
+    parts = []
+    for item in output:
+        kind = getattr(item, "type", None)
+        if kind == "reasoning":
+            if getattr(item, "status", None) not in {None, "completed"}:
+                raise ValueError
+            continue
+        if (
+            kind != "message"
+            or getattr(item, "role", None) != "assistant"
+            or getattr(item, "status", None) != "completed"
+        ):
+            raise ValueError
+        messages += 1
+        content = getattr(item, "content", None)
+        if not isinstance(content, list) or not content:
+            raise ValueError
+        for block in content:
+            if getattr(block, "type", None) != "output_text" or not isinstance(
+                getattr(block, "text", None), str
+            ):
+                raise ValueError
+            parts.append(block.text)
+    if messages != 1:
+        raise ValueError
+    return _text(_Answer.model_validate_json("".join(parts)).answer, 800)
+
+
 def validate_gpt_settings(settings: Settings, *, require_key: bool = True):
     if (
         not settings.cloud_enabled
@@ -161,19 +200,13 @@ class GPTChat:
                 ),
                 timeout=self.settings.operation_timeout_s,
             )
-            if response.usage:
+            if response.usage is not None:
                 await self._storage.call(
                     self.budget.record_usage,
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
+                    input_tokens=getattr(response.usage, "input_tokens", None),
+                    output_tokens=getattr(response.usage, "output_tokens", None),
                 )
-            if response.status != "completed" or any(
-                block.type == "refusal"
-                for item in response.output
-                for block in getattr(item, "content", [])
-            ):
-                raise ValueError
-            answer = _text(_Answer.model_validate_json(response.output_text).answer, 800)
+            answer = _completed_answer(response)
         except StateUnavailable:
             raise GPTChatError("PC_GPT_STORAGE_UNAVAILABLE") from None
         except (OpenAIError, ValidationError, ValueError, TypeError, TimeoutError):
