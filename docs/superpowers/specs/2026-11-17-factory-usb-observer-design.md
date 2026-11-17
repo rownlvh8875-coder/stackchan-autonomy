@@ -1,6 +1,6 @@
 # Factory-based USB observer: design for the next autonomy milestone
 
-Date: 2026-11-17 KST. Status: PROPOSED, awaiting design approval before implementation.
+Date: 2026-11-17 KST. Status: APPROVED for implementation by the user's “그래 진행해”.
 Fresh ESP32/Python builder check completed: nothing important left for planning.
 The user chose preparation of an official-firmware extension, explicitly not permission
 to install firmware. Preserve the current working GPT/official-app setup on the device.
