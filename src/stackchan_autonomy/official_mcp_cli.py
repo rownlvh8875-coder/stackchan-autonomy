@@ -1,4 +1,4 @@
-"""Serve a read-only PC check tool to the official AI; physical control is unavailable."""
+"""Serve PC tools to the official AI; --gpt explicitly enables paid OpenAI text replies."""
 
 import argparse
 import asyncio
@@ -45,15 +45,42 @@ def _endpoint_input() -> str:
         raise _InputUnavailable from None
 
 
+async def _gpt_bridge(endpoint, settings):
+    from .gpt_chat import GPTChat
+    from .private_logging import private_library_logs
+
+    with private_library_logs():
+        async with GPTChat(settings) as gpt:
+            await run_bridge(endpoint, emit=lambda line: print(line, flush=True), gpt=gpt)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _PrivateParser(description=__doc__)
+    parser.add_argument(
+        "--gpt",
+        action="store_true",
+        help="Enable paid GPT replies using local .env/environment configuration",
+    )
     try:
         try:
-            parser.parse_args(argv)
+            args = parser.parse_args(argv)
         except SystemExit as stopped:
             return 0 if stopped.code == 0 else 2
+        if args.gpt:
+            from .gpt_chat import GPTChatError, validate_gpt_settings
+            from .settings import Settings
+
+            try:
+                settings = Settings()
+                validate_gpt_settings(settings)
+            except (ValueError, OSError, GPTChatError):
+                _message("PC_GPT_CONFIG_REQUIRED", error=True)
+                return 2
         endpoint = validate_endpoint(_endpoint_input())
-        asyncio.run(run_bridge(endpoint, emit=lambda line: print(line, flush=True)))
+        if args.gpt:
+            asyncio.run(_gpt_bridge(endpoint, settings))
+        else:
+            asyncio.run(run_bridge(endpoint, emit=lambda line: print(line, flush=True)))
         return 0
     except _ArgumentsInvalid:
         _message("OFFICIAL_MCP_ARGUMENTS_INVALID", error=True)

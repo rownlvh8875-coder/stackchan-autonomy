@@ -335,3 +335,16 @@ async def test_slow_budget_io_runs_off_the_event_loop(tmp_path, monkeypatch):
         finally:
             release.set()
         assert (await asyncio.wait_for(task, 2))["answer"] == "안녕하세요. GPT가 만든 답변입니다."
+
+
+@pytest.mark.parametrize("effort", ["none", "low"])
+async def test_explicit_reasoning_setting_reaches_sdk_for_supported_models(tmp_path, effort):
+    sent = []
+
+    def api(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json=response_payload())
+
+    async with service(tmp_path, api, gpt_reasoning_effort=effort) as chat:
+        await chat.ask("짧게 대답해 줘")
+    assert sent[0]["reasoning"] == {"effort": effort}

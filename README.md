@@ -141,6 +141,9 @@ namespace, 한도**를 설정해야 한다. [설정·복구·보장 범위](docs
 출고 펌웨어와 공식 앱을 유지하는 [PC 연결 확인 도구](docs/OFFICIAL_MCP_PC.ko.md)를 제공한다.
 `stackchan-pc-mcp`는 공식 AI에 PC 연결 확인과 보관된24시간 시험 요약의 읽기 전용 도구
 두 개를 등록하는 별도 확장이다. 시험 요약은 PC Fake/Mock의 과거 실시간 시험을 설명한다.
+**GPT API가 만든 답변을 로봇으로 듣는 경로**는 [GPT 연결 설명서](docs/GPT_ROBOT.ko.md)를 따른다.
+`--gpt`와 로컬 키·모델·cloud 설정으로 활성화한다. 공식 음성 서비스가 질문 전달/재생을 맡고
+PC의 Responses API가 답변을 생성한다. 실제 계정·음성 확인은 별도 기록한다.
 PC OpenAI 엔진의 로봇 직접 제어 또는 음성 backend 교체와는 구분한다.
 
 제품 없이 가능한 [실제 로컬 HTTP 검증](docs/TRANSPORT_TEST_REPORT.md)과

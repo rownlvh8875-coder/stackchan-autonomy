@@ -1,6 +1,7 @@
 """Safe defaults with explicit environment opt-ins; YAML never contains secrets."""
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import Field, SecretStr, model_validator
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     hardware_enabled: bool = False
     dry_run: bool = True
     openai_model: str | None = None
+    gpt_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] | None = None
     api_key: SecretStr | None = Field(
         default=None, validation_alias="OPENAI_API_KEY", exclude=True, repr=False
     )

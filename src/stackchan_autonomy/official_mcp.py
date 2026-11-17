@@ -1,10 +1,8 @@
 """Bounded read-only PC tools served to the official AI over an outbound WebSocket."""
 
-import logging
 import secrets
 import time
 from collections.abc import Callable
-from contextlib import contextmanager
 from urllib.parse import parse_qsl, urlsplit
 
 import anyio
@@ -14,6 +12,8 @@ from mcp.shared.message import SessionMessage
 from websockets.asyncio.client import connect as _WebSocketConnect
 from websockets.exceptions import ConnectionClosed
 
+from .gpt_chat import GPTChat, GPTChatError
+from .private_logging import private_library_logs as _private_library_logs
 from .soak_summary import SoakSummaryUnavailable, load_soak_summary
 
 INITIALIZATION_TIMEOUT_S = 30.0
@@ -21,6 +21,7 @@ _INPUT_LIMIT = 16 * 1024
 _OUTPUT_LIMIT = 64 * 1024
 _TOOL_NAME = "stackchan_pc_connection_status"
 _SUMMARY_TOOL_NAME = "stackchan_pc_soak_report_summary"
+_GPT_TOOL_NAME = "stackchan_gpt_reply"
 _ERROR_CODES = frozenset(
     {
         "OFFICIAL_MCP_INVALID_ENDPOINT",
@@ -32,6 +33,11 @@ _ERROR_CODES = frozenset(
         "OFFICIAL_MCP_REDIRECT_REJECTED",
         "PC_TOOL_UNSUPPORTED",
         "PC_SOAK_REPORT_UNAVAILABLE",
+        "PC_GPT_CONFIG_REQUIRED",
+        "PC_GPT_INVALID_QUESTION",
+        "PC_GPT_BUDGET_EXHAUSTED",
+        "PC_GPT_STORAGE_UNAVAILABLE",
+        "PC_GPT_UNAVAILABLE",
     }
 )
 
@@ -87,33 +93,6 @@ def validate_endpoint(value: str) -> str:
         raise BridgeError("OFFICIAL_MCP_INVALID_ENDPOINT") from None
 
 
-@contextmanager
-def _private_library_logs():
-    """Keep SDK/transport messages out of the dedicated bridge's console/logs."""
-    roots = ("mcp", "websockets")
-    for name in roots:
-        logging.getLogger(name)
-    loggers = [
-        logger
-        for name, logger in list(logging.Logger.manager.loggerDict.items())
-        if isinstance(logger, logging.Logger)
-        and any(name == root or name.startswith(root + ".") for root in roots)
-    ]
-    # MCP1.30 also calls logging.warning/debug directly for typed validation.
-    # This is a dedicated process; protect and later restore the root handlers too.
-    loggers.append(logging.getLogger())
-    previous = [(logger, logger.handlers[:], logger.propagate) for logger in loggers]
-    try:
-        for logger in loggers:
-            logger.handlers = [logging.NullHandler()]
-            logger.propagate = False
-        yield
-    finally:
-        for logger, handlers, propagate in previous:
-            logger.handlers = handlers
-            logger.propagate = propagate
-
-
 def _failure_code(error: Exception) -> str:
     if isinstance(error, BridgeError):
         return error.code
@@ -125,20 +104,23 @@ def _failure_code(error: Exception) -> str:
     return "OFFICIAL_MCP_CONNECTION_FAILED"
 
 
-async def run_bridge(endpoint: str, *, emit: Callable[[str], None]) -> None:
+async def run_bridge(
+    endpoint: str, *, emit: Callable[[str], None], gpt: GPTChat | None = None
+) -> None:
     endpoint = validate_endpoint(endpoint)
     with _private_library_logs():
         try:
-            await _run(endpoint, emit)
+            await _run(endpoint, emit, gpt)
         except Exception as error:
             raise BridgeError(_failure_code(error)) from None
 
 
-async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
+async def _run(endpoint: str, emit: Callable[[str], None], gpt: GPTChat | None) -> None:
     check_code = str(secrets.randbelow(900000) + 100000)
     started_at = time.monotonic()
     call_count = 0
     summary_call_count = 0
+    gpt_call_count = 0
     server = Server("stackchan-pc", version="0.1.0")
 
     def report(line: str):
@@ -149,7 +131,7 @@ async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
 
     @server.list_tools()
     async def list_tools():
-        return [
+        tools = [
             types.Tool(
                 name=_TOOL_NAME,
                 description="PC 연결 상태와 현재 실행의 6자리 연결 확인 코드를 알려줍니다. 로봇 제어 기능은 없습니다.",
@@ -172,10 +154,46 @@ async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
                 ),
             ),
         ]
+        if gpt is not None:
+            tools.append(
+                types.Tool(
+                    name=_GPT_TOOL_NAME,
+                    description=(
+                        "GPT에게 질문하거나 일반 대화 답변을 요청할 때 사용합니다. PC의 OpenAI API로 "
+                        "답변을 생성하며 사용량 비용이 발생합니다. 질문만 question에 넣으세요. 성공하면 "
+                        "answer를 자연스러운 한국어로 그대로 읽고, 실패하면 GPT 연결 실패를 알리세요. "
+                        "하드웨어 제어 기능은 없습니다."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "question": {"type": "string", "minLength": 1, "maxLength": 1200}
+                        },
+                        "required": ["question"],
+                        "additionalProperties": False,
+                    },
+                    annotations=types.ToolAnnotations(
+                        readOnlyHint=True, destructiveHint=False, openWorldHint=True
+                    ),
+                )
+            )
+        return tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict):
-        nonlocal call_count, summary_call_count
+        nonlocal call_count, summary_call_count, gpt_call_count
+        if name == _GPT_TOOL_NAME and gpt is not None:
+            if set(arguments) != {"question"}:
+                raise BridgeError("PC_GPT_INVALID_QUESTION")
+            gpt_call_count += 1
+            report(f"PC_GPT_CALLED={gpt_call_count}")
+            try:
+                reply = await gpt.ask(arguments["question"])
+            except GPTChatError as error:
+                report(error.code)
+                raise BridgeError(error.code) from None
+            report(f"PC_GPT_ANSWERED={gpt_call_count}")
+            return reply
         if name not in {_TOOL_NAME, _SUMMARY_TOOL_NAME} or arguments:
             raise BridgeError("PC_TOOL_UNSUPPORTED")
         if name == _SUMMARY_TOOL_NAME:
@@ -225,6 +243,8 @@ async def _run(endpoint: str, emit: Callable[[str], None]) -> None:
                 initialized.set()
                 report("OFFICIAL_MCP_INITIALIZED")
                 report(f"PC_CHECK_CODE={check_code}")
+                if gpt is not None:
+                    report("PC_GPT_READY")
 
         async def read_socket():
             nonlocal stage, pending_id, pending_method, response_sent, initialized_notification_seen

@@ -49,6 +49,8 @@ https://developers.openai.com/api/reference/resources/responses/methods/create
   stays in memory, is bounded, and clears on process exit. Remote prompts cannot
   change input roles or provide system instructions/configuration.
 - API model is explicitly configured with `STACKCHAN_OPENAI_MODEL`, never hardcoded.
+  Optional `STACKCHAN_GPT_REASONING_EFFORT` is passed only when explicitly set; the
+  guide uses current documented low-cost `gpt-6-luna` with `none`, not a code default.
   Key comes only from `OPENAI_API_KEY` in local `.env`/environment. GPT requires both
   `--gpt` and `STACKCHAN_CLOUD_ENABLED=true`. Default two-tool mode ignores app dotenv.
 - Reuse existing Settings, persistent SQLiteRequestBudget and AsyncStorage. Default

@@ -28,15 +28,20 @@ def run(command, *, cwd, env):
 def verify_official_mcp(python, binaries, *, cwd, env):
     cli = binaries / ("stackchan-pc-mcp.exe" if os.name == "nt" else "stackchan-pc-mcp")
     run([cli, "--help"], cwd=cwd, env=env)
+    run([cli, "--gpt", "--help"], cwd=cwd, env=env)
     probe = textwrap.dedent("""
         import asyncio, hashlib, json
         from contextlib import asynccontextmanager, suppress
         from importlib.resources import files
+        import httpx2 as httpx
+        from openai import AsyncOpenAI
         from websockets.asyncio.client import connect
         from websockets.asyncio.server import serve
         import stackchan_autonomy.official_mcp as bridge
+        from stackchan_autonomy.gpt_chat import GPTChat
+        from stackchan_autonomy.settings import Settings
 
-        async def main():
+        async def main(gpt=None):
             reply = asyncio.get_running_loop().create_future()
             release = asyncio.Event()
             lines = []
@@ -51,12 +56,17 @@ def verify_official_mcp(python, binaries, *, cwd, env):
                                                "clientInfo":{"name":"wheel-probe", "version":"1"}})
                     await socket.send(json.dumps({"jsonrpc":"2.0", "method":"notifications/initialized"}))
                     listing = await rpc(2, "tools/list", {})
-                    assert [t["name"] for t in listing["result"]["tools"]] == [
-                        "stackchan_pc_connection_status", "stackchan_pc_soak_report_summary"]
+                    expected = ["stackchan_pc_connection_status", "stackchan_pc_soak_report_summary"]
+                    if gpt is not None: expected.append("stackchan_gpt_reply")
+                    assert [t["name"] for t in listing["result"]["tools"]] == expected
                     called = await rpc(3, "tools/call", {"name":"stackchan_pc_connection_status", "arguments":{}})
                     summary = await rpc(4, "tools/call", {"name":"stackchan_pc_soak_report_summary", "arguments":{}})
+                    answer = None
+                    if gpt is not None:
+                        answer = await rpc(5, "tools/call", {"name":"stackchan_gpt_reply",
+                                           "arguments":{"question":"설치 확인"}})
                     reply.set_result((called["result"]["structuredContent"],
-                                      summary["result"]["structuredContent"]))
+                                      summary["result"]["structuredContent"], answer))
                     await release.wait()
                 except Exception as error:
                     if not reply.done(): reply.set_exception(error)
@@ -70,9 +80,9 @@ def verify_official_mcp(python, binaries, *, cwd, env):
                         yield socket
                 bridge.connect = local_only
                 task = asyncio.create_task(bridge.run_bridge(
-                    "wss://api.xiaozhi.me/mcp/?token=offline-wheel-check", emit=lines.append))
+                    "wss://api.xiaozhi.me/mcp/?token=offline-wheel-check", emit=lines.append, gpt=gpt))
                 try:
-                    result, summary = await asyncio.wait_for(reply, 10)
+                    result, summary, answer = await asyncio.wait_for(reply, 10)
                     assert result["call_count"] == 1 and result["robot_control_available"] is False
                     assert len(result["check_code"]) == 6
                     assert any(result["check_code"] in line for line in lines)
@@ -88,17 +98,50 @@ def verify_official_mcp(python, binaries, *, cwd, env):
                     assert summary["test_scope"] == "pc_fake_mock"
                     assert summary["time_mode"] == "wall_clock"
                     assert summary["robot_hardware_tested"] is False
+                    if gpt is not None:
+                        result = answer["result"]["structuredContent"]
+                        assert result["answer"] == "설치된 GPT 경로 확인입니다."
+                        assert result["provider"] == "openai_responses"
+                        assert "PC_GPT_READY" in lines and "PC_GPT_CALLED=1" in lines
+                        assert "PC_GPT_ANSWERED=1" in lines
+                    else:
+                        assert not any(line.startswith("PC_GPT_") for line in lines)
                 finally:
                     task.cancel()
                     with suppress(asyncio.CancelledError, bridge.BridgeError): await task
                     release.set()
             raw = files("stackchan_autonomy").joinpath(
                 "data", "windows-home-soak-24h-passed.json").read_bytes()
+            return hashlib.sha256(raw).hexdigest()
+
+        async def verify():
+            digest = await main()
+            sent = []
+            def api(request):
+                sent.append(json.loads(request.content))
+                return httpx.Response(200, json={
+                    "id":"resp_wheel", "object":"response", "created_at":0,
+                    "model":"offline-wheel-model", "status":"completed",
+                    "output":[{"id":"msg_wheel", "type":"message", "role":"assistant",
+                               "status":"completed", "content":[{"type":"output_text",
+                               "text":json.dumps({"answer":"설치된 GPT 경로 확인입니다."}),
+                               "annotations":[]}]}],
+                    "usage":{"input_tokens":4, "output_tokens":5, "total_tokens":9}})
+            config = Settings(_env_file=None, cloud_enabled=True,
+                              openai_model="offline-wheel-model")
+            client = AsyncOpenAI(api_key="offline-wheel-key", max_retries=0,
+                base_url="https://api.openai.com/v1",
+                http_client=httpx.AsyncClient(transport=httpx.MockTransport(api)))
+            async with GPTChat(config, client=client) as chat:
+                assert await main(chat) == digest
+            assert len(sent) == 1 and sent[0]["store"] is False
+            assert sent[0]["model"] == "offline-wheel-model"
+            assert sent[0]["input"] == [{"role":"user", "content":"설치 확인"}]
             print(json.dumps({"official_mcp":True, "call_count":1,
                               "robot_control_available":False, "soak_summary":True,
-                              "report_sha256":hashlib.sha256(raw).hexdigest()}))
+                              "gpt_reply":True, "report_sha256":digest}))
 
-        asyncio.run(main())
+        asyncio.run(verify())
     """)
     result = json.loads(run([python, "-I", "-c", probe], cwd=cwd, env=env))
     original = (
@@ -110,10 +153,11 @@ def verify_official_mcp(python, binaries, *, cwd, env):
         "call_count": 1,
         "robot_control_available": False,
         "soak_summary": True,
+        "gpt_reply": True,
         "report_sha256": hashlib.sha256(original.read_bytes()).hexdigest(),
     }:
         raise RuntimeError("installed official MCP diagnostic failed its offline contract")
-    print("Installed official MCP CLI / connection + soak summary / exact report: PASS", flush=True)
+    print("Installed PC MCP CLI / connection + report + local SDK GPT reply: PASS", flush=True)
 
 
 def main():

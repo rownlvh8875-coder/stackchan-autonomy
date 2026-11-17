@@ -55,22 +55,28 @@ def _text(value: str, maximum: int) -> str:
     return value
 
 
-class GPTChat:
-    def __init__(self, settings: Settings, *, client=None, clock=time.time):
+def validate_gpt_settings(settings: Settings, *, require_key: bool = True):
+    if (
+        not settings.cloud_enabled
+        or not isinstance(settings.openai_model, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}", settings.openai_model)
+    ):
+        raise GPTChatError("PC_GPT_CONFIG_REQUIRED")
+    if require_key:
+        key = settings.api_key.get_secret_value() if settings.api_key else ""
         if (
-            not settings.cloud_enabled
-            or not isinstance(settings.openai_model, str)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}", settings.openai_model)
+            not key
+            or len(key) > 8192
+            or any(c.isspace() or ord(c) < 33 or ord(c) > 126 for c in key)
         ):
             raise GPTChatError("PC_GPT_CONFIG_REQUIRED")
+
+
+class GPTChat:
+    def __init__(self, settings: Settings, *, client=None, clock=time.time):
+        validate_gpt_settings(settings, require_key=client is None)
         if client is None:
-            key = settings.api_key.get_secret_value() if settings.api_key else ""
-            if (
-                not key
-                or len(key) > 8192
-                or any(c.isspace() or ord(c) < 33 or ord(c) > 126 for c in key)
-            ):
-                raise GPTChatError("PC_GPT_CONFIG_REQUIRED")
+            key = settings.api_key.get_secret_value()
             with private_library_logs():
                 client = AsyncOpenAI(
                     api_key=key,
@@ -124,6 +130,11 @@ class GPTChat:
             raise GPTChatError("PC_GPT_STORAGE_UNAVAILABLE") from None
         if not reserved:
             raise GPTChatError("PC_GPT_BUDGET_EXHAUSTED")
+        reasoning = (
+            {}
+            if self.settings.gpt_reasoning_effort is None
+            else {"reasoning": {"effort": self.settings.gpt_reasoning_effort}}
+        )
         try:
             response = await asyncio.wait_for(
                 self.client.responses.create(
@@ -146,6 +157,7 @@ class GPTChat:
                     store=False,
                     max_output_tokens=600,
                     timeout=self.settings.operation_timeout_s,
+                    **reasoning,
                 ),
                 timeout=self.settings.operation_timeout_s,
             )

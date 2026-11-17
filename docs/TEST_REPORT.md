@@ -1,5 +1,12 @@
 # Test Report
 
+최신 개발 검증: **2026-11-17 / GPT API 답변 → 공식 MCP → 로봇 음성 경로**.
+실제 OpenAI SDK의 로컬 HTTP 응답과 실제 SQLite/WebSocket/MCP로 검증했다.
+전체 **404 PASS /63.27초**, GPT·연결·CLI·보고서 대상114개 모두 PASS다.
+이 수치는 유료 API나 실제 GPT 음성 시험이 아니다. 노트북의 키·모델 설정 후
+[GPT 실행 설명서](GPT_ROBOT.ko.md)에 따라 CALLED/ANSWERED와 실제 로봇 답변을 확인한다.
+상세 오프라인/설치/hosted/live 상태는 [GPT 검증 기록](validation/2026-11-17-gpt-robot-reply.json)에 구분한다.
+
 최신 현장 확인: **2026-11-17 / 사용자 Windows 노트북 + K151 / 시험 요약 음성 조회 PASS**.
 사용자 CLI의 `PC_SOAK_REPORT_CALLED=1`과 로봇의 PC 가상 로봇 시험 PASS·약24시간·83,157회·
 재시작/복원332회 설명을 확인했다. [요약 조회 현장 기록](validation/2026-11-17-official-mcp-soak-summary-live.md) 참고.

@@ -704,3 +704,35 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   remains separate. Do not infer new24h, hardware control, STOP or media acceptance.
 - Documentation/evidence only; no runtime, dependency, original report, environment
   publishing or device call. Local Markdown/JSON/provenance checks precede the upload.
+
+## GPT API robot replies — 2026-11-17 (KST)
+
+- User explicitly prioritized GPT API answers spoken by the robot and asked to
+  proceed promptly instead of more prerequisite connection tests. Confirmed key
+  readiness only, never requested or received the key. Preserved factory firmware/app.
+- Chosen route extends the live-proven official MCP path: official voice recognition/
+  orchestration/playback, PC OpenAI Responses answers. Separate API persona/context,
+  not this Codex session; no claim that MCP forces every utterance through GPT or
+  that an independent voice backend/physical autonomy is finished.
+- Native implementation in existing clean worktree, baseline360 PASS/62.32s. GPT
+  service tests observed28 missing-feature RED then29 PASS/1.16s; a test fixture's
+  assumed DB path was corrected to the actual env-priority path, without runtime changes.
+- API requests use strict answer JSON, store=false, retry0, timeout and max600 output
+  tokens. Only text plus last3 successful turns in RAM; no raw conversation in DB/logs.
+  Shared persistent request budget survives restart/failure; storage is off the loop.
+  Fixed official API URL/redirect rejection, input/output bounds and SDK debug privacy checked.
+- MCP/CLI observed12 RED/57 PASS before adding conditional third tool and --gpt.
+  Default two-tool command remains offline. GPT requires explicit cloud/key/model,
+  reads local dotenv only in GPT mode and closes client/storage on exit. CALLED and
+  ANSWERED markers distinguish invocation from validated API success.
+- Current official model docs were checked read-only. Builder's guide example is
+  gpt-6-luna/none for low-cost short replies. The model remains operator configured;
+  optional reasoning setting observed2 RED then passed in the full suite. No account
+  access/availability or price guarantee is inferred from public docs.
+- Final full404 PASS/63.27s, target114 included, Ruff/format99files PASS. Built wheel
+  runtime module bytes match source and original report bytes. Independent installed
+  default/GPT SDK probes use a synthetic key and local HTTP transport only. Final
+  installed result, fresh review and hosted matrix are recorded before handoff.
+- Operator guide covers private local .env setup, same MCP hidden endpoint, explicit
+  GPT request and optional existing-agent Character description. New paid API/voice
+  acceptance remains pending. No firmware reset, motor/media call or environment publication.

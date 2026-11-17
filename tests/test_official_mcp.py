@@ -43,7 +43,7 @@ async def initialize(socket, *, notification_params=None):
 
 
 @asynccontextmanager
-async def local_endpoint(module, monkeypatch, peer, *, emit=None, wrap=None):
+async def local_endpoint(module, monkeypatch, peer, *, emit=None, wrap=None, gpt=None):
     """Replace only the external dial; keep the actual WebSocket/SDK dialogue."""
     from websockets.asyncio.client import connect
     from websockets.asyncio.server import serve
@@ -72,7 +72,8 @@ async def local_endpoint(module, monkeypatch, peer, *, emit=None, wrap=None):
                 yield wrap(socket) if wrap is not None else socket
 
         monkeypatch.setattr(module, "connect", dial)
-        task = asyncio.create_task(module.run_bridge(ENDPOINT, emit=lines.append))
+        options = {} if gpt is None else {"gpt": gpt}
+        task = asyncio.create_task(module.run_bridge(ENDPOINT, emit=lines.append, **options))
         try:
             yield task, result, lines
         finally:
@@ -685,3 +686,154 @@ async def test_soak_unavailable_is_fixed_private_and_does_not_break_connection_t
         assert private not in observed
         assert str(tmp_path) not in observed
         assert "synthetic-endpoint-secret" not in observed
+
+
+async def test_gpt_mode_routes_real_sdk_answer_and_keeps_existing_tools(monkeypatch, tmp_path):
+    import httpx2 as httpx
+    from test_gpt_chat import response_payload, service
+
+    module = bridge_module()
+    sent = []
+
+    def api(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json=response_payload("새로운 GPT 답변입니다."))
+
+    async def peer(socket):
+        await initialize(socket)
+        listing = await request(socket, 2, "tools/list", {})
+        tools = listing["result"]["tools"]
+        assert [t["name"] for t in tools] == [
+            "stackchan_pc_connection_status",
+            "stackchan_pc_soak_report_summary",
+            "stackchan_gpt_reply",
+        ]
+        assert tools[2]["annotations"]["openWorldHint"] is True
+        answer = await request(
+            socket,
+            3,
+            "tools/call",
+            {"name": "stackchan_gpt_reply", "arguments": {"question": "새로운 질문"}},
+        )
+        connection = await request(
+            socket, 4, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
+        )
+        return answer, connection
+
+    async with service(tmp_path, api) as chat:
+        async with local_endpoint(module, monkeypatch, peer, gpt=chat) as (task, result, lines):
+            answer, connection = await asyncio.wait_for(result, 5)
+            assert not task.done()
+            assert answer["result"]["structuredContent"]["answer"] == "새로운 GPT 답변입니다."
+            assert answer["result"]["structuredContent"]["provider"] == "openai_responses"
+            assert connection["result"]["structuredContent"]["call_count"] == 1
+            assert "PC_GPT_READY" in lines and "PC_GPT_CALLED=1" in lines
+            assert "PC_GPT_ANSWERED=1" in lines and "PC_TOOL_CALLED=1" in lines
+            assert "새로운 질문" not in "\n".join(lines)
+            assert "새로운 GPT 답변" not in "\n".join(lines)
+    assert len(sent) == 1
+    assert sent[0]["input"] == [{"role": "user", "content": "새로운 질문"}]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"question": "안녕", "model": "unapproved-model"},
+        {"question": "안녕", "base_url": "https://example.invalid/private"},
+        {"path": "private/operator-file"},
+    ],
+)
+async def test_gpt_remote_arguments_cannot_change_config_or_read_files(
+    monkeypatch, tmp_path, arguments
+):
+    import httpx2 as httpx
+    from test_gpt_chat import response_payload, service
+
+    module = bridge_module()
+    calls = []
+
+    def api(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json=response_payload())
+
+    async def peer(socket):
+        await initialize(socket)
+        invalid = await request(
+            socket, 2, "tools/call", {"name": "stackchan_gpt_reply", "arguments": arguments}
+        )
+        valid = await request(
+            socket,
+            3,
+            "tools/call",
+            {"name": "stackchan_gpt_reply", "arguments": {"question": "안녕"}},
+        )
+        return invalid, valid
+
+    async with service(tmp_path, api) as chat:
+        async with local_endpoint(module, monkeypatch, peer, gpt=chat) as (_, result, lines):
+            invalid, valid = await asyncio.wait_for(result, 5)
+            assert invalid["result"]["isError"] is True
+            assert valid["result"]["structuredContent"]["provider"] == "openai_responses"
+            assert [line for line in lines if line.startswith("PC_GPT_CALLED=")] == [
+                "PC_GPT_CALLED=1"
+            ]
+    assert len(calls) == 1 and calls[0]["model"] == "account-selected-model"
+
+
+@pytest.mark.parametrize("failure", ["api", "budget"])
+async def test_gpt_failure_never_reports_answered_and_diagnostics_still_work(
+    monkeypatch, tmp_path, failure, caplog
+):
+    import httpx2 as httpx
+    from test_gpt_chat import PRIVATE, service
+
+    module = bridge_module()
+
+    async def peer(socket):
+        await initialize(socket)
+        failed = []
+        for number in range(2, 5):
+            failed.append(
+                await request(
+                    socket,
+                    number,
+                    "tools/call",
+                    {"name": "stackchan_gpt_reply", "arguments": {"question": PRIVATE}},
+                )
+            )
+        connected = await request(
+            socket, 5, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
+        )
+        return failed, connected
+
+    async with service(
+        tmp_path, lambda request: httpx.Response(500, json={"error": {"message": PRIVATE}})
+    ) as chat:
+        async with local_endpoint(module, monkeypatch, peer, gpt=chat) as (task, result, lines):
+            failed, connected = await asyncio.wait_for(result, 5)
+            assert not task.done()
+            assert all(r["result"]["isError"] for r in failed)
+            code = "PC_GPT_BUDGET_EXHAUSTED" if failure == "budget" else "PC_GPT_UNAVAILABLE"
+            selected = failed[-1] if failure == "budget" else failed[0]
+            assert selected["result"]["content"] == [{"type": "text", "text": code}]
+            assert connected["result"]["structuredContent"]["call_count"] == 1
+            assert not any(line.startswith("PC_GPT_ANSWERED=") for line in lines)
+            assert PRIVATE not in json.dumps(failed) + "\n".join(lines) + caplog.text
+
+
+async def test_default_mode_cannot_invoke_gpt_or_charge_an_api(monkeypatch):
+    module = bridge_module()
+
+    async def peer(socket):
+        await initialize(socket)
+        return await request(
+            socket,
+            2,
+            "tools/call",
+            {"name": "stackchan_gpt_reply", "arguments": {"question": "안녕"}},
+        )
+
+    async with local_endpoint(module, monkeypatch, peer) as (_, result, lines):
+        rejected = await asyncio.wait_for(result, 5)
+        assert rejected["result"]["isError"] is True
+        assert not any(line.startswith("PC_GPT_") for line in lines)

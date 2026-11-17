@@ -1,0 +1,31 @@
+{
+  "recorded_date": "2026-11-17",
+  "timezone": "Asia/Seoul",
+  "component": "gpt_api_reply_through_official_mcp",
+  "route": "official_voice_to_pc_responses_to_official_voice",
+  "scope": "offline_real_sdk_local_http_sqlite_websocket_mcp",
+  "full_tests": {
+    "passed": 404,
+    "failed": 0,
+    "skipped": 0,
+    "elapsed_s": 63.27
+  },
+  "target_tests_passed": 114,
+  "lint_and_format": "passed",
+  "wheel_source_runtime_bytes": "passed",
+  "independent_installed_wheel": "passed_default_and_gpt_with_local_http_only",
+  "real_openai_account_used_in_cloud": false,
+  "real_user_mcp_endpoint_used_in_cloud": false,
+  "paid_api_called_in_cloud": false,
+  "firmware_changed": false,
+  "physical_commands_sent": false,
+  "api_key_readiness": "operator_confirmed_ready_no_value_shared",
+  "suggested_model_example": "gpt-6-luna",
+  "suggested_reasoning_example": "none",
+  "runtime_model_is_operator_configured": true,
+  "final_review": "pending",
+  "hosted_ci": {
+    "status": "pending"
+  },
+  "live_gpt_api_voice_acceptance": "pending_operator"
+}

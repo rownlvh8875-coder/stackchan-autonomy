@@ -52,26 +52,27 @@ manager; `GPTChatError` exposes only fixed public codes. Budget/Settings interfa
 ### Task 2: Opt-in MCP/CLI and operator path
 
 **Files:** Modify `src/stackchan_autonomy/official_mcp.py`, `official_mcp_cli.py`,
+`src/stackchan_autonomy/settings.py` (optional reasoning effort, default unset),
 `tests/test_official_mcp.py`, `tests/test_official_mcp_cli.py`, `scripts/ci_verify.py`;
 add `docs/GPT_ROBOT.ko.md` and update README, next steps, test report, work log/evidence.
 **Interfaces:** `run_bridge(endpoint, *, emit, gpt=None)` accepts Task1 service only
 in opt-in mode; default call signature remains usable. CLI creates/closes service
 inside privacy protection. `question` is the only remote-configurable value.
 
-- [ ] Add failing real WebSocket + SDK/local OpenAI transport tests: three tools in
+- [x] Add failing real WebSocket + SDK/local OpenAI transport tests: three tools in
   GPT mode, correct answer and independent CALLED/ANSWERED markers; default remains
   two tools. Invalid arguments and API/budget errors must not produce ANSWERED or
   leak private content. Exercise diagnostic calls after GPT failure.
-- [ ] Add failing CLI tests for --gpt configuration, hidden endpoint behavior, fixed
+- [x] Add failing CLI tests for --gpt configuration, hidden endpoint behavior, fixed
   config errors, no default dotenv reads, cancellation/cleanup and help with no I/O.
-- [ ] Implement conditional tool registration/dispatch, private OpenAI/HTTP logger
+- [x] Implement conditional tool registration/dispatch, private OpenAI/HTTP logger
   handling, exact argument validation, lifecycle and configuration-only GPT startup.
-- [ ] Run target tests to PASS. Extend installed-wheel probe to use GPT with local
+- [x] Run target tests to PASS. Extend installed-wheel probe to use GPT with local
   HTTP transport/synthetic key and verify real SDK/MCP answer without live API.
-- [ ] Document local .env setup (key/model/cloud flag), one CMD command per step,
+- [x] Document local .env setup (key/model/cloud flag), one CMD command per step,
   Character prompt and explicit voice request, success/error markers and costs.
   Explain separate API session and official voice orchestration; live status pending.
-- [ ] Run full `uv run --frozen pytest -q`, Ruff check/format, docs/whitespace checks;
+- [x] Run full `uv run --frozen pytest -q`, Ruff check/format, docs/whitespace checks;
   build sdist/wheel and run independent `scripts/ci_verify.py --require-opus`.
   Expect all offline checks PASS. Commit; one fresh whole-change review and tested fix
   pass if needed, normal push, verify existing four hosted OS/Python CI jobs.

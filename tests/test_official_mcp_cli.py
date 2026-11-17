@@ -150,3 +150,69 @@ def test_actual_module_rejects_secret_argv_without_argparse_echo():
     )
     assert result.returncode == 2
     assert "synthetic-cli-secret" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("missing", ["cloud", "model", "key", "invalid"])
+def test_gpt_requires_local_configuration_before_prompt_or_dial(
+    monkeypatch, tmp_path, capsys, missing
+):
+    module = cli_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STACKCHAN_CLOUD_ENABLED", "true" if missing != "cloud" else "false")
+    monkeypatch.setenv(
+        "STACKCHAN_OPENAI_MODEL",
+        "account-selected-model" if missing != "invalid" else "bad\nsynthetic-private-key",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-private-key")
+    if missing == "model":
+        monkeypatch.delenv("STACKCHAN_OPENAI_MODEL")
+    if missing == "key":
+        monkeypatch.delenv("OPENAI_API_KEY")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unconfigured GPT reached hidden prompt")
+
+    monkeypatch.setattr(module.getpass, "getpass", forbidden)
+    assert module.main(["--gpt"]) == 2
+    observed = output(capsys)
+    assert "PC_GPT_CONFIG_REQUIRED" in observed
+    assert "synthetic-private-key" not in observed
+
+
+def test_gpt_reads_private_dotenv_and_closes_real_client_without_startup_api_call(
+    monkeypatch, tmp_path, capsys
+):
+    module = cli_module()
+    monkeypatch.chdir(tmp_path)
+    for name in ["STACKCHAN_CLOUD_ENABLED", "STACKCHAN_OPENAI_MODEL", "OPENAI_API_KEY"]:
+        monkeypatch.delenv(name, raising=False)
+    (tmp_path / ".env").write_text(
+        "STACKCHAN_CLOUD_ENABLED=true\nSTACKCHAN_OPENAI_MODEL=account-selected-model\nOPENAI_API_KEY=synthetic-private-key\n"
+    )
+    monkeypatch.setenv("STACKCHAN_OFFICIAL_MCP_ENDPOINT", ENDPOINT)
+    seen = []
+
+    async def connected(endpoint, *, emit, gpt):
+        assert endpoint == ENDPOINT
+        assert gpt.settings.openai_model == "account-selected-model"
+        assert gpt.settings.api_key.get_secret_value() == "synthetic-private-key"
+        seen.append(gpt)
+        emit("PC_GPT_READY")
+
+    monkeypatch.setattr(module, "run_bridge", connected)
+    assert module.main(["--gpt"]) == 0
+    assert len(seen) == 1 and seen[0].client.is_closed()
+    assert seen[0].budget.snapshot().requests == 0
+    observed = output(capsys)
+    assert "PC_GPT_READY" in observed and "synthetic-private-key" not in observed
+
+
+def test_gpt_help_never_loads_local_configuration_or_requests_secrets(
+    monkeypatch, tmp_path, capsys
+):
+    module = cli_module()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=synthetic-private-key\n")
+    assert module.main(["--gpt", "--help"]) == 0
+    observed = output(capsys)
+    assert "--gpt" in observed and "synthetic-private-key" not in observed
