@@ -318,9 +318,11 @@ def test_windows_launcher_from_other_directory_keeps_configuration_failure_visib
     blocked.mkdir()
     marker = tmp_path / "unexpected-network"
     (blocked / "sitecustomize.py").write_text(
-        "import os,socket\nfrom pathlib import Path\n"
+        "import os,socket,site\nfrom pathlib import Path\n"
         "def deny(*a,**kw):\n Path(os.environ['STACKCHAN_TEST_NETWORK_MARKER']).write_text('blocked')\n raise AssertionError('network-disabled')\n"
         "socket.socket.connect=deny\nsocket.socket.connect_ex=deny\nsocket.getaddrinfo=deny\n"
+        # PYTHONPATH alone does not process pywin32's required .pth bootstrap.
+        "site.addsitedir(os.environ['STACKCHAN_TEST_DEPENDENCY_SITE'])\n"
     )
     if prepared:
         venv.EnvBuilder(with_pip=False).create(project / ".venv")
@@ -331,12 +333,11 @@ def test_windows_launcher_from_other_directory_keeps_configuration_failure_visib
         OPENAI_API_KEY="private-launcher-key",
         STACKCHAN_OFFICIAL_MCP_ENDPOINT=ENDPOINT,
         STACKCHAN_TEST_NETWORK_MARKER=str(marker),
+        STACKCHAN_TEST_DEPENDENCY_SITE=sysconfig.get_path("purelib"),
         UV_OFFLINE="true",
         UV_PYTHON_DOWNLOADS="never",
         UV_CACHE_DIR=str(tmp_path / "cold-cache"),
-        PYTHONPATH=os.pathsep.join(
-            [str(blocked), str(project / "src"), sysconfig.get_path("purelib")]
-        ),
+        PYTHONPATH=os.pathsep.join([str(blocked), str(project / "src")]),
     )
     if prepared:
         # Prove the fixture is ready before the launcher hides import diagnostics.

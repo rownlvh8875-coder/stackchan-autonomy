@@ -86,3 +86,15 @@ No second review is requested. Final corrected full suite **485 PASS,2 Windows-o
 SKIP /69.59s**, lint/format, distributions and all independent installed-wheel probes
 PASS. Hosted results are recorded below after completion. Actual internet outage and robot voice recovery remain operator
 checks in [the guide](../MCP_RECONNECT.ko.md).
+
+## Hosted Windows fixture diagnosis
+
+First source run44184962160 passed both Linux jobs but failed the prepared-environment
+launcher case on both Windows versions (484 PASS,2 SKIP,1 FAIL each). The missing-env
+case passed. A diagnostic import precondition, without product changes, reproduced
+`ModuleNotFoundError: pywintypes` in run44185692645. The fixture passed dependencies
+only through PYTHONPATH, which does not process pywin32's required .pth bootstrap.
+It was not actually a prepared environment. The test-only network-denial hook now
+uses site.addsitedir for the already installed dependency directory. Network blocking,
+empty cache/no-download checks and the import precondition remain; neither launcher
+nor runtime behavior changed for this correction. Final hosted evidence follows.
