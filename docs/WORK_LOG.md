@@ -770,3 +770,18 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   independent voice backend, physical commands and duration claims stay separate.
 - Evidence/documentation only. No key/endpoint read or cloud-side authenticated
   API/device request; no runtime, dependency, original report or environment change.
+
+## Physical autonomy next milestone — source-backed observer design, 2026-11-17 (KST)
+
+- User requested proceeding with the remaining autonomy stages and selected preparation
+  of an official-firmware extension, explicitly not approval to install it.
+- Rechecked official main via GitHub:28b9f0c matches the pinned source. Inspected
+  external MCP direction, phone-hosted Avatar LAN, deployment RSA configuration,
+  weak placeholder secret_logic functions, ReadPos fallback and NVS/servo startup behavior.
+- Proposed a dedicated USB read-only observer first, with opt-in image understanding;
+  no motor authority from unverified pose, no new LAN service/vendor credential reuse.
+  Documented source-rebuild compatibility/recovery as a hard installation hold.
+- Added a Korean staged roadmap and full design for a builder check. No product code,
+  SDK installation/build, device/paid API access, credential read or firmware change.
+- Fresh ESP32/Python builder review returned "nothing important left". Design approval
+  remains the next gate; this preparation is not implementation or installation approval.
