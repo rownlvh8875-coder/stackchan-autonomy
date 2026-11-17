@@ -1,6 +1,6 @@
 # GPT robot reply implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Produce GPT API answers on the PC and speak them through the factory robot.
 **Architecture:** Opt-in third MCP tool backed by the official Responses SDK and
@@ -31,22 +31,23 @@ to proceed without further prerequisite discussion. Normal existing-branch push 
 
 ### Task 1: Bounded GPT reply service
 
-**Files:** Create `src/stackchan_autonomy/gpt_chat.py`, `tests/test_gpt_chat.py`.
+**Files:** Create `src/stackchan_autonomy/gpt_chat.py`, shared
+`src/stackchan_autonomy/private_logging.py`, `tests/test_gpt_chat.py`.
 **Interfaces:** `GPTChat(settings: Settings, *, client=None, clock=time.time)`,
 `async ask(question: str) -> dict[str, object]`, `async aclose()` and async context
 manager; `GPTChatError` exposes only fixed public codes. Budget/Settings interfaces unchanged.
 
-- [ ] Write real SDK/MockTransport tests asserting selected model, literal question,
+- [x] Write real SDK/MockTransport tests asserting selected model, literal question,
   strict JSON answer schema, store=false, max_output_tokens600 and no image/audio/tools.
   Assert returned Korean answer/source and that last3 successful turns alone are sent.
-- [ ] Test invalid/oversized/Unicode input before reservation; malformed/incomplete/
+- [x] Test invalid/oversized/Unicode input before reservation; malformed/incomplete/
   refused/empty/oversized output,429/500/timeout each consumes one request and no retry.
   Test restart budget exhaustion, storage failure before network, cancellation, and
   no prompt/key/API body in logs. Observe missing-service RED.
-- [ ] Implement service with AsyncStorage and existing SQLiteRequestBudget. Use the
+- [x] Implement service with AsyncStorage and existing SQLiteRequestBudget. Use the
   fixed official API URL, disabled redirects, timeout and no retries. Record usage
   safely, validate structured answer, then append bounded successful history only.
-- [ ] Run `uv run --frozen pytest -q tests/test_gpt_chat.py`; expect all PASS. Commit.
+- [x] Run `uv run --frozen pytest -q tests/test_gpt_chat.py`; expect all PASS. Commit.
 
 ### Task 2: Opt-in MCP/CLI and operator path
 
