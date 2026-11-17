@@ -216,3 +216,102 @@ def test_gpt_help_never_loads_local_configuration_or_requests_secrets(
     assert module.main(["--gpt", "--help"]) == 0
     observed = output(capsys)
     assert "--gpt" in observed and "synthetic-private-key" not in observed
+
+
+def test_reconnect_keeps_endpoint_private_prompts_once_and_closes_each_gpt_client(
+    monkeypatch, tmp_path, capsys
+):
+    from stackchan_autonomy.official_mcp_runtime import run_reconnecting
+
+    module = cli_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("STACKCHAN_OFFICIAL_MCP_ENDPOINT", raising=False)
+    monkeypatch.setenv("STACKCHAN_CLOUD_ENABLED", "true")
+    monkeypatch.setenv("STACKCHAN_OPENAI_MODEL", "offline-model")
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-private-key")
+    monkeypatch.setattr(sys, "stdin", ConsoleInput())
+    prompts, clients = [], []
+
+    def prompt(label):
+        prompts.append(label)
+        return ENDPOINT
+
+    monkeypatch.setattr(module.getpass, "getpass", prompt)
+
+    async def session(endpoint, *, emit, gpt):
+        assert endpoint == ENDPOINT
+        if clients:
+            assert clients[-1].client.is_closed()
+        clients.append(gpt)
+        emit("OFFICIAL_MCP_INITIALIZED")
+        if len(clients) == 1:
+            raise module.BridgeError("OFFICIAL_MCP_REMOTE_CLOSED", retryable=True)
+
+    async def sleep(seconds):
+        assert seconds == 2 and clients[-1].client.is_closed()
+
+    async def supervise(session, *, emit):
+        await run_reconnecting(session, emit=emit, sleep=sleep)
+
+    monkeypatch.setattr(module, "run_bridge", session)
+    monkeypatch.setattr(module, "run_reconnecting", supervise, raising=False)
+    assert module.main(["--gpt", "--reconnect"]) == 0
+    assert len(prompts) == 1 and len(clients) == 2
+    assert all(client.client.is_closed() for client in clients)
+    observed = output(capsys)
+    assert "OFFICIAL_MCP_RECONNECT_WAIT=2" in observed
+    assert "synthetic-private-key" not in observed and "synthetic-cli-secret" not in observed
+
+
+def test_reconnect_bad_configuration_stops_before_secret_prompt(monkeypatch, tmp_path, capsys):
+    module = cli_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STACKCHAN_CLOUD_ENABLED", "false")
+    monkeypatch.setattr(module, "_endpoint_input", lambda: pytest.fail("prompt reached"))
+    assert module.main(["--gpt", "--reconnect"]) == 2
+    assert "PC_GPT_CONFIG_REQUIRED" in output(capsys)
+
+
+def test_reconnect_rejects_usb_observer_before_open_or_secret_prompt(monkeypatch, capsys):
+    module = cli_module()
+    monkeypatch.setattr(module, "_endpoint_input", lambda: pytest.fail("prompt reached"))
+    assert module.main(["--gpt", "--reconnect", "--observer-port", "private-port"]) == 2
+    observed = output(capsys)
+    assert "OFFICIAL_MCP_ARGUMENTS_INVALID" in observed and "private-port" not in observed
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows CMD launcher integration")
+def test_windows_launcher_from_other_directory_keeps_configuration_failure_visible(tmp_path):
+    import shutil
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    project = tmp_path / "프로젝트 with spaces"
+    project.mkdir()
+    for name in ("README.md", "pyproject.toml", "uv.lock"):
+        shutil.copy2(root / name, project / name)
+    shutil.copytree(root / "src", project / "src", ignore=shutil.ignore_patterns("__pycache__"))
+    (project / "scripts").mkdir()
+    launcher = project / "scripts/start-gpt.cmd"
+    shutil.copy2(root / "scripts/start-gpt.cmd", launcher)
+    environment = os.environ.copy()
+    environment.update(
+        STACKCHAN_CLOUD_ENABLED="false",
+        OPENAI_API_KEY="private-launcher-key",
+        STACKCHAN_OFFICIAL_MCP_ENDPOINT=ENDPOINT,
+    )
+    result = subprocess.run(
+        ["cmd.exe", "/d", "/c", str(launcher)],
+        cwd=tmp_path,
+        env=environment,
+        input="\n",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=90,
+    )
+    assert result.returncode == 2
+    assert "PC_GPT_CONFIG_REQUIRED" in result.stdout + result.stderr
+    assert "private-launcher-key" not in result.stdout + result.stderr
+    assert "synthetic-cli-secret" not in result.stdout + result.stderr

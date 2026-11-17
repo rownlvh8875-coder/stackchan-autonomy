@@ -24,7 +24,7 @@ during development, environment publication, credential persistence or OS startu
 - HTTP401/403/proxy407 are authentication failures; other4xx handshakes, including429,
   stop. Do not hammer a rate-limited endpoint or follow a redirect.5xx are temporary.
   Certificate/SSL verification failures stop; TLS remains verified.
-- WebSocket close1000/1001/1006/1011/1012/1013 are recoverable. Policy/protocol/data-size
+- WebSocket close1000/1001/1005/1006/1011/1012/1013 are recoverable. Policy/protocol/data-size
   rejection closes stop. Exception groups containing a fatal leaf must stop.
 - Retry waits2,4,8,16,32,60 seconds then stay60, until stopped. Reset to2 only after
  60 seconds of initialized operation, so short flaps cannot create a rapid dial loop.
