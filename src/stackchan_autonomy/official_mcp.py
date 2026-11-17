@@ -12,7 +12,8 @@ from mcp.shared.message import SessionMessage
 from websockets.asyncio.client import connect as _WebSocketConnect
 from websockets.exceptions import ConnectionClosed
 
-from .gpt_chat import GPTChat, GPTChatError
+from .gpt_chat import GPTChat, GPTChatError, _text
+from .observer_protocol import ObserverError
 from .private_logging import private_library_logs as _private_library_logs
 from .soak_summary import SoakSummaryUnavailable, load_soak_summary
 
@@ -22,6 +23,7 @@ _OUTPUT_LIMIT = 64 * 1024
 _TOOL_NAME = "stackchan_pc_connection_status"
 _SUMMARY_TOOL_NAME = "stackchan_pc_soak_report_summary"
 _GPT_TOOL_NAME = "stackchan_gpt_reply"
+_OBSERVE_TOOL_NAME = "stackchan_gpt_observe"
 _ERROR_CODES = frozenset(
     {
         "OFFICIAL_MCP_INVALID_ENDPOINT",
@@ -38,6 +40,13 @@ _ERROR_CODES = frozenset(
         "PC_GPT_BUDGET_EXHAUSTED",
         "PC_GPT_STORAGE_UNAVAILABLE",
         "PC_GPT_UNAVAILABLE",
+        "PC_OBSERVER_UNAVAILABLE",
+        "PC_OBSERVER_PROTOCOL_FAILED",
+        "PC_OBSERVER_PAIRING_REQUIRED",
+        "PC_OBSERVER_IDENTITY_CHANGED",
+        "PC_OBSERVER_BUSY",
+        "PC_OBSERVER_CONSENT_REQUIRED",
+        "PC_OBSERVER_CANCELLED",
     }
 )
 
@@ -105,22 +114,27 @@ def _failure_code(error: Exception) -> str:
 
 
 async def run_bridge(
-    endpoint: str, *, emit: Callable[[str], None], gpt: GPTChat | None = None
+    endpoint: str, *, emit: Callable[[str], None], gpt: GPTChat | None = None, observer=None
 ) -> None:
     endpoint = validate_endpoint(endpoint)
     with _private_library_logs():
         try:
-            await _run(endpoint, emit, gpt)
+            if observer is not None and (gpt is None or not gpt.settings.image_transmission):
+                raise BridgeError("PC_OBSERVER_CONSENT_REQUIRED")
+            await _run(endpoint, emit, gpt, observer)
         except Exception as error:
             raise BridgeError(_failure_code(error)) from None
 
 
-async def _run(endpoint: str, emit: Callable[[str], None], gpt: GPTChat | None) -> None:
+async def _run(
+    endpoint: str, emit: Callable[[str], None], gpt: GPTChat | None, observer=None
+) -> None:
     check_code = str(secrets.randbelow(900000) + 100000)
     started_at = time.monotonic()
     call_count = 0
     summary_call_count = 0
     gpt_call_count = 0
+    observe_call_count = 0
     server = Server("stackchan-pc", version="0.1.0")
 
     def report(line: str):
@@ -177,11 +191,55 @@ async def _run(endpoint: str, emit: Callable[[str], None], gpt: GPTChat | None) 
                     ),
                 )
             )
+        if observer is not None:
+            tools.append(
+                types.Tool(
+                    name=_OBSERVE_TOOL_NAME,
+                    description=(
+                        "지금 카메라로 무엇이 보이는지 물을 때만 사용합니다. USB에서 사진 한 장과 "
+                        "캐시된 접촉·움직임 이벤트를 받아 유료 OpenAI API에 전송합니다. "
+                        "question에 질문만 넣고 성공하면 answer를 읽으세요. 연속 감시나 "
+                        "로봇 제어 기능은 없으며 머리 각도는 확인되지 않았습니다."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "question": {"type": "string", "minLength": 1, "maxLength": 1200}
+                        },
+                        "required": ["question"],
+                        "additionalProperties": False,
+                    },
+                    annotations=types.ToolAnnotations(
+                        readOnlyHint=True, destructiveHint=False, openWorldHint=True
+                    ),
+                )
+            )
         return tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict):
-        nonlocal call_count, summary_call_count, gpt_call_count
+        nonlocal call_count, summary_call_count, gpt_call_count, observe_call_count
+        if pending_id in cancelled_ids:
+            raise BridgeError("PC_OBSERVER_CANCELLED")
+        if name == _OBSERVE_TOOL_NAME and observer is not None:
+            try:
+                if set(arguments) != {"question"}:
+                    raise ValueError
+                question = _text(arguments["question"], 1200)
+            except (ValueError, TypeError):
+                raise BridgeError("PC_GPT_INVALID_QUESTION") from None
+            observe_call_count += 1
+            report(f"PC_OBSERVE_CALLED={observe_call_count}")
+            try:
+                observation = await observer.capture()
+                if pending_id in cancelled_ids:
+                    raise BridgeError("PC_OBSERVER_CANCELLED")
+                reply = await gpt.observe(question, observation)
+            except (GPTChatError, ObserverError) as error:
+                report(error.code)
+                raise BridgeError(error.code) from None
+            report(f"PC_OBSERVE_ANSWERED={observe_call_count}")
+            return reply
         if name == _GPT_TOOL_NAME and gpt is not None:
             if set(arguments) != {"question"}:
                 raise BridgeError("PC_GPT_INVALID_QUESTION")
@@ -235,6 +293,9 @@ async def _run(endpoint: str, emit: Callable[[str], None], gpt: GPTChat | None) 
         pending_id: str | int | None = None
         pending_method: str | None = None
         response_sent: anyio.Event | None = None
+        request_send, request_read = anyio.create_memory_object_stream[SessionMessage](32)
+        queued_ids: set[str | int] = set()
+        cancelled_ids: set[str | int] = set()
 
         def mark_ready():
             nonlocal stage
@@ -261,24 +322,13 @@ async def _run(endpoint: str, emit: Callable[[str], None], gpt: GPTChat | None) 
                     raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED") from None
                 root = message.root
                 if isinstance(root, types.JSONRPCRequest):
-                    if root.method == "initialize":
-                        if stage != "new":
-                            raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
-                        stage = "initializing"
-                    else:
-                        # MCP1.30 accepts requests after the initialize reply. Some
-                        # compatible clients list tools before sending the notification.
-                        if stage == "initializing" and init_response_sent:
-                            mark_ready()
-                        if root.method != "ping" and stage != "ready":
-                            raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
-                    pending_id, pending_method = root.id, root.method
-                    response_sent = anyio.Event()
-                    await incoming.send(SessionMessage(message))
-                    # Admit only one SDK request until its response is on the wire.
-                    # A queue alone would not bound the SDK's spawned request tasks.
-                    await response_sent.wait()
-                    pending_id = pending_method = response_sent = None
+                    if root.id in queued_ids:
+                        raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
+                    queued_ids.add(root.id)
+                    try:
+                        request_send.send_nowait(SessionMessage(message))
+                    except anyio.WouldBlock:
+                        raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED") from None
                 elif (
                     isinstance(root, types.JSONRPCNotification)
                     and root.method == "notifications/initialized"
@@ -298,14 +348,38 @@ async def _run(endpoint: str, emit: Callable[[str], None], gpt: GPTChat | None) 
                     and root.method == "notifications/cancelled"
                 ):
                     try:
-                        types.CancelledNotification.model_validate(root.model_dump())
+                        notice = types.CancelledNotification.model_validate(root.model_dump())
                     except Exception:
                         raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED") from None
-                    # The serial reader cannot process cancellation until the prior
-                    # response is written. Completed/unknown IDs are harmless no-ops;
-                    # forwarding them would add unnecessary SDK notification work.
+                    request_id = notice.params.requestId
+                    if request_id in queued_ids:
+                        cancelled_ids.add(request_id)
+                        if request_id == pending_id:
+                            await incoming.send(SessionMessage(message))
                 else:
                     raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
+
+        async def admit_requests():
+            nonlocal pending_id, pending_method, response_sent, stage
+            async for message in request_read:
+                root = message.message.root
+                if root.method == "initialize":
+                    if stage != "new":
+                        raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
+                    stage = "initializing"
+                else:
+                    if stage == "initializing" and init_response_sent:
+                        mark_ready()
+                    if root.method != "ping" and stage != "ready":
+                        raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
+                pending_id, pending_method = root.id, root.method
+                response_sent = anyio.Event()
+                await incoming.send(message)
+                # One SDK request until its response is sent; read-ahead stays bounded.
+                await response_sent.wait()
+                queued_ids.discard(root.id)
+                cancelled_ids.discard(root.id)
+                pending_id = pending_method = response_sent = None
 
         async def write_socket():
             nonlocal init_response_sent
@@ -335,9 +409,10 @@ async def _run(endpoint: str, emit: Callable[[str], None], gpt: GPTChat | None) 
             except TimeoutError:
                 raise BridgeError("OFFICIAL_MCP_INITIALIZATION_TIMEOUT") from None
 
-        async with incoming, read_stream, write_stream, outgoing:
+        async with incoming, read_stream, write_stream, outgoing, request_send, request_read:
             async with anyio.create_task_group() as group:
                 group.start_soon(read_socket)
+                group.start_soon(admit_requests)
                 group.start_soon(write_socket)
                 group.start_soon(initialization_deadline)
                 group.start_soon(

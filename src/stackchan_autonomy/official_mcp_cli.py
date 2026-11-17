@@ -7,6 +7,7 @@ import os
 import sys
 import warnings
 
+from .observer_protocol import ObserverError
 from .official_mcp import BridgeError, run_bridge, validate_endpoint
 
 
@@ -45,13 +46,24 @@ def _endpoint_input() -> str:
         raise _InputUnavailable from None
 
 
-async def _gpt_bridge(endpoint, settings):
+async def _gpt_bridge(endpoint, settings, observer_port=None, observer_profile=None):
     from .gpt_chat import GPTChat
     from .private_logging import private_library_logs
 
     with private_library_logs():
         async with GPTChat(settings) as gpt:
-            await run_bridge(endpoint, emit=lambda line: print(line, flush=True), gpt=gpt)
+            if observer_port is None:
+                await run_bridge(endpoint, emit=lambda line: print(line, flush=True), gpt=gpt)
+            else:
+                from .observer_async import AsyncObserver
+
+                async with AsyncObserver(observer_port, observer_profile) as observer:
+                    await run_bridge(
+                        endpoint,
+                        emit=lambda line: print(line, flush=True),
+                        gpt=gpt,
+                        observer=observer,
+                    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,11 +73,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Enable paid GPT replies using local .env/environment configuration",
     )
+    parser.add_argument(
+        "--observer-port", help="Explicit native USB port of paired observer prototype"
+    )
+    parser.add_argument("--observer-profile", default=".local/observer/profile.json")
     try:
         try:
             args = parser.parse_args(argv)
         except SystemExit as stopped:
             return 0 if stopped.code == 0 else 2
+        if args.observer_port and not args.gpt:
+            raise _ArgumentsInvalid
         if args.gpt:
             from .gpt_chat import GPTChatError, validate_gpt_settings
             from .settings import Settings
@@ -73,12 +91,20 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 settings = Settings()
                 validate_gpt_settings(settings)
+                if args.observer_port and not settings.image_transmission:
+                    _message("PC_OBSERVER_CONSENT_REQUIRED", error=True)
+                    return 2
             except (ValueError, OSError, GPTChatError):
                 _message("PC_GPT_CONFIG_REQUIRED", error=True)
                 return 2
         endpoint = validate_endpoint(_endpoint_input())
         if args.gpt:
-            asyncio.run(_gpt_bridge(endpoint, settings))
+            if args.observer_port:
+                asyncio.run(
+                    _gpt_bridge(endpoint, settings, args.observer_port, args.observer_profile)
+                )
+            else:
+                asyncio.run(_gpt_bridge(endpoint, settings))
         else:
             asyncio.run(run_bridge(endpoint, emit=lambda line: print(line, flush=True)))
         return 0
@@ -94,6 +120,9 @@ def main(argv: list[str] | None = None) -> int:
     except BridgeError as error:
         _message(error.code, error=True)
         return 2 if error.code == "OFFICIAL_MCP_INVALID_ENDPOINT" else 1
+    except ObserverError as error:
+        _message(error.code, error=True)
+        return 1
     except Exception:
         _message("OFFICIAL_MCP_CONNECTION_FAILED", error=True)
         return 1

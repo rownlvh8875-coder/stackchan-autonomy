@@ -785,3 +785,19 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   SDK installation/build, device/paid API access, credential read or firmware change.
 - Fresh ESP32/Python builder review returned "nothing important left". Design approval
   remains the next gate; this preparation is not implementation or installation approval.
+- 2026-11-17: Approved USB observer implementation
+  - User approved the reviewed design; reused isolated worktree and native inline
+    execution, wrote an implementation plan and observed missing-feature RED tests.
+  - Added bounded SCOB protocol/client, identity profile and offline metadata-only CLI;
+    same production C++ core/dispatcher host-tested with synthetic backend, plus opt-in
+    official HAL/native USB adapter. No servo/UART reconfiguration or actuator calls.
+  - Optional GPT observation shares persistent quota, validates consent/source before
+    reservation, sends one JPEG/sanitized events and never joins text chat history.
+    Existing default/text GPT MCP behavior preserved; cancellation drains serial IO.
+  - Final offline459 PASS, target155 PASS, lint/format and isolated wheel probes PASS.
+    Actual ESP-IDF6.1 ESP32-S3 build with enabled observer PASS; pinned input/output
+    hashes recorded, binary stays local and is not approved for installation.
+  - No physical device/API/credentials accessed. Installation remains HOLD for backup/
+    restore, LCD/native USB identification, public auth placeholders, camera driver
+    timing/recovery and explicit exact-image approval. Fresh review/hosted verification
+    are recorded in docs/validation/2026-11-17-usb-observer.md after completion.

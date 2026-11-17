@@ -1,0 +1,40 @@
+--- a/firmware/main/main.cpp
++++ b/firmware/main/main.cpp
+@@ -11,6 +11,8 @@
+ #include <hal/hal.h>
+ #include <hal/hal_toggles.h>
+ 
++#include "hal/pc_observer/esp/observer_usb.h"
++
+ using namespace mooncake;
+ using namespace smooth_ui_toolkit;
+ 
+@@ -22,6 +24,7 @@
+ 
+     // HAL init
+     GetHAL().init();
++    start_pc_observer();
+ 
+     // Setup ui hal
+     ui_hal::on_delay([](uint32_t ms) { GetHAL().delay(ms); });
+--- a/firmware/main/CMakeLists.txt
++++ b/firmware/main/CMakeLists.txt
+@@ -315,6 +315,7 @@
+                         esp_driver_tsens
+                         esp_driver_gpio
+                         esp_driver_uart
++                        esp_driver_usb_serial_jtag
+                         esp_driver_spi
+                         esp_driver_i2c
+                         esp_driver_i2s
+--- a/firmware/main/Kconfig.projbuild
++++ b/firmware/main/Kconfig.projbuild
+@@ -1026,3 +1026,8 @@
+             Use this option to enable resolving peer's address.
+ 
+ endmenu
++
++config STACKCHAN_PC_OBSERVER
++    bool "Experimental read-only USB PC observer (not approved for installation)"
++    depends on BOARD_TYPE_M5STACK_STACK_CHAN && ESP_CONSOLE_UART_DEFAULT && ESP_CONSOLE_SECONDARY_NONE
++    default n

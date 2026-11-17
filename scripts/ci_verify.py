@@ -342,6 +342,17 @@ def main():
             raise RuntimeError("installed soak entry point failed the bounded offline contract")
         print("Isolated installed soak entry point / restart checks: PASS", flush=True)
         verify_official_mcp(python, binaries, cwd=root, env=env)
+        observer_cli = binaries / (
+            "stackchan-observe.exe" if os.name == "nt" else "stackchan-observe"
+        )
+        run([observer_cli, "--help"], cwd=root, env=env)
+        # -I and a temporary cwd ensure the built package supplies every runtime module.
+        print(
+            run(
+                [python, "-I", project / "scripts/observer_wheel_probe.py"], cwd=root, env=env
+            ).strip(),
+            flush=True,
+        )
     return 0
 
 

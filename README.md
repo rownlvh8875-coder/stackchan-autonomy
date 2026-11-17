@@ -6,6 +6,13 @@ Observe → Perceive → Decide → Validate → Act → Evaluate 순환을 가�
 Phase 4는 MCP 계약·상태/각도/터치 파서와 메모리 내 gateway 통합 시뮬레이션을 제공한다.
 물리 실행은 계속 차단돼 있다.
 
+## USB 관찰 확장 준비
+
+K151 공식 소스 기반의 사진·센서 읽기 전용 USB 확장과 선택적 GPT 이미지 도구는
+[설치 전 확인·작업설명서](docs/USB_OBSERVER.ko.md)를 참고한다. 개발 검증과 실제
+ESP32-S3 빌드를 준비했으며, 실물 펌웨어 설치는 백업·복구·호환성 확인 전 HOLD다.
+현재 동작하는 출고 펌웨어의 GPT 음성 대화는 계속 사용할 수 있다.
+
 ## 제품이 도착하면
 
 [제품 도착 후 상세 작업설명서](docs/DEVICE_ARRIVAL_RUNBOOK.ko.md)를 D00부터 따른다.

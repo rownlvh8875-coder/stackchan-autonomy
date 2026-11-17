@@ -1,12 +1,19 @@
 # Test Report
 
+최신 추가 개발 검증: **USB 관찰 확장 / 전체459 PASS /71.01초**, 대상155 PASS,
+독립 wheel 설치의 합성 USB→이미지 SDK 및 기존 MCP/GPT 경로 PASS.
+관찰 모듈을 포함한 **실제 ESP32-S3 빌드 PASS**이며 소스·SDK·설정·결과 해시는
+[빌드 manifest](validation/2026-11-17-usb-observer-build.json)에 기록했다.
+[검증 경계·후속 결과](validation/2026-11-17-usb-observer.md) 참고.
+실물 설치·카메라/센서·실제 이미지 API·공식 음성 동시 사용은 미검증이며 설치 HOLD다.
+
 최신 현장 확인: **2026-11-17 / 사용자 Windows 노트북 + K151 / GPT API 답변·로봇 음성 PASS**.
 사용자는 로컬 설정 저장 후 로봇 답변이 정상이라고 보고했고, 현재 cmd에
 `PC_GPT_ANSWERED=N` 표시도 있음을 확인했다. [GPT 현장 기록](validation/2026-11-17-gpt-robot-reply-live.md) 참고.
 정확한 호출 번호·실제 모델 ID·발화 원문·토큰/비용은 미수집이다. 공식 음성 서비스를
 통해 PC GPT 답변을 재생하는 범위이며 독립 backend나 모터/장시간 운용 판정은 별도다.
 
-최신 개발 검증: **2026-11-17 / GPT API 답변 → 공식 MCP → 로봇 음성 경로**.
+이전 개발 검증: **2026-11-17 / GPT API 답변 → 공식 MCP → 로봇 음성 경로**.
 실제 OpenAI SDK의 로컬 HTTP 응답과 실제 SQLite/WebSocket/MCP로 검증했다.
 전체 **415 PASS /61.74초**, GPT·연결·CLI·보고서 대상125개 모두 PASS다.
 독립 검토에서 발견한 응답 완료·블록 검증 문제를 재현하고 수정했다. 불완전/오류/null/

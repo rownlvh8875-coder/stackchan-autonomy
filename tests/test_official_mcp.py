@@ -43,7 +43,9 @@ async def initialize(socket, *, notification_params=None):
 
 
 @asynccontextmanager
-async def local_endpoint(module, monkeypatch, peer, *, emit=None, wrap=None, gpt=None):
+async def local_endpoint(
+    module, monkeypatch, peer, *, emit=None, wrap=None, gpt=None, observer=None
+):
     """Replace only the external dial; keep the actual WebSocket/SDK dialogue."""
     from websockets.asyncio.client import connect
     from websockets.asyncio.server import serve
@@ -73,6 +75,8 @@ async def local_endpoint(module, monkeypatch, peer, *, emit=None, wrap=None, gpt
 
         monkeypatch.setattr(module, "connect", dial)
         options = {} if gpt is None else {"gpt": gpt}
+        if observer is not None:
+            options["observer"] = observer
         task = asyncio.create_task(module.run_bridge(ENDPOINT, emit=lines.append, **options))
         try:
             yield task, result, lines

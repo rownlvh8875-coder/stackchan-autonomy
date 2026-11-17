@@ -1,0 +1,12 @@
+--- a/main/boards/common/esp_video.h
++++ b/main/boards/common/esp_video.h
+@@ -20,6 +20,9 @@
+ };
+ 
+ class EspVideo : public Camera {
++#if CONFIG_STACKCHAN_PC_OBSERVER
++    friend struct StackChanObserverAccess;
++#endif
+ protected:
+     struct FrameBuffer {
+         uint8_t* data = nullptr;

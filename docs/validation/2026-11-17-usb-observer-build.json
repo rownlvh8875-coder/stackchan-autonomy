@@ -1,0 +1,141 @@
+{
+  "date": "2026-11-17",
+  "status": "COMPILED_NOT_APPROVED_FOR_DEVICE_INSTALLATION",
+  "target": "esp32s3",
+  "elf_machine": "Xtensa (94)",
+  "pins": {
+    "upstream": "28b9f0c8bd6acd81cb3c70f1a93c3e373b39d400",
+    "esp_idf": "fff9895c82d744c7237be8847347bdd1b07c6643",
+    "repos": [
+      {
+        "url": "https://github.com/Forairaaaaa/mooncake.git",
+        "path": "components/mooncake",
+        "branch": "v2.3.3",
+        "commit": "572a7e488641f1c3f22e85d65c27f095ecf27d12"
+      },
+      {
+        "url": "https://github.com/Forairaaaaa/mooncake_log.git",
+        "path": "components/mooncake_log",
+        "branch": "v1.5.0",
+        "commit": "554d55cd8c6e551b911b99cad274a46929f05bae"
+      },
+      {
+        "url": "https://github.com/Forairaaaaa/smooth_ui_toolkit.git",
+        "path": "components/smooth_ui_toolkit",
+        "branch": "v2.12.0",
+        "commit": "2a18ff5d3fd6b402339d0f4f3c2834f574e3cb05"
+      },
+      {
+        "url": "https://github.com/78/xiaozhi-esp32.git",
+        "path": "xiaozhi-esp32",
+        "branch": "v2.5.2",
+        "patch": "patches/xiaozhi-esp32.patch",
+        "commit": "49b4380b3faa0ceadd28a3e78aaf0f311c46c57e"
+      },
+      {
+        "url": "https://github.com/bblanchon/ArduinoJson.git",
+        "path": "components/ArduinoJson",
+        "branch": "v7.4.2",
+        "commit": "733bc4ee82630c88c0a619a883cd3a206efae977"
+      },
+      {
+        "url": "https://github.com/espressif/esp-now.git",
+        "path": "components/esp-now",
+        "branch": "c3b5f9be245f1a80db9cb938600566aa6a8dd1e5",
+        "commit": "c3b5f9be245f1a80db9cb938600566aa6a8dd1e5"
+      }
+    ]
+  },
+  "command": "idf.py -C <prepared-upstream>/firmware build",
+  "configuration": {
+    "board": "M5STACK_STACK_CHAN",
+    "observer": true,
+    "console": "UART0",
+    "usb_secondary_console": false,
+    "log_maximum_level": 3,
+    "production_authentication": false
+  },
+  "compiled_observer_sources": [
+    "observer_core.cpp",
+    "observer_usb.cpp"
+  ],
+  "inputs": {
+    "firmware/observer/core/observer_camera.h": {
+      "bytes": 2060,
+      "sha256": "6b2565af19e491aaea3b3e731113bf103a674f192402c3fe254885d9b7e619e7"
+    },
+    "firmware/observer/core/observer_core.cpp": {
+      "bytes": 5991,
+      "sha256": "96526f60476208709ca0c8371e6dccbad1a8ea4c7f504a6a0959f52c4b099d54"
+    },
+    "firmware/observer/core/observer_core.h": {
+      "bytes": 1395,
+      "sha256": "acf7fa17b452d846c76896588f63e05baab84ceac97a18fa04526c2b84015b55"
+    },
+    "firmware/observer/esp/observer_usb.cpp": {
+      "bytes": 8396,
+      "sha256": "3233168adf89a818381b6821de459de78f10eebc972f1b4a87a40943ef0d61d5"
+    },
+    "firmware/observer/esp/observer_usb.h": {
+      "bytes": 156,
+      "sha256": "74ed3e1194a09c35051024efc539e9ce873374a7e3618a11375d375c2c83b317"
+    },
+    "integration.patch": {
+      "bytes": 1210,
+      "sha256": "712c31feca7b9beea6208a7783e080f5d785b382e9879fe0fe5497612dde8bdd"
+    },
+    "camera-access.patch": {
+      "bytes": 290,
+      "sha256": "0579842e01456721aae2b35fd3646cbbdeaaa2c99a5fa13daa468673069bd11b"
+    },
+    "patched-esp-video-header": {
+      "bytes": 1666,
+      "sha256": "20e989795211e092620b258d17af098de40da2137c250a3156101a1435aece8d"
+    },
+    "managed-dependencies.lock": {
+      "bytes": 29208,
+      "sha256": "636d39a630994317d1c72e337ba3626f8e2a2daf721a453039cf2bf5ad5248b0"
+    },
+    "sdkconfig": {
+      "bytes": 153185,
+      "sha256": "23ea7793b2828b568707b0a38d4dd90261acfa76ee6beb0288a66599bb2691b5"
+    }
+  },
+  "outputs": {
+    "stack-chan.elf": {
+      "bytes": 77092852,
+      "sha256": "88f4d0a788a77577f519da1b19ebcee67727a80fbeba30287d9ce535591bf88b"
+    },
+    "stack-chan.bin": {
+      "bytes": 3786064,
+      "sha256": "30b8beb362f54d8cbbc3f6d3dbc4ad1f82ea7de34ca667498ad756f8f3a873f4"
+    },
+    "bootloader/bootloader.bin": {
+      "bytes": 24208,
+      "sha256": "4cb7583730f56acc20b3cbfc2ecc5f4088e42cf227c1fc51440f67bb1a6ff96a"
+    },
+    "partition_table/partition-table.bin": {
+      "bytes": 3072,
+      "sha256": "48da0866f56d9d8eb1fe786412984d8f1a4a01b3f13f965621fcb916761e1a4b"
+    },
+    "generated_assets.bin": {
+      "bytes": 2371294,
+      "sha256": "b7f59fcf67f09b7053857923503231cf8dd53dc4e0de3d30c9c537cdb6536b7a"
+    },
+    "ota_data_initial.bin": {
+      "bytes": 8192,
+      "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+    }
+  },
+  "hardware_accessed": false,
+  "paid_api_called": false,
+  "installed": false,
+  "pending": [
+    "LCD/USB routing",
+    "backup and verified restore",
+    "service authentication",
+    "camera driver timing/recovery",
+    "real sensors/vision/voice coexistence",
+    "separate exact-image installation approval"
+  ]
+}

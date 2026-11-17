@@ -66,6 +66,9 @@ No production broker keys, private-key extraction or account bypass is part of t
 - `snapshot` acquires the existing camera frame lock, captures/encodes one JPEG in RAM,
   releases the lock and frees owned buffers. No ongoing camera stream, file write,
   microphone operation or cloud upload. Return BUSY/UNAVAILABLE on conflict/failure.
+  Reviewed implementation uses a narrow conditional camera-access patch: discard/requeue
+  the pinned single-buffer DVP's outstanding frame, lease the next with conservative time,
+  validate raw format/length/mapping and never replace the official retained `frame_`.
 - `status` returns capabilities and cached touch/IMU events with age/provenance.
   Use existing public event signals; unavailable/never-observed is null, not false/zero.
   Exact event names/cache hooks and numeric representation are builder decisions based
@@ -134,6 +137,8 @@ hardware verification and is not guaranteed by a Python unit test.
 - No raw image, pixel signature, description, serial text, credentials or identifying
   device metadata in normal console/logs. Fixed lifecycle/call/success markers only.
   Synthetic fixtures are permitted in automated tests and clearly labeled as such.
+  The paid path rebuilds JPEG from decoded pixels to strip metadata/trailing data;
+  MCP cancellation received during capture suppresses the pending image upload.
 
 ## Build and verification
 
