@@ -799,5 +799,8 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
     hashes recorded, binary stays local and is not approved for installation.
   - No physical device/API/credentials accessed. Installation remains HOLD for backup/
     restore, LCD/native USB identification, public auth placeholders, camera driver
-    timing/recovery and explicit exact-image approval. Fresh review/hosted verification
-    are recorded in docs/validation/2026-11-17-usb-observer.md after completion.
+    timing/recovery and explicit exact-image approval. Fresh review findings were fixed
+    in one tested pass. CI44169302639 source391299e: all four jobs finally PASS; each
+    Linux459, each Windows457+2SKIP, target155 all platforms. Windows3.12's initial
+    existing1.5s heartbeat assertion and unchanged-code retry PASS are recorded with
+    the uninstrumented cause, not mislabeled as a runtime fix.

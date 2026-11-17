@@ -59,7 +59,32 @@ Existing accelerated engine scenario:2880 cycles, virtual86400s,11 restart/resto
 checks, no violations/task growth/cloud requests. This is a virtual scenario, not another
 real24h run and not a hardware observer endurance test.
 
-Hosted results are recorded below after verification. Build outputs
+## Hosted verification
+
+Source391299eb518a7d3366520785787cf9d59ca5a03c:
+[CI44169302639](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44169302639),
+final attempt2 SUCCESS. Downloaded all four JUnit/soak artifacts and checked counts,
+target cases and virtual86400s results; [machine-readable evidence](2026-11-17-usb-observer-ci.json).
+
+| Platform | Full suite | Observer/GPT/MCP/CLI targets | Virtual soak / isolated wheel |
+|---|---|---|---|
+| Linux Python3.11 | 459 PASS | 155 PASS | PASS |
+| Linux Python3.12 | 459 PASS | 155 PASS | PASS |
+| Windows Python3.11 | 457 PASS,2 SKIP | 155 PASS | PASS |
+| Windows Python3.12 | 457 PASS,2 SKIP | 155 PASS | PASS |
+
+Windows skips are the existing unavailable system Opus/fork cases. Host C++ camera/
+binary-wire tests ran successfully on Windows too. The extracted sdist's foundation
+tests passed12/12, including packaged config inputs. Hosted CI does not build ESP32;
+the separately recorded local IDF build is the device-toolchain evidence.
+
+The first Windows3.12 attempt failed the existing live heartbeat test configured with
+a1.5s TTL (456 PASS,2 SKIP,1 FAIL). The same unchanged commit passed the complete job
+on retry. Exact scheduling/storage cause was not instrumented; this is an intermittent
+timing assertion, not a demonstrated runtime fix. No lease timing or safety behavior
+was changed to get a pass. Both the first failure and retry are retained in the CI run.
+
+Build outputs
 stay in the ignored local build directory with a NOT_APPROVED_FOR_INSTALLATION notice;
 no binary release is published.
 

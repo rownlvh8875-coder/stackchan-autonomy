@@ -1,0 +1,87 @@
+{
+  "date": "2026-11-17",
+  "source_commit": "391299eb518a7d3366520785787cf9d59ca5a03c",
+  "run_url": "https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44169302639",
+  "run_attempt": 2,
+  "conclusion": "success",
+  "jobs": [
+    {
+      "job": "ubuntu-latest-py3.11",
+      "passed": 459,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "targeted_passed": 155,
+      "duration_s": 74.215,
+      "junit_sha256": "01a27d1d9cdbf7db38d84770571ccc3f9b52eb3ce154abc7631edbdfaafa3c09",
+      "virtual_soak": {
+        "passed": true,
+        "cycles": 2880,
+        "virtual_elapsed_s": 86400.0,
+        "cloud_requests": 0,
+        "remaining_tasks": 0
+      }
+    },
+    {
+      "job": "ubuntu-latest-py3.12",
+      "passed": 459,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "targeted_passed": 155,
+      "duration_s": 68.242,
+      "junit_sha256": "e20be1f50dd1f0aab39bf00004f2de321f7ba1948ef0be851c3c4f8b8dadead2",
+      "virtual_soak": {
+        "passed": true,
+        "cycles": 2880,
+        "virtual_elapsed_s": 86400.0,
+        "cloud_requests": 0,
+        "remaining_tasks": 0
+      }
+    },
+    {
+      "job": "windows-latest-py3.11",
+      "passed": 457,
+      "skipped": 2,
+      "failures": 0,
+      "errors": 0,
+      "targeted_passed": 155,
+      "duration_s": 124.809,
+      "junit_sha256": "d5024e209e762730c563c6ca0285013ad0bfa40861fb415120f6b008126aa0b4",
+      "virtual_soak": {
+        "passed": true,
+        "cycles": 2880,
+        "virtual_elapsed_s": 86400.0,
+        "cloud_requests": 0,
+        "remaining_tasks": 0
+      }
+    },
+    {
+      "job": "windows-latest-py3.12",
+      "passed": 457,
+      "skipped": 2,
+      "failures": 0,
+      "errors": 0,
+      "targeted_passed": 155,
+      "duration_s": 146.9,
+      "junit_sha256": "e2416f3c330c950bc27d21276ee1f99162ef55c1e4c9b8facfcade14c6ade00c",
+      "virtual_soak": {
+        "passed": true,
+        "cycles": 2880,
+        "virtual_elapsed_s": 86400.0,
+        "cloud_requests": 0,
+        "remaining_tasks": 0
+      }
+    }
+  ],
+  "first_attempt": {
+    "windows_py312": "1 existing live-heartbeat assertion failed; 456 passed,2 skipped",
+    "test": "tests/test_lease_runtime.py::test_live_heartbeat_renews_ownership_until_close",
+    "configured_ttl_s": 1.5,
+    "retry": "same source, no code or timing changes; full job passed",
+    "root_cause": "exact scheduling/storage cause not instrumented; intermittent assertion, not a proven fix"
+  },
+  "physical_device_accessed": false,
+  "paid_api_called": false,
+  "firmware_build_in_hosted_ci": false
+}

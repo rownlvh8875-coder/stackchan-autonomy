@@ -6,6 +6,10 @@
 [빌드 manifest](validation/2026-11-17-usb-observer-build.json)에 기록했다.
 [검증 경계·후속 결과](validation/2026-11-17-usb-observer.md) 참고.
 실물 설치·카메라/센서·실제 이미지 API·공식 음성 동시 사용은 미검증이며 설치 HOLD다.
+고정 소스391299e의 [CI44169302639](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44169302639)는
+네 조합 모두 최종 PASS다. Linux 각각459 PASS, Windows 각각457 PASS와 기존2 SKIP이며
+관찰/GPT/MCP/CLI 대상155개는 모두 PASS다. Windows3.12의 첫 기존 heartbeat 실패와
+동일 코드 재실행 PASS도 [검증 기록](validation/2026-11-17-usb-observer.md#hosted-verification)에 남겼다.
 
 최신 현장 확인: **2026-11-17 / 사용자 Windows 노트북 + K151 / GPT API 답변·로봇 음성 PASS**.
 사용자는 로컬 설정 저장 후 로봇 답변이 정상이라고 보고했고, 현재 cmd에
