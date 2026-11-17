@@ -8,6 +8,10 @@
 이 수치는 유료 API나 실제 GPT 음성 시험이 아니다. 노트북의 키·모델 설정 후
 [GPT 실행 설명서](GPT_ROBOT.ko.md)에 따라 CALLED/ANSWERED와 실제 로봇 답변을 확인한다.
 상세 오프라인/설치/hosted/live 상태는 [GPT 검증 기록](validation/2026-11-17-gpt-robot-reply.json)에 구분한다.
+고정 소스a15cb95의 [hosted CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44085236332)는
+Windows/Linux × Python3.11/3.12 모두 통과했다. Linux는 각각415 PASS, Windows는 각각413 PASS와
+기존 플랫폼 제한2 SKIP이며, GPT 대상125개는 네 조합 모두 PASS다. 가속 안정성과
+독립 설치의 기본/GPT 응답 경로도 모두 통과했다. 실제 계정·음성은 사용자 확인 대기다.
 
 최신 현장 확인: **2026-11-17 / 사용자 Windows 노트북 + K151 / 시험 요약 음성 조회 PASS**.
 사용자 CLI의 `PC_SOAK_REPORT_CALLED=1`과 로봇의 PC 가상 로봇 시험 PASS·약24시간·83,157회·

@@ -747,3 +747,11 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Fixed release rebuilt and independently installed: all existing CLI checks and
   real local WebSocket/MCP + OpenAI SDK answer probe PASS. Runtime module bytes match
   the wheel. No actual key/account/device was used. Hosted verification follows.
+- Hosted run44085236332 tested fixed sourcea15cb95: all4 Windows/Linux Python3.11/3.12
+  jobs SUCCESS, including independent wheel default/GPT probes. Downloaded and checked
+  all4 JUnit/soak artifacts. Linux415 PASS each (59.803s/56.326s); Windows413 PASS+2
+  existing platform skips each (96.171s/115.493s); target125 PASS in all4. Accelerated
+  2880-cycle virtual24h scenarios PASS, no remaining tasks/cloud requests/failure.
+- Final metadata update is documentation only; runtime stays byte-identical to the
+  successful hosted source. Key is to be configured on the laptop; actual paid API
+  model/account/voice acceptance is still pending. No new duration or hardware PASS.

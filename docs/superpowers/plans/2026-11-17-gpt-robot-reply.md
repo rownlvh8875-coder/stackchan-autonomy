@@ -76,7 +76,7 @@ inside privacy protection. `question` is the only remote-configurable value.
   build sdist/wheel and run independent `scripts/ci_verify.py --require-opus`.
   Expect all offline checks PASS. Commit; one fresh whole-change review and tested fix
   pass if needed, normal push, verify existing four hosted OS/Python CI jobs.
-- [ ] Record evidence and hand off local configuration/voice acceptance. Preserve
+- [x] Record evidence and hand off local configuration/voice acceptance. Preserve
   API key privacy and never claim the existing1h/24h or new GPT voice test without evidence.
 
 ## Self-review

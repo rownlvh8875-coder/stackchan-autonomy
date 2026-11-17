@@ -25,11 +25,82 @@
   "runtime_model_is_operator_configured": true,
   "final_review": "important_response_validation_fixed_with_observed_red_green_and_full_suite",
   "hosted_ci": {
-    "status": "pending"
+    "status": "passed",
+    "run_id": 44085236332,
+    "url": "https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44085236332",
+    "tested_commit": "a15cb9561e661de19611a752ff788b196dbe32be",
+    "matrix": [
+      {
+        "artifact": "verification-ubuntu-latest-py3.11",
+        "tests_passed": 415,
+        "tests_skipped": 0,
+        "tests_failed": 0,
+        "test_elapsed_s": 59.803,
+        "target_passed": 125,
+        "virtual_soak": {
+          "passed": true,
+          "cycles": 2880,
+          "virtual_elapsed_s": 86400,
+          "wall_elapsed_s": 28.177596409000003,
+          "remaining_tasks": 0,
+          "cloud_requests": 0
+        }
+      },
+      {
+        "artifact": "verification-ubuntu-latest-py3.12",
+        "tests_passed": 415,
+        "tests_skipped": 0,
+        "tests_failed": 0,
+        "test_elapsed_s": 56.326,
+        "target_passed": 125,
+        "virtual_soak": {
+          "passed": true,
+          "cycles": 2880,
+          "virtual_elapsed_s": 86400,
+          "wall_elapsed_s": 23.760956359000005,
+          "remaining_tasks": 0,
+          "cloud_requests": 0
+        }
+      },
+      {
+        "artifact": "verification-windows-latest-py3.11",
+        "tests_passed": 413,
+        "tests_skipped": 2,
+        "tests_failed": 0,
+        "test_elapsed_s": 96.171,
+        "target_passed": 125,
+        "virtual_soak": {
+          "passed": true,
+          "cycles": 2880,
+          "virtual_elapsed_s": 86400,
+          "wall_elapsed_s": 185.00000000000003,
+          "remaining_tasks": 0,
+          "cloud_requests": 0
+        }
+      },
+      {
+        "artifact": "verification-windows-latest-py3.12",
+        "tests_passed": 413,
+        "tests_skipped": 2,
+        "tests_failed": 0,
+        "test_elapsed_s": 115.493,
+        "target_passed": 125,
+        "virtual_soak": {
+          "passed": true,
+          "cycles": 2880,
+          "virtual_elapsed_s": 86400,
+          "wall_elapsed_s": 208.65600000000006,
+          "remaining_tasks": 0,
+          "cloud_requests": 0
+        }
+      }
+    ]
   },
   "live_gpt_api_voice_acceptance": "pending_operator",
   "target_tests_elapsed_s": 3.41,
   "reviewed_pre_fix_commit": "e9e11fb8baf1414552ea9f20ac19427866d6856b",
   "review_regression_red_count": 11,
-  "deferred_minors": []
+  "deferred_minors": [],
+  "model_documentation_checked_date": "2026-11-17",
+  "model_documentation_url": "https://developers.openai.com/api/docs/models"
 }
