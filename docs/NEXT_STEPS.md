@@ -13,7 +13,9 @@
 이 연결 단계를 통과했다.** [현장 PASS 기록](validation/2026-11-17-official-mcp-pc-live.md) 참고.
 후속 PC 기능으로 보관된 실시간24시간 시험의 읽기 전용 요약 조회를 추가했다.
 [음성 조회 순서](OFFICIAL_MCP_PC.ko.md#4-완료한-24시간-시험-결과를-음성으로-조회)에 따라
-새 호출 표시·음성 수치·PC Fake/Mock 범위를 확인한다. 이 추가 도구의 현장 확인은 대기 중이며,
+새 호출 표시·음성 수치·PC Fake/Mock 범위를 확인한다. **2026-11-17에 사용자가 실제 호출
+표시와 음성의 PASS·약24시간·83,157회·재시작/복원332회를 확인했다.**
+[요약 조회 현장 PASS](validation/2026-11-17-official-mcp-soak-summary-live.md) 참고.
 아래 직접 실물 제어 과제와는 별도다.
 
 ## Phase 4 — 계약 검증 후 실제 MCP Adapter

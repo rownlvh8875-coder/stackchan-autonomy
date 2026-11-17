@@ -97,7 +97,23 @@
       }
     ]
   },
-  "live_summary_voice_acceptance": "pending_operator_confirmation",
+  "live_summary_voice_acceptance": "passed_operator_confirmed",
   "reviewed_implementation_commit": "4eb5ef9e76a4c782d6d5e45490a3af4257c0a763",
-  "independent_review_autocrlf_true_resource_check": "passed"
+  "independent_review_autocrlf_true_resource_check": "passed",
+  "live_summary_voice_evidence": {
+    "recorded_date": "2026-11-17",
+    "timezone": "Asia/Seoul",
+    "source": "operator_console_log_and_voice_confirmation",
+    "preceding_checkout_update": "6ba5023",
+    "summary_call_marker": "PC_SOAK_REPORT_CALLED=1",
+    "spoken_scope": "pc_fake_mock",
+    "spoken_result": "PASS",
+    "spoken_elapsed": "about_24_hours",
+    "spoken_cycles": 83157,
+    "spoken_restarts": 332,
+    "spoken_restoration_checks": 332,
+    "record": "2026-11-17-official-mcp-soak-summary-live.md",
+    "new_24h_test_executed": false,
+    "authenticated_cloud_side_access": false
+  }
 }

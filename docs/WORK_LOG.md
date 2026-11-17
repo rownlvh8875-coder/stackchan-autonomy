@@ -690,3 +690,17 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   each (115.681s/161.816s). Target70 PASS in every job. Accelerated2880-cycle virtual
   24h scenario PASS in each, no remaining tasks/cloud requests/failure. These CI
   simulations are not a new real24h or physical-device run. Final update is docs only.
+
+## Historical soak summary live voice acceptance — 2026-11-17 (KST)
+
+- User's preceding pull fast-forwarded the Windows checkout to6ba5023, then the
+  same PC bridge command connected/initialized/responded to tools/list. The supplied
+  console includes exactly `PC_SOAK_REPORT_CALLED=1` for the summary invocation.
+- User explicitly confirmed the robot described PC Fake/Mock PASS, about24 hours,
+  83,157 cycles and332 restarts/restoration checks. These match the bundled original.
+  No separate audio, exact raw utterance or app catalog screenshot was provided.
+- Recorded live PASS for this historical-report voice query and updated the guide,
+  runbook, next steps, validation JSON and test report. Earlier connection-code PASS
+  remains separate. Do not infer new24h, hardware control, STOP or media acceptance.
+- Documentation/evidence only; no runtime, dependency, original report, environment
+  publishing or device call. Local Markdown/JSON/provenance checks precede the upload.
