@@ -1,17 +1,23 @@
 # Test Report
 
+최신 현장 확인: **2026-11-17 / 사용자 Windows 노트북 + K151 / GPT API 답변·로봇 음성 PASS**.
+사용자는 로컬 설정 저장 후 로봇 답변이 정상이라고 보고했고, 현재 cmd에
+`PC_GPT_ANSWERED=N` 표시도 있음을 확인했다. [GPT 현장 기록](validation/2026-11-17-gpt-robot-reply-live.md) 참고.
+정확한 호출 번호·실제 모델 ID·발화 원문·토큰/비용은 미수집이다. 공식 음성 서비스를
+통해 PC GPT 답변을 재생하는 범위이며 독립 backend나 모터/장시간 운용 판정은 별도다.
+
 최신 개발 검증: **2026-11-17 / GPT API 답변 → 공식 MCP → 로봇 음성 경로**.
 실제 OpenAI SDK의 로컬 HTTP 응답과 실제 SQLite/WebSocket/MCP로 검증했다.
 전체 **415 PASS /61.74초**, GPT·연결·CLI·보고서 대상125개 모두 PASS다.
 독립 검토에서 발견한 응답 완료·블록 검증 문제를 재현하고 수정했다. 불완전/오류/null/
 예상 밖 도구 응답은 고정 오류이며 성공 표시를 내지 않는다. 정상 추론 블록은 지원한다.
-이 수치는 유료 API나 실제 GPT 음성 시험이 아니다. 노트북의 키·모델 설정 후
+이 자동 테스트 수치는 유료 API나 실제 GPT 음성 시험이 아니다. 노트북의 키·모델 설정 후
 [GPT 실행 설명서](GPT_ROBOT.ko.md)에 따라 CALLED/ANSWERED와 실제 로봇 답변을 확인한다.
 상세 오프라인/설치/hosted/live 상태는 [GPT 검증 기록](validation/2026-11-17-gpt-robot-reply.json)에 구분한다.
 고정 소스a15cb95의 [hosted CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44085236332)는
 Windows/Linux × Python3.11/3.12 모두 통과했다. Linux는 각각415 PASS, Windows는 각각413 PASS와
 기존 플랫폼 제한2 SKIP이며, GPT 대상125개는 네 조합 모두 PASS다. 가속 안정성과
-독립 설치의 기본/GPT 응답 경로도 모두 통과했다. 실제 계정·음성은 사용자 확인 대기다.
+독립 설치의 기본/GPT 응답 경로도 모두 통과했다. 실제 API·음성의 사용자 확인은 위 현장 기록과 구분한다.
 
 최신 현장 확인: **2026-11-17 / 사용자 Windows 노트북 + K151 / 시험 요약 음성 조회 PASS**.
 사용자 CLI의 `PC_SOAK_REPORT_CALLED=1`과 로봇의 PC 가상 로봇 시험 PASS·약24시간·83,157회·

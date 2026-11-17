@@ -19,7 +19,7 @@
   "paid_api_called_in_cloud": false,
   "firmware_changed": false,
   "physical_commands_sent": false,
-  "api_key_readiness": "operator_confirmed_ready_no_value_shared",
+  "api_key_readiness": "operator_managed_local_env_no_secret_value_read_by_agent",
   "suggested_model_example": "gpt-6-luna",
   "suggested_reasoning_example": "none",
   "runtime_model_is_operator_configured": true,
@@ -96,11 +96,28 @@
       }
     ]
   },
-  "live_gpt_api_voice_acceptance": "pending_operator",
+  "live_gpt_api_voice_acceptance": "passed_operator_confirmed_answered_marker_and_normal_speech",
   "target_tests_elapsed_s": 3.41,
   "reviewed_pre_fix_commit": "e9e11fb8baf1414552ea9f20ac19427866d6856b",
   "review_regression_red_count": 11,
   "deferred_minors": [],
   "model_documentation_checked_date": "2026-11-17",
-  "model_documentation_url": "https://developers.openai.com/api/docs/models"
+  "model_documentation_url": "https://developers.openai.com/api/docs/models",
+  "live_gpt_api_voice_evidence": {
+    "recorded_date": "2026-11-17",
+    "timezone": "Asia/Seoul",
+    "source": "operator_local_setup_and_voice_report_then_marker_confirmation",
+    "guided_release_commit": "ccd29783c18fef69e668de4ee30e2870d70a99a6",
+    "runtime_revision_independently_observed": false,
+    "answered_marker_confirmed": true,
+    "exact_call_number": null,
+    "normal_robot_voice_confirmed": true,
+    "raw_console_log_supplied": false,
+    "actual_model_id_observed": null,
+    "raw_utterance_or_audio_supplied": false,
+    "tokens_and_cost_measured": false,
+    "additional_paid_request_for_evidence": false,
+    "authenticated_cloud_side_access": false,
+    "record": "2026-11-17-gpt-robot-reply-live.md"
+  }
 }

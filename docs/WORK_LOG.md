@@ -755,3 +755,18 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - Final metadata update is documentation only; runtime stays byte-identical to the
   successful hosted source. Key is to be configured on the laptop; actual paid API
   model/account/voice acceptance is still pending. No new duration or hardware PASS.
+
+## GPT API robot reply live acceptance — 2026-11-17 (KST)
+
+- After reporting local .env saved, user followed the guided GPT run and reported
+  normal robot speech. A single follow-up asked only whether the existing cmd had
+  PC_GPT_ANSWERED with any number; user explicitly confirmed the marker was present.
+  No extra paid question was requested for evidence collection.
+- Recorded operator-confirmed live PASS for official voice → PC Responses answer →
+  robot speech. Exact call number, runtime SHA/model, API response ID, raw speech,
+  usage tokens and cost were not supplied; do not fabricate or generalize these.
+- Updated the guide, runbook, README, next steps, test report and validation JSON.
+  This remains a separate API conversation with official speech orchestration;
+  independent voice backend, physical commands and duration claims stay separate.
+- Evidence/documentation only. No key/endpoint read or cloud-side authenticated
+  API/device request; no runtime, dependency, original report or environment change.
