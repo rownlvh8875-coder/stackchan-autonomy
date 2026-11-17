@@ -280,9 +280,29 @@ def test_reconnect_rejects_usb_observer_before_open_or_secret_prompt(monkeypatch
     assert "OFFICIAL_MCP_ARGUMENTS_INVALID" in observed and "private-port" not in observed
 
 
+def test_empty_observer_port_is_rejected_before_input_in_reconnect_mode(
+    monkeypatch, tmp_path, capsys
+):
+    module = cli_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STACKCHAN_CLOUD_ENABLED", "true")
+    monkeypatch.setenv("STACKCHAN_OPENAI_MODEL", "offline-model")
+    monkeypatch.setenv("OPENAI_API_KEY", "private-key")
+    monkeypatch.setattr(
+        module, "_endpoint_input", lambda: pytest.fail("invalid mode reached secret input")
+    )
+    assert module.main(["--gpt", "--reconnect", "--observer-port", ""]) == 2
+    assert "OFFICIAL_MCP_ARGUMENTS_INVALID" in output(capsys)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows CMD launcher integration")
-def test_windows_launcher_from_other_directory_keeps_configuration_failure_visible(tmp_path):
+@pytest.mark.parametrize("prepared", [False, True])
+def test_windows_launcher_from_other_directory_keeps_configuration_failure_visible(
+    tmp_path, prepared
+):
     import shutil
+    import sysconfig
+    import venv
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
@@ -294,11 +314,29 @@ def test_windows_launcher_from_other_directory_keeps_configuration_failure_visib
     (project / "scripts").mkdir()
     launcher = project / "scripts/start-gpt.cmd"
     shutil.copy2(root / "scripts/start-gpt.cmd", launcher)
+    blocked = tmp_path / "deny-network"
+    blocked.mkdir()
+    marker = tmp_path / "unexpected-network"
+    (blocked / "sitecustomize.py").write_text(
+        "import os,socket\nfrom pathlib import Path\n"
+        "def deny(*a,**kw):\n Path(os.environ['STACKCHAN_TEST_NETWORK_MARKER']).write_text('blocked')\n raise AssertionError('network-disabled')\n"
+        "socket.socket.connect=deny\nsocket.socket.connect_ex=deny\nsocket.getaddrinfo=deny\n"
+    )
+    if prepared:
+        venv.EnvBuilder(with_pip=False).create(project / ".venv")
     environment = os.environ.copy()
+    environment.pop("UV_PROJECT_ENVIRONMENT", None)
     environment.update(
         STACKCHAN_CLOUD_ENABLED="false",
         OPENAI_API_KEY="private-launcher-key",
         STACKCHAN_OFFICIAL_MCP_ENDPOINT=ENDPOINT,
+        STACKCHAN_TEST_NETWORK_MARKER=str(marker),
+        UV_OFFLINE="true",
+        UV_PYTHON_DOWNLOADS="never",
+        UV_CACHE_DIR=str(tmp_path / "cold-cache"),
+        PYTHONPATH=os.pathsep.join(
+            [str(blocked), str(project / "src"), sysconfig.get_path("purelib")]
+        ),
     )
     result = subprocess.run(
         ["cmd.exe", "/d", "/c", str(launcher)],
@@ -312,6 +350,8 @@ def test_windows_launcher_from_other_directory_keeps_configuration_failure_visib
         timeout=90,
     )
     assert result.returncode == 2
-    assert "PC_GPT_CONFIG_REQUIRED" in result.stdout + result.stderr
+    code = "PC_GPT_CONFIG_REQUIRED" if prepared else "PC_PYTHON_ENV_REQUIRED"
+    assert code in result.stdout + result.stderr
     assert "private-launcher-key" not in result.stdout + result.stderr
     assert "synthetic-cli-secret" not in result.stdout + result.stderr
+    assert not marker.exists() and not (tmp_path / "cold-cache").exists()

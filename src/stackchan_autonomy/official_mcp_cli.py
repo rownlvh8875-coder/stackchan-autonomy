@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         reconnect = args.reconnect
         if args.observer_port and not args.gpt:
             raise _ArgumentsInvalid
-        if args.observer_port and reconnect:
+        if args.observer_port is not None and reconnect:
             raise _ArgumentsInvalid
         if args.gpt:
             from .gpt_chat import GPTChatError, validate_gpt_settings

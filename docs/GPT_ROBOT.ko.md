@@ -55,6 +55,10 @@ OpenAI 요청에는 `store=false`를 사용하며 제공자의 데이터 처리 
 
 ## 3. GPT 모드로 실행
 
+자동 복구를 사용하려면 [Windows 간편 실행·자동 재연결](MCP_RECONNECT.ko.md)을 따른다.
+기존 설정과 출고 펌웨어를 유지하며 `scripts/start-gpt.cmd` 또는 `--gpt --reconnect`로 실행한다.
+아래 기존 명령은 단일 연결 모드다.
+
 ```cmd
 "%USERPROFILE%\.local\bin\uv.exe" --directory "%USERPROFILE%\stackchan-soak-24h" run --frozen stackchan-pc-mcp --gpt
 ```
@@ -96,7 +100,8 @@ GPT 도구가 실패하면 연결 또는 사용량 한도 문제를 알리고, G
 
 이 지침은 공식 AI의 도구 선택을 유도하며 모든 발화의 강제 라우팅을 보장하지 않는다.
 PC는 이미지·오디오를 받지 않으며 전달받은 텍스트 질문과 제한된 대화만 OpenAI로 보낸다.
-노트북과 cmd를 켜 두어야 한다. 종료는 **Ctrl+C**, 재연결은 수동 실행이다.
+노트북과 cmd를 켜 두어야 한다. 종료는 **Ctrl+C**다. 기존 단일 연결 모드는 수동 실행,
+`--reconnect` 모드는 일시적인 MCP 연결 오류만 자동 복구하며 GPT 질문을 재전송하지 않는다.
 
 ## 오류 확인
 

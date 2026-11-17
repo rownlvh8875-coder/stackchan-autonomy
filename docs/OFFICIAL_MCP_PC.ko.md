@@ -145,3 +145,8 @@ Official MCP endpoint (hidden input):
 이 기록의 코드는 해당 실행의 값이며, 새 실행에서는 현재 cmd에 나온 코드를 기준으로 비교한다.
 같은 날 [시험 요약 조회](validation/2026-11-17-official-mcp-soak-summary-live.md)의 실제 호출과
 로봇 음성 결과·PC Fake/Mock 범위도 사용자 확인으로 PASS했다.
+## 자동 재연결 선택 기능
+
+진단은 `--reconnect`, GPT 대화는 `--gpt --reconnect`로 연결 복구를 켤 수 있다.
+Windows 실행 파일·대기/종료·질문 및 사용량 처리·현장 확인 순서는
+[PC 연결 자동 복구 설명서](MCP_RECONNECT.ko.md)를 참고한다.

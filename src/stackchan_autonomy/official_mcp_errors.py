@@ -2,7 +2,13 @@
 
 import ssl
 
-from websockets.exceptions import ConnectionClosed, InvalidProxyStatus, InvalidStatus
+from websockets.exceptions import (
+    ConnectionClosed,
+    InvalidMessage,
+    InvalidProxyMessage,
+    InvalidProxyStatus,
+    InvalidStatus,
+)
 
 _TEMPORARY = frozenset(
     {
@@ -72,6 +78,12 @@ def classify_failure(error: Exception) -> BridgeError:
         return BridgeError("OFFICIAL_MCP_HANDSHAKE_FAILED")
     if isinstance(error, ssl.SSLError):
         return BridgeError("OFFICIAL_MCP_TLS_FAILED")
+    if isinstance(error, (InvalidMessage, InvalidProxyMessage)) and isinstance(
+        error.__cause__, EOFError
+    ):
+        # websockets wraps an interrupted upgrade/CONNECT response this way.
+        # Other malformed HTTP responses remain fatal.
+        return BridgeError("OFFICIAL_MCP_CONNECTION_FAILED", retryable=True)
     if isinstance(error, (OSError, TimeoutError)):
         return BridgeError("OFFICIAL_MCP_CONNECTION_FAILED", retryable=True)
     return BridgeError("OFFICIAL_MCP_CONNECTION_FAILED")

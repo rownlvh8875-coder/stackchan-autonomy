@@ -18,6 +18,138 @@ def runtime():
     return importlib.import_module("stackchan_autonomy.official_mcp_runtime")
 
 
+@pytest.mark.parametrize("proxy", [False, True])
+async def test_handshake_eof_recovers_to_a_real_mcp_session(monkeypatch, proxy):
+    from websockets.asyncio.client import connect
+    from websockets.asyncio.server import serve
+
+    ready = asyncio.Event()
+    dials = []
+
+    async def drop(reader, writer):
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def peer(socket):
+        await initialize(socket)
+        await request(socket, 2, "tools/list", {})
+        ready.set()
+        await socket.wait_closed()
+
+    module = bridge_module()
+    async with await asyncio.start_server(drop, "127.0.0.1", 0) as raw:
+        raw_port = raw.sockets[0].getsockname()[1]
+        async with serve(peer, "127.0.0.1", 0) as good:
+            good_port = good.sockets[0].getsockname()[1]
+
+            @asynccontextmanager
+            async def local_only(uri, **kwargs):
+                assert uri == ENDPOINT
+                dials.append(1)
+                if len(dials) == 1 and proxy:
+                    # The loopback proxy drops CONNECT; it never forwards externally.
+                    target, route = "wss://synthetic.invalid/", f"http://127.0.0.1:{raw_port}"
+                else:
+                    port = raw_port if len(dials) == 1 else good_port
+                    target, route = f"ws://127.0.0.1:{port}", None
+                async with connect(target, proxy=route, **kwargs) as socket:
+                    yield socket
+
+            monkeypatch.setattr(module, "connect", local_only)
+
+            async def session(emit):
+                await run_bridge(ENDPOINT, emit=emit)
+
+            async def sleep(seconds):
+                assert seconds == 2
+
+            task = asyncio.create_task(
+                runtime().run_reconnecting(session, emit=lambda s: None, sleep=sleep)
+            )
+            try:
+                await asyncio.wait_for(ready.wait(), 3)
+                assert len(dials) == 2 and not task.done()
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_bad_http_syntax_remains_fatal_even_though_eof_can_retry(monkeypatch):
+    from websockets.exceptions import InvalidMessage, InvalidProxyMessage
+
+    module = bridge_module()
+    for cls in (InvalidMessage, InvalidProxyMessage):
+        failure = cls("private-invalid-http")
+        failure.__cause__ = ValueError("private-malformed-status")
+
+        def fail(*args, **kwargs):
+            raise failure
+
+        monkeypatch.setattr(module, "connect", fail)
+        with pytest.raises(BridgeError) as caught:
+            await run_bridge(ENDPOINT, emit=lambda s: None)
+        assert not caught.value.retryable
+
+
+async def test_sdk_tool_output_failure_terminates_session_without_redial(monkeypatch):
+    from websockets.asyncio.client import connect
+    from websockets.asyncio.server import serve
+    from websockets.exceptions import ConnectionClosed
+
+    broken = asyncio.Event()
+    calls = []
+
+    async def peer(socket):
+        await initialize(socket)
+        await request(socket, 2, "tools/list", {})
+        try:
+            await request(
+                socket, 3, "tools/call", {"name": "stackchan_pc_connection_status", "arguments": {}}
+            )
+        except ConnectionClosed:
+            pass
+        await socket.wait_closed()
+
+    def unavailable(line):
+        if line.startswith("PC_TOOL_CALLED="):
+            broken.set()
+            raise BrokenPipeError("private-output")
+
+    module = bridge_module()
+    async with serve(peer, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+
+        @asynccontextmanager
+        async def local_only(uri, **kwargs):
+            async with connect(f"ws://127.0.0.1:{port}", proxy=None, **kwargs) as socket:
+                yield socket
+
+        monkeypatch.setattr(module, "connect", local_only)
+
+        async def session(emit):
+            calls.append(1)
+            await run_bridge(ENDPOINT, emit=emit)
+
+        async def no_retry(seconds):
+            pytest.fail("output failure must be fatal")
+
+        task = asyncio.create_task(
+            runtime().run_reconnecting(session, emit=unavailable, sleep=no_retry)
+        )
+        try:
+            await asyncio.wait_for(broken.wait(), 2)
+            with pytest.raises(BridgeError) as caught:
+                await asyncio.wait_for(asyncio.shield(task), 2)
+            assert caught.value.code == "OFFICIAL_MCP_OUTPUT_FAILED"
+            assert calls == [1]
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 @pytest.mark.parametrize(
     "failure,code,retryable",
     [

@@ -93,11 +93,15 @@ async def _run(
     gpt_call_count = 0
     observe_call_count = 0
     server = Server("stackchan-pc", version="0.1.0")
+    output_failed = anyio.Event()
 
     def report(line: str):
         try:
             emit(line)
         except Exception:
+            # MCP catches exceptions raised inside tool handlers. A separate watcher
+            # must still end this session if a tool's lifecycle output cannot be written.
+            output_failed.set()
             raise BridgeError("OFFICIAL_MCP_OUTPUT_FAILED") from None
 
     @server.list_tools()
@@ -366,8 +370,13 @@ async def _run(
             except TimeoutError:
                 raise BridgeError("OFFICIAL_MCP_INITIALIZATION_TIMEOUT", retryable=True) from None
 
+        async def output_failure():
+            await output_failed.wait()
+            raise BridgeError("OFFICIAL_MCP_OUTPUT_FAILED")
+
         async with incoming, read_stream, write_stream, outgoing, request_send, request_read:
             async with anyio.create_task_group() as group:
+                group.start_soon(output_failure)
                 group.start_soon(read_socket)
                 group.start_soon(admit_requests)
                 group.start_soon(write_socket)

@@ -43,10 +43,15 @@ Keep fixed ASCII lifecycle markers. Add RECONNECT_WAIT=<seconds> and RECONNECTIN
 only fixed/sanitized error codes, never URL, key, dialogue, remote reason or device IDs.
 Reconnect mode also shows short Korean connection/configuration guidance.
 
-`scripts/start-gpt.cmd` locates uv in the user's local bin or PATH, changes to the
-repository via its own directory, uses UTF-8 and runs `--gpt --reconnect` once. It
+`scripts/start-gpt.cmd` changes to its own repository, checks the prepared `.venv`
+Python/imports without package management, uses UTF-8 and runs `--gpt --reconnect` once. It
 does not shell-loop, write configuration/secrets, install drivers or schedule startup.
 Fatal errors remain visible; Ctrl+C does not restart. Existing local `.env` is used.
+Review correction: missing/unprepared environment gives a fixed setup instruction;
+it must not download packages before validating configuration. Setup is a separate
+explicit `uv sync --frozen` step. Incomplete HTTP/CONNECT upgrade EOF is temporary;
+other malformed HTTP remains fatal. Tool callback output failure separately signals
+the session task group because the SDK can catch callback exceptions.
 
 ## Evidence
 

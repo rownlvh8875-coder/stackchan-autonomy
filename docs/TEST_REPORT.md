@@ -1,5 +1,12 @@
 # Test Report
 
+PC MCP 자동 재연결 추가: 로컬 전체485 PASS, Windows 전용2 SKIP /69.59초.
+검토 수정 후 대상146 PASS+2 SKIP, 린트·배포·독립 설치의 로컬 실제 WebSocket 재연결과 SDK 검증 PASS.
+처리 중 연결을 끊은 요청의 자동 재전송 없음과 사용량 보존을 확인했다.
+[검토·플랫폼별 기록](validation/2026-11-17-mcp-reconnect.md),
+[Windows 간편 실행과 현장 확인](MCP_RECONNECT.ko.md)을 참고한다.
+이는 실제 인터넷 장애·유료 API·로봇 음성 복구의 현장 판정은 아니다.
+
 추가 호환성 검토: [원본 백업·복구 준비와 근거](validation/2026-11-17-k151-recovery-compatibility.md).
 공식 저장소 기여자가 공개 빌드의 제품 인증 구현/설정 경로 미공개를 확인했다.
 LCD C/E 분기와 native USB 회로 경로는 소스로 확인했으나 실제 기기 판정은 미실행이다.

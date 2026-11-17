@@ -821,3 +821,29 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
     eFuse/cloud/external controller state. No executable write/erase procedure is issued.
   - Documentation only; no runtime/lock changes, device calls, secret/NVS extraction,
     public issue/comment, installation or paid API. Hardware evidence remains pending.
+- 2026-11-17: PC MCP transport recovery and Windows launch
+  - User approved the proposed automatic reconnect/no automatic GPT replay/launcher
+    work while physical backup evidence is unavailable. Preserved inline method and
+    existing isolated worktree; wrote spec/plan and ran baseline459 PASS.
+  - Added conservative fixed error classification and sequential fresh-session
+    supervisor. Capped backoff, fatal-first groups and cancellable waits; no credential
+    storage or physical observer reconnection. New flag defaults off, launcher opts in.
+  - Fresh GPT client/context closes storage/HTTP before a next dial; persistent quota
+    retained. Actual local SDK/MCP test cancelled an in-flight paid-call simulation,
+    showed no replay, then accepted one genuinely new question with fresh context.
+  - TDD RED17 then RED3 → target141 PASS+1SKIP, full480 PASS+1Windows-onlySKIP65.54s.
+    Ruff/distributions and installed-wheel real local recovery/GPT/observer probes PASS.
+  - Added UTF-8 CMD launcher with own-directory resolution, private endpoint prompt
+    once and fixed Korean guidance. Hosted Windows launcher/whole-change review pending
+    in docs/validation/2026-11-17-mcp-reconnect.md. No device, real endpoint, paid API,
+    secret read, firmware install, OS startup task or environment publication.
+  - Fresh review: fixed truncated HTTP/CONNECT handshake retry and SDK-swallowed output
+    failures via independent task-group signal. Launcher now requires prepared venv
+    with no package/network setup at launch; explicit uv sync is separate. Regraded
+    empty observer argument to Important because it bypassed pre-input mode validation,
+    then observed RED and fixed. Portable review RED4→97PASS+2WindowsSKIP. Cold-cache
+    Windows cases await hosted execution; no fabricated local Windows RED claim.
+    Cleanup-inclusive stability reset is a disclosed deferred minor.
+
+  - Corrected full485PASS+2Windows-onlySKIP69.59s, lint/format, distribution and installed
+    recovery/GPT/observer probes PASS. No runtime/firmware dependency changed.
