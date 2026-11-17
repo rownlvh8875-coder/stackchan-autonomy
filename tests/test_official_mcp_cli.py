@@ -338,6 +338,23 @@ def test_windows_launcher_from_other_directory_keeps_configuration_failure_visib
             [str(blocked), str(project / "src"), sysconfig.get_path("purelib")]
         ),
     )
+    if prepared:
+        # Prove the fixture is ready before the launcher hides import diagnostics.
+        probe = subprocess.run(
+            [
+                str(project / ".venv/Scripts/python.exe"),
+                "-c",
+                "import stackchan_autonomy.official_mcp_cli",
+            ],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        assert probe.returncode == 0, probe.stdout + probe.stderr
     result = subprocess.run(
         ["cmd.exe", "/d", "/c", str(launcher)],
         cwd=tmp_path,
