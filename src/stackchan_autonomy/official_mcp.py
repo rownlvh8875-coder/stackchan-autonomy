@@ -14,6 +14,7 @@ from websockets.exceptions import ConnectionClosed
 
 from .gpt_chat import GPTChat, GPTChatError, _text
 from .observer_protocol import ObserverError
+from .official_mcp_errors import BridgeError, classify_failure
 from .private_logging import private_library_logs as _private_library_logs
 from .soak_summary import SoakSummaryUnavailable, load_soak_summary
 
@@ -24,39 +25,6 @@ _TOOL_NAME = "stackchan_pc_connection_status"
 _SUMMARY_TOOL_NAME = "stackchan_pc_soak_report_summary"
 _GPT_TOOL_NAME = "stackchan_gpt_reply"
 _OBSERVE_TOOL_NAME = "stackchan_gpt_observe"
-_ERROR_CODES = frozenset(
-    {
-        "OFFICIAL_MCP_INVALID_ENDPOINT",
-        "OFFICIAL_MCP_CONNECTION_FAILED",
-        "OFFICIAL_MCP_PROTOCOL_FAILED",
-        "OFFICIAL_MCP_REMOTE_CLOSED",
-        "OFFICIAL_MCP_INITIALIZATION_TIMEOUT",
-        "OFFICIAL_MCP_OUTPUT_FAILED",
-        "OFFICIAL_MCP_REDIRECT_REJECTED",
-        "PC_TOOL_UNSUPPORTED",
-        "PC_SOAK_REPORT_UNAVAILABLE",
-        "PC_GPT_CONFIG_REQUIRED",
-        "PC_GPT_INVALID_QUESTION",
-        "PC_GPT_BUDGET_EXHAUSTED",
-        "PC_GPT_STORAGE_UNAVAILABLE",
-        "PC_GPT_UNAVAILABLE",
-        "PC_OBSERVER_UNAVAILABLE",
-        "PC_OBSERVER_PROTOCOL_FAILED",
-        "PC_OBSERVER_PAIRING_REQUIRED",
-        "PC_OBSERVER_IDENTITY_CHANGED",
-        "PC_OBSERVER_BUSY",
-        "PC_OBSERVER_CONSENT_REQUIRED",
-        "PC_OBSERVER_CANCELLED",
-    }
-)
-
-
-class BridgeError(Exception):
-    """Only fixed public codes cross the transport/console boundary."""
-
-    def __init__(self, code: str):
-        self.code = code if code in _ERROR_CODES else "OFFICIAL_MCP_CONNECTION_FAILED"
-        super().__init__(self.code)
 
 
 class _SingleEndpointConnect(_WebSocketConnect):
@@ -102,17 +70,6 @@ def validate_endpoint(value: str) -> str:
         raise BridgeError("OFFICIAL_MCP_INVALID_ENDPOINT") from None
 
 
-def _failure_code(error: Exception) -> str:
-    if isinstance(error, BridgeError):
-        return error.code
-    if isinstance(error, ExceptionGroup):
-        for child in error.exceptions:
-            code = _failure_code(child)
-            if code != "OFFICIAL_MCP_CONNECTION_FAILED":
-                return code
-    return "OFFICIAL_MCP_CONNECTION_FAILED"
-
-
 async def run_bridge(
     endpoint: str, *, emit: Callable[[str], None], gpt: GPTChat | None = None, observer=None
 ) -> None:
@@ -123,7 +80,7 @@ async def run_bridge(
                 raise BridgeError("PC_OBSERVER_CONSENT_REQUIRED")
             await _run(endpoint, emit, gpt, observer)
         except Exception as error:
-            raise BridgeError(_failure_code(error)) from None
+            raise classify_failure(error) from None
 
 
 async def _run(
@@ -312,8 +269,8 @@ async def _run(
             while True:
                 try:
                     frame = await socket.recv()
-                except ConnectionClosed:
-                    raise BridgeError("OFFICIAL_MCP_REMOTE_CLOSED") from None
+                except ConnectionClosed as error:
+                    raise classify_failure(error) from None
                 if not isinstance(frame, str) or len(frame.encode("utf-8")) > _INPUT_LIMIT:
                     raise BridgeError("OFFICIAL_MCP_PROTOCOL_FAILED")
                 try:
@@ -407,7 +364,7 @@ async def _run(
                 with anyio.fail_after(INITIALIZATION_TIMEOUT_S):
                     await initialized.wait()
             except TimeoutError:
-                raise BridgeError("OFFICIAL_MCP_INITIALIZATION_TIMEOUT") from None
+                raise BridgeError("OFFICIAL_MCP_INITIALIZATION_TIMEOUT", retryable=True) from None
 
         async with incoming, read_stream, write_stream, outgoing, request_send, request_read:
             async with anyio.create_task_group() as group:
