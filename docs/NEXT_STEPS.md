@@ -14,7 +14,10 @@ PC MCP 자동 재연결과 Windows 간편 실행을 구현했고,2026-11-18(한�
 따라서 공식 앱을 유지하는 설치는 현재 HOLD다. [검토 근거](validation/2026-11-17-k151-recovery-compatibility.md)와
 [집에서 시작할 원본 백업·복구 준비 순서](K151_BACKUP_RECOVERY.ko.md)를 참고한다.
 2026-11-18에는 Windows COM3의 USB 식별과 실제 ESP32-S3·보호 상태·16MB 조회까지
-확인했다. 원본 A/B 백업과 이후 상태는 [실물 USB 진행 기록](validation/2026-11-18-k151-usb-preflight.md)을 따른다.
+확인했고, 원본 A/B 각16MB·동일 SHA256도 확인해 백업 파일 일치를 통과했다.
+이후 정상 부팅·기존 앱/GPT 복귀와 공식 앱 Monitoring Camera의 영상 표시도
+사용자가 확인했다. 별도 사본과 이후 상태는 [실물 USB 진행 기록](validation/2026-11-18-k151-usb-preflight.md)을 따른다.
+공식 앱의 카메라 표시 확인을 PC 사진 수신·GPT 이미지 입력 성공으로 확대하지 않는다.
 
 사용자는 다음 우선 작업으로 **GPT API가 답변을 만들고 로봇이 말하는 연결**을 지시했다.
 현재 구현한 [GPT 음성 답변 경로](GPT_ROBOT.ko.md)는 검증된 공식 MCP를 확장하며,

@@ -906,3 +906,21 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   - Instructed same-session B read into a distinct file. Actual filesystem lengths,
     B completion, SHA256 match, stock reboot and restore remain unconfirmed.
     Recorded completion metadata only; no original binary/MAC/credential upload.
+- 2026-11-18 (Asia/Seoul): Original-flash A/B match confirmed
+  - User B read completed16,777,216bytes in1309.6seconds/102.5kbit/s, staying in
+    bootloader. PowerShell filesystem/hash output: A/B each16,777,216bytes with the
+    same64-hex SHA256. Backup-file consistency PASS by user evidence; no binary upload.
+  - Added sanitized machine-readable metadata. Separate private-media copy, stock
+    reboot/app/GPT return and restoration writing remain unconfirmed at this point.
+    Requested normal boot after PC GPT registration and existing functionality checks.
+    No firmware write/erase, eFuse change or custom-auth compatibility claim.
+- 2026-11-18 (Asia/Seoul): Stock return and camera baseline confirmed
+  - User replied 잘된다 to normal boot/existing app/GPT_ANSWERED/robot voice checks
+    after preparing PC GPT then short-pressing RST. Stock functionality return PASS
+    by user report; no full post-boot log/current firmware version recollected.
+  - User replied 보여 to official Monitoring Camera in Avatar mode. Basic official
+    camera display PASS by user report. No image/video uploaded; no PC photo API,
+    GPT vision, sensor reading, video latency/freshness or simultaneous voice claim.
+  - Instructed closing Monitoring Camera and returning to AI Agent; final post-camera
+    mode not separately confirmed. Separate private-media backup copy and actual
+    restoration write remain unverified. Custom observer installation/auth HOLD remains.

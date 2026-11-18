@@ -4,8 +4,10 @@
 Windows cmd, 기존 폴더 `%USERPROFILE%\stackchan-soak-24h`.
 공식 자료 확인: 2026-11-17 UTC, USB 연결 후속 확인:2026-11-18(한국 시간).
 사용자의 Windows에서 COM3/Espressif303A:1001, esptool5.6.0, 실제 ESP32-S3·보호 상태·16MB
-조회까지 확인했다. [진행 상태와 현장 근거](validation/2026-11-18-k151-usb-preflight.md) 참고.
-이 절차의 조회 성공을 백업 파일 검증이나 실제 복구 성공으로 확대하지 않는다.
+조회와 원본 A/B 각16MB·SHA256 일치까지 사용자 출력으로 확인했다.
+이후 정상 부팅·기존 앱/GPT 기능 복귀도 사용자 보고로 확인했다.
+[진행 상태와 현장 근거](validation/2026-11-18-k151-usb-preflight.md) 참고.
+백업 파일 일치는 실제 복구 쓰기 성공이나 커스텀 빌드의 공식 앱 호환성 판정과 구분한다.
 
 ## 먼저 알아야 할 호환성 판정
 
@@ -183,6 +185,10 @@ powershell.exe -NoProfile -Command "Get-ChildItem -LiteralPath (Join-Path $env:U
 **복구 성공 PASS는 아니다.** 중단 여부나 hash 불일치는 그대로 FAIL/HOLD로 남긴다.
 다른 비공개 저장장치에 사본을 복사한 뒤 그 사본의 해시도 원본과 비교한다.
 
+2026-11-18 현장에서는 별도 날짜 폴더 `k151-original-20261118-01`의 A/B가
+각16,777,216바이트·동일 SHA256으로 확인됐다. 원본은 공개하지 않았으며,
+[백업 메타데이터](validation/2026-11-18-k151-original-backup.json)에 확인 범위를 남겼다.
+
 ## 7. 출고 상태로 돌아와 기본 연결 확인
 
 이제 공식 매뉴얼의 RST **한 번 누르기**로 재부팅한다. 모터가 움직일 수 있으므로
@@ -191,6 +197,10 @@ powershell.exe -NoProfile -Command "Get-ChildItem -LiteralPath (Join-Path $env:U
 본체 화면 → 같은 펌웨어 버전 → 기존 StackChan World 연결 → 기존 GPT 음성 답변을
 확인한다. 재페어링·Unbind·업데이트를 요구하면 임의로 진행하지 않고 메시지만 기록한다.
 아직 새 관찰 펌웨어를 넣지 않았으므로 USB 관찰 도구는 실행하지 않는다.
+
+2026-11-18 현장에서는 PC GPT를 먼저 준비한 뒤 짧은 RST 재부팅과 기존 앱·성공 표시·
+음성 확인 요청에 사용자가 “잘된다”고 응답했다. 정상 복귀 PASS의 근거이며,
+실제 복구 쓰기를 시험한 결과는 아니다. 별도 저장장치 사본은 아직 확인하지 않았다.
 
 ## 8. 구체적인 복구 경로와 남은 조건
 

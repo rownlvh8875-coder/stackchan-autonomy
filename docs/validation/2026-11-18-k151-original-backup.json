@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-18",
+  "timezone": "Asia/Seoul",
+  "evidence_source": "User-supplied Windows esptool output and PowerShell filesystem/hash output; no binary uploaded",
+  "device": {
+    "reported_product": "StackChan K151",
+    "chip": "ESP32-S3 (QFN56)",
+    "revision": "v0.2",
+    "usb_mode": "USB-Serial/JTAG",
+    "flash_size_bytes": 16777216,
+    "secure_boot": "Disabled",
+    "flash_encryption": "Disabled",
+    "security_flags": 0
+  },
+  "reader": {
+    "tool": "esptool",
+    "version": "5.6.0",
+    "chip": "esp32s3",
+    "before": "no-reset",
+    "after": "no-reset",
+    "stub": false,
+    "connect_attempts": 1,
+    "start_address": 0,
+    "length_bytes": 16777216,
+    "same_bootloader_session_requested": true
+  },
+  "private_local_directory": ".local/device-backup/k151-original-20261118-01",
+  "reads": [
+    {
+      "file": "factory-a.bin",
+      "reported_read_bytes": 16777216,
+      "elapsed_s": 1301.2,
+      "reported_rate_kbit_s": 103.2,
+      "filesystem_length_bytes": 16777216,
+      "sha256": "C1241A7C87145EE8B9569CFBCFBB1F8C289641856F9B9B5DDF2CCD565019543E"
+    },
+    {
+      "file": "factory-b.bin",
+      "reported_read_bytes": 16777216,
+      "elapsed_s": 1309.6,
+      "reported_rate_kbit_s": 102.5,
+      "filesystem_length_bytes": 16777216,
+      "sha256": "C1241A7C87145EE8B9569CFBCFBB1F8C289641856F9B9B5DDF2CCD565019543E"
+    }
+  ],
+  "verdict": "PASS: two full-length backup files match by user-supplied SHA256",
+  "agent_recomputed_binary_hash": false,
+  "separate_private_copy": "not_confirmed",
+  "stock_boot_after_backup": "PASS_user_report",
+  "official_app_after_backup": "PASS_user_report",
+  "gpt_voice_after_backup": "PASS_user_report",
+  "post_boot_evidence": "Asked to check normal boot, existing app, GPT_ANSWERED and robot voice; user replied 잘된다. No full post-boot log collected.",
+  "post_boot_firmware_version": "not_requeried",
+  "restoration_write_tested": false,
+  "firmware_written_in_this_step": false,
+  "custom_build_official_app_compatibility": "HOLD; matching backups do not supply missing production authentication"
+}
