@@ -4,6 +4,11 @@ Date uses Asia/Seoul. User explicitly selected **retain the official app and fir
 check the manufacturer-supported route** after the backup/stock-camera milestone.
 This is a source/support review, not a new firmware implementation or hardware trial.
 
+**Later instruction:** the user declined manufacturer contact and requested direct
+development. The inquiry draft is withdrawn and was never posted. Follow the
+[direct-development notes](2026-11-18-direct-observer-development.md); do not send
+the archived inquiry under the earlier route selection.
+
 ## Inputs retained
 
 - [User evidence](2026-11-18-k151-usb-preflight.md): two full16MB files with matching

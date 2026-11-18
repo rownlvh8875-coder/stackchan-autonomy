@@ -935,3 +935,24 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   - Prepared exact public-issue title/body requesting stock read-only JPEG/touch/IMU
     and owner authentication/coexistence documentation. No MAC, token, keys, backup
     hash or images included; no message posted. No product code/lock/config changes.
+- 2026-11-18 (Asia/Seoul): Manufacturer inquiry cancelled; direct development requested
+  - User explicitly said not to contact the manufacturer and to build the missing
+    support. No issue/comment/message sent. Marked draft withdrawn and removed only
+    agent-created local issue-title/body staging files to prevent accidental posting.
+  - Reuse candidate is the existing SCOB/USB observer and Python client, not a fresh
+    mock transport. Clarifying whether official-app compatibility is mandatory in the
+    development mode; did not interpret direct development as device-install approval.
+  - Read existing pinned build source: public two-OTA partition table, HAL NVS
+    auto-erase/servo initialization and the separate Xiaozhi entrypoint erase path.
+    Actual backup partition layout remains uninspected. No product code/device changes.
+- 2026-11-18 (Asia/Seoul): Official-app requirement removed; direct-development spike
+  - User said official app is optional and desired functionality takes priority.
+    Target is a standalone GPT API firmware direction; USB remains a diagnostic path.
+    This does not authorize device installation or claim compatibility with vendor services.
+  - Built an explicitly experimental, stdlib-only backup-layout inspector: full-image
+    SHA binding, fixed table offset/MD5, bounds/overlap checks, nonstandard-label redaction,
+    fixed errors and explicit unknown active/spare slot. No serial/network/write/env access.
+  - Synthetic standard table, wrong SHA, MD5 tamper with matching image hash, overlap,
+    truncation, label privacy and actual CLI/input-unchanged checks PASS. Ruff/format PASS.
+    No real backup image or device accessed; no paid API request. Product integration
+    and installation are outside this spike. Operator metadata output still pending.
