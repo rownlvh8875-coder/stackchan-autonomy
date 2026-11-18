@@ -869,3 +869,14 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
     diagnostic bridge, run start-gpt.cmd, confirm GPT_READY/ANSWERED and robot sound.
   - Recorded sanitized live markers and updated current guide/report. Documentation
     only; no local device/official endpoint/paid API/secret access or firmware install.
+- 2026-11-18 (Asia/Seoul): GPT-mode return and robot answer confirmed
+  - User supplied start-gpt.cmd CONNECTED/INITIALIZED/GPT_READY/TOOLS_LISTED output;
+    official app showed GPT tool registration. User then confirmed existing
+    GPT_ANSWERED and robot voice with "응 나왔어"; no additional paid prompt requested.
+  - Diagnostic automatic recovery and subsequent separately launched GPT answer/voice
+    are PASS by user evidence. No field claim of an outage during paid processing,
+    measured cost/latency, or real-device24h. Intervening tool-selection failure's exact
+    cause is unknown; no speculative cache diagnosis or PC code fix is asserted.
+  - Updated current guide, report and next steps; translated the earlier live record's
+    remaining Japanese paragraphs into Korean. Documentation only, no runtime/lock,
+    device/secret/paid API access or firmware/environment publication.

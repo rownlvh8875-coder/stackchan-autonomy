@@ -1,9 +1,10 @@
 # Test Report
 
-최신 현장 확인: **2026-11-18(한국 시간) / Windows PC MCP 진단 모드 자동 재연결 PASS**.
+최신 현장 확인: **2026-11-18(한국 시간) / 진단 모드 자동 재연결·GPT 모드 복귀 후 답변·음성 PASS**.
 단절 후2→4→8초 대기,3회차 재접속,INITIALIZED·새 확인 코드·TOOLS_LISTED를 사용자
 출력으로 확인했다. [현장 기록](validation/2026-11-18-mcp-reconnect-live.md) 참고.
-GPT 모드 전환 후 답변·로봇 음성 복구와 정확한 실경과 시간은 이 출력에서 미확인이다.
+이후 GPT 실행 파일의 READY·공식 앱 도구 등록을 확인했고, 사용자가 기존 ANSWERED
+표시와 로봇 답변도 확인했다. GPT 처리 중 단절·실물24h·정확한 실경과 시간은 미검증이다.
 
 PC MCP 자동 재연결 추가: 로컬 전체485 PASS, Windows 전용2 SKIP /69.59초.
 검토 수정 후 대상146 PASS+2 SKIP, 린트·배포·독립 설치의 로컬 실제 WebSocket 재연결과 SDK 검증 PASS.

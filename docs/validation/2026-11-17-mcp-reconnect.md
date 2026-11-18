@@ -76,7 +76,7 @@ Reviewer set-aside items and executor rulings:
 
 | Considered item | Disposition and practical limit |
 |---|---|
-| Actual endpoint/Wi-Fi/robot recovery | Diagnostic endpoint recovery confirmed by user console on2026-11-18; GPT/robot voice recovery still pending ([live record](2026-11-18-mcp-reconnect-live.md)) |
+| Actual endpoint/Wi-Fi/robot recovery | User-confirmed2026-11-18: diagnostic reconnection, then separately launched GPT answer/voice; interruption during a GPT request not field-tested ([live record](2026-11-18-mcp-reconnect-live.md)) |
 | Billing/model permission/server reissuance | No paid calls; reservation/no-client-replay tested, exactly-once billing not promised |
 | Physical observer/firmware/credential migration | Excluded, existing installation HOLD; forbidden combination rejected before input |
 | Windows GUI/interrupt/codepage | Hosted headless path/config/cold-cache coverage; actual double-click/Ctrl+C and robot sound remain operator checks |
@@ -84,9 +84,9 @@ Reviewer set-aside items and executor rulings:
 
 No second review was performed. Corrected local full suite **485 PASS,2 Windows-only
 SKIP /69.59s**, lint/format, distributions and all independent installed-wheel probes
-PASS. Final hosted results follow below. Diagnostic endpoint recovery was later
-confirmed by the user on2026-11-18; GPT/robot voice recovery remains an operator
-check in [the guide](../MCP_RECONNECT.ko.md).
+PASS. Final hosted results follow below. Diagnostic endpoint recovery and subsequent
+GPT-mode answer/voice were later confirmed by the user on2026-11-18. An outage during
+an active GPT request remains outside this field confirmation; see [the guide](../MCP_RECONNECT.ko.md).
 
 ## Hosted Windows fixture diagnosis
 
@@ -135,3 +135,9 @@ third-attempt CONNECTED/INITIALIZED, changed check code and TOOLS_LISTED. Record
 diagnostic real-endpoint recovery PASS; no GPT request, robot voice recovery, exact
 elapsed time or firmware installation is established by this output. Full scope and
 sanitized markers are in [the live record](2026-11-18-mcp-reconnect-live.md).
+
+The user then supplied launcher GPT_READY/TOOLS_LISTED output and official-app GPT
+tool registration, and confirmed both existing GPT_ANSWERED and robot voice. Record
+post-diagnostic GPT-mode return/answer PASS by user report. No additional paid question
+was requested; exact call number/model/billing and the cause of an intervening tool
+selection issue were not collected. No PC code or settings were changed by the agent.

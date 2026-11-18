@@ -1,6 +1,8 @@
 # Next steps
 
-실물 확인을 기다리는 동안 PC MCP 자동 재연결과 Windows 간편 실행을 준비했다.
+PC MCP 자동 재연결과 Windows 간편 실행을 구현했고,2026-11-18(한국 시간)에
+사용자가 진단 연결의 단절 후 자동 복구와 이후 GPT 모드의 ANSWERED·로봇 답변을
+확인했다. [현장 PASS 기록](validation/2026-11-18-mcp-reconnect-live.md)을 참고한다.
 [실행·종료·질문 재전송 제한](MCP_RECONNECT.ko.md)을 참고한다. 물리 장치 접근이나
 펌웨어 교체 없이 출고 상태의 GPT 대화 연결에 사용하는 선택 기능이다.
 
