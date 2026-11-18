@@ -880,3 +880,22 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   - Updated current guide, report and next steps; translated the earlier live record's
     remaining Japanese paragraphs into Korean. Documentation only, no runtime/lock,
     device/secret/paid API access or firmware/environment publication.
+- 2026-11-18 (Asia/Seoul): First physical USB/ROM preflight
+  - User supplied PnP COM3 plus Espressif303A:1001/MI00 IDs; COM7 is Bluetooth and
+    excluded. Confirmed isolated esptool5.6.0 setup. Corrected a missing-backslash
+    command presentation with fenced full-path Windows commands.
+  - After manual Download Mode instructions, COM3 temporarily disappeared then
+    reappeared with composite/JTAG interfaces. No-reset get-security-info failed with
+    Write timeout; PC-side USB reconnect and one identical retry reproduced it.
+    Screen off/green LED on did not establish ROM communication.
+  - Pinned esptool USB-Serial/JTAG reset support checked without a local device.
+    User --before usb-reset get-security-info succeeded: ESP32-S3 QFN56 rev0.2,
+    USB-Serial/JTAG, flags0, Secure Boot/Flash Encryption Disabled. Subsequent no-reset
+    flash-id succeeded:16MB/quad/3.3V. No protection setting changed; precise earlier
+    timeout cause remains unknown. No MAC/keys copied into public evidence.
+  - New private dated backup directory confirmed; first16MB ROM read instructed.
+    A/B lengths/hash, stock reboot and restore remain pending until user evidence.
+  - Reviewed pinned official LAN lifecycle/auth, BLE cached-buffer/battery callback
+    and App Center OTA paths. No complete stock PC observation/control API established.
+    Updated evidence/backup guide and removed unsafe COM7 example ambiguity. Firmware
+    installation/auth HOLD remains. No cloud device/paid API call or firmware write.

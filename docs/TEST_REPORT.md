@@ -20,7 +20,9 @@ Linux·Windows × Python3.11/3.12 네 조합 모두 **485 PASS,2 SKIP,실패0**�
 추가 호환성 검토: [원본 백업·복구 준비와 근거](validation/2026-11-17-k151-recovery-compatibility.md).
 공식 저장소 기여자가 공개 빌드의 제품 인증 구현/설정 경로 미공개를 확인했다.
 LCD C/E 분기와 native USB 회로 경로는 소스로 확인했으나 실제 기기 판정은 미실행이다.
-사용자가 외출 중이므로 COM·보호 상태·flash 읽기·해시·복구 성공은 아직 확인하지 않았다.
+후속2026-11-18에 COM3/Espressif USB·도구5.6.0·ROM 연결·ESP32-S3·보호 상태·16MB를
+사용자 출력으로 확인했다. 원본 읽기·해시·부팅 복귀와 복구 판정은
+[실물 USB 기록](validation/2026-11-18-k151-usb-preflight.md)에 별도로 남긴다.
 
 최신 추가 개발 검증: **USB 관찰 확장 / 전체459 PASS /71.01초**, 대상155 PASS,
 독립 wheel 설치의 합성 USB→이미지 SDK 및 기존 MCP/GPT 경로 PASS.

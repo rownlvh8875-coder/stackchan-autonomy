@@ -2,8 +2,10 @@
 
 대상: 현재 출고 펌웨어와 StackChan World 앱으로 GPT 음성 대화를 사용 중인 K151,
 Windows cmd, 기존 폴더 `%USERPROFILE%\stackchan-soak-24h`.
-공식 자료 확인: 2026-11-17 UTC. **현재는 준비 절차이며 장치 백업·복구 성공 기록이 아니다.**
-사용자는 USB에 연결해 두었으나 외출 중이어서 PC 명령 결과는 아직 받지 않았다.
+공식 자료 확인: 2026-11-17 UTC, USB 연결 후속 확인:2026-11-18(한국 시간).
+사용자의 Windows에서 COM3/Espressif303A:1001, esptool5.6.0, 실제 ESP32-S3·보호 상태·16MB
+조회까지 확인했다. [진행 상태와 현장 근거](validation/2026-11-18-k151-usb-preflight.md) 참고.
+이 절차의 조회 성공을 백업 파일 검증이나 실제 복구 성공으로 확대하지 않는다.
 
 ## 먼저 알아야 할 호환성 판정
 
@@ -47,7 +49,9 @@ powershell.exe -NoProfile -Command "Get-PnpDevice -PresentOnly -Class Ports | Se
 지원한다. 현재 연결이 이미 베이스 포트라면 확인을 위해 무작정 옮길 필요는 없다.
 포트가 없거나 조회 오류가 나면 그 결과부터 확인하고, 아직 아래 장치 명령으로 넘어가지 않는다.
 
-이후 명령의 **COM7은 예시**다. 실제 포트가 확인되기 전에는 실행하지 않는다.
+이후 명령의 **COM_CONFIRMED는 확인한 포트로 바꿀 자리표시자**다.
+이번 사용자 PC의 COM7은 Bluetooth 포트이므로 USB 대상으로 사용하지 않는다.
+일반 부팅에서는 COM3을 확인했으며 실제 사용할 포트는 단계마다 다시 확인한다.
 Download Mode에 들어가면 포트 번호가 달라질 수 있으므로 다시 조회한다.
 
 ## 2. 로컬 보관 폴더와 공식 복구 이미지 준비
@@ -95,17 +99,17 @@ mkdir "%USERPROFILE%\stackchan-soak-24h\.local\device-backup\k151-original-01"
 2. 옆 LED가 초록색으로 켜지면 놓는다. 매뉴얼은 놓은 뒤 LED가 꺼지며 Download Mode에
    들어간다고 설명한다. 왼쪽 전원 버튼과 혼동하지 않는다.
 3. 1번의 Windows 포트 조회를 다시 실행하고 새로 나타난 정확한 포트를 확인한다.
-4. 아래 두 명령을 실제 포트로 바꿔 **한 번에 하나씩** 실행한다.
+4. USB 포트가 다시 확인되면 아래 두 명령을 실제 포트로 바꿔 **한 번에 하나씩** 실행한다.
 
 ```cmd
-"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM7 --before no-reset --after no-reset --no-stub --connect-attempts 1 get-security-info
+"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM_CONFIRMED --before no-reset --after no-reset --no-stub --connect-attempts 1 get-security-info
 ```
 
 ```cmd
-"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM7 --before no-reset --after no-reset --no-stub --connect-attempts 1 flash-id
+"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM_CONFIRMED --before no-reset --after no-reset --no-stub --connect-attempts 1 flash-id
 ```
 
-`--before no-reset`/`--after no-reset`는 도구가 명시적으로 전후 리셋을 수행하지 않게 하는
+기본 조회·백업의 `--before no-reset`/`--after no-reset`는 도구가 명시적으로 전후 리셋을 수행하지 않게 하는
 옵션이며, USB 드라이버의 포트 열기 동작까지 무변화라고 보장하지 않는다.
 `--no-stub`는 RAM 보조 프로그램도 올리지 않고 ROM 부트로더를 사용하는 선택이다.
 원본 읽기에 충분하지 않은 보호/드라이버 상태이면 오류로 중단하며 우회하지 않는다.
@@ -116,20 +120,46 @@ mkdir "%USERPROFILE%\stackchan-soak-24h\.local\device-backup\k151-original-01"
 보호 설정이나 eFuse를 바꾸지 않는다. 전체 로그 대신 칩 종류·용량·보호 상태·고정 오류
 요지만 검토하고, MAC/시리얼 전체는 가린다.
 
+### USB 포트 소실 또는 Write timeout이 날 때
+
+Bluetooth 포트만 보이면 칩 명령을 실행하지 않고 Espressif 장치를 다시 조회한다.
+
+```cmd
+powershell.exe -NoProfile -Command "Get-PnpDevice -PresentOnly | Where-Object InstanceId -Match 'VID_303A' | Select-Object Status,Class,FriendlyName | Format-Table -AutoSize"
+```
+
+2026-11-18 현장에서는 COM3이 다시 보여도 no-reset 조회가 Write timeout이었고,
+USB 재연결 후 같은 오류가 재현됐다. 공식 매뉴얼은 Download Mode의 녹색 LED를
+설명하지만 실제 관측은 화면 꺼짐·녹색 LED 계속 켜짐이었다. LED·PnP 표시만으로
+ROM 접속 성공을 가정하지 않는다.
+
+**K151의 Espressif303A:1001 USB Serial/JTAG와 실제 포트가 확인된 경우** esptool의
+USB 전용 리셋으로 보호 조회를 한 번 시도할 수 있다. 이 명령은 칩 리셋을 수행하며
+flash를 쓰거나 지우지 않는다. 현재 대화는 멈추고 로봇을 평평한 곳에 둔다.
+
+```cmd
+"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM_CONFIRMED --before usb-reset --after no-reset --no-stub --connect-attempts 1 get-security-info
+```
+
+해당 현장에서는 이 방식으로 ROM 보호 조회가 성공했고, 이어 no-reset flash-id도
+성공했다. 다른 장치·보호 상태에서의 성공을 보장하거나 정확한 과거 timeout 원인을
+확정한 결과는 아니다. 실패가 계속되면 반복·드라이버 교체로 밀어붙이지 않고 중단한다.
+성공한 뒤에는 같은 ROM 상태를 유지하고 기본 no-reset 명령으로 이어간다.
+
 ## 5. 동일한 Download Mode에서 원본 전체를 두 번 읽기
 
 아래는 4번 조건과 **실제 COM 포트/새 폴더**를 확인한 뒤에만 사용하는 명령이다.
 ROM 방식은 느릴 수 있다. 예상 시간을 약속하지 않으며 완료 전 창을 닫지 않는다.
 
 ```cmd
-"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM7 --before no-reset --after no-reset --no-stub --connect-attempts 1 read-flash --flash-size 16MB 0x0 0x1000000 "%USERPROFILE%\stackchan-soak-24h\.local\device-backup\k151-original-01\factory-a.bin"
+"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM_CONFIRMED --before no-reset --after no-reset --no-stub --connect-attempts 1 read-flash --flash-size 16MB 0x0 0x1000000 "%USERPROFILE%\stackchan-soak-24h\.local\device-backup\k151-original-01\factory-a.bin"
 ```
 
 첫 읽기가 성공해 프롬프트가 돌아오면 **기기를 재부팅하거나 앱을 실행하지 않은 상태로**
 두 번째 파일에 읽는다. 중간 부팅으로 NVS가 바뀌면 두 파일이 달라질 수 있다.
 
 ```cmd
-"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM7 --before no-reset --after no-reset --no-stub --connect-attempts 1 read-flash --flash-size 16MB 0x0 0x1000000 "%USERPROFILE%\stackchan-soak-24h\.local\device-backup\k151-original-01\factory-b.bin"
+"%USERPROFILE%\.local\bin\uv.exe" tool run --from esptool==5.6.0 esptool --chip esp32s3 --port COM_CONFIRMED --before no-reset --after no-reset --no-stub --connect-attempts 1 read-flash --flash-size 16MB 0x0 0x1000000 "%USERPROFILE%\stackchan-soak-24h\.local\device-backup\k151-original-01\factory-b.bin"
 ```
 
 이 과정에서 flash 지우기/쓰기를 수행하는 명령은 사용하지 않는다. 읽기 실패·부분 파일은
