@@ -924,3 +924,14 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   - Instructed closing Monitoring Camera and returning to AI Agent; final post-camera
     mode not separately confirmed. Separate private-media backup copy and actual
     restoration write remain unverified. Custom observer installation/auth HOLD remains.
+- 2026-11-18 (Asia/Seoul): Stock observation route and support draft
+  - User selected retaining the official app and checking manufacturer support first;
+    did not authorize an independent firmware install or an external support post.
+  - Inspected camera page/transport/remote authorization and deployment-time URL/key
+    configuration. Avatar onClose requests warm reboot, so app preview does not prove
+    a PC snapshot interface or uninterrupted AI.Agent coexistence. No secrets extracted.
+  - Rechecked official main28b9f0c and issue134's two comments; no newer auth/SDK reply.
+    Bounded camera API/SDK issue searches did not establish a supported stock PC API.
+  - Prepared exact public-issue title/body requesting stock read-only JPEG/touch/IMU
+    and owner authentication/coexistence documentation. No MAC, token, keys, backup
+    hash or images included; no message posted. No product code/lock/config changes.

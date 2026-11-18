@@ -1,5 +1,11 @@
 # Next steps
 
+현재 우선 경로(2026-11-18): 사용자는 **공식 앱 유지·제조사 지원 경로 확인**을 선택했다.
+출고 상태의 PC 사진·센서 API와 음성 공존 조건에 대한
+[지원 문의 초안](M5STACK_OBSERVATION_API_REQUEST.ko.md)을 준비했으며 아직 외부에 게시하지 않았다.
+[추가 소스·지원 검토](validation/2026-11-18-stock-observation-api-review.md) 참고.
+생산용 인증 호환성 HOLD는 유지하며 새 펌웨어 설치나 비공개 키 추출로 진행하지 않는다.
+
 PC MCP 자동 재연결과 Windows 간편 실행을 구현했고,2026-11-18(한국 시간)에
 사용자가 진단 연결의 단절 후 자동 복구와 이후 GPT 모드의 ANSWERED·로봇 답변을
 확인했다. [현장 PASS 기록](validation/2026-11-18-mcp-reconnect-live.md)을 참고한다.
