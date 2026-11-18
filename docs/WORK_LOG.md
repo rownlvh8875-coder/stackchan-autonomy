@@ -899,3 +899,10 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
     and App Center OTA paths. No complete stock PC observation/control API established.
     Updated evidence/backup guide and removed unsafe COM7 example ambiguity. Firmware
     installation/auth HOLD remains. No cloud device/paid API call or firmware write.
+- 2026-11-18 (Asia/Seoul): First original-flash read completed
+  - User esptool output reports16,777,216bytes read from0 into factory-a.bin,
+    1301.2seconds/103.2kbit/s and Staying in bootloader. Read used ROM/no-stub and
+    no-reset before/after, explicit16MB, private newly created dated directory.
+  - Instructed same-session B read into a distinct file. Actual filesystem lengths,
+    B completion, SHA256 match, stock reboot and restore remain unconfirmed.
+    Recorded completion metadata only; no original binary/MAC/credential upload.
