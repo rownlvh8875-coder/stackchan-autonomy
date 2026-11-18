@@ -974,3 +974,12 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   - Fresh ESP-IDF/audio builder check returned "nothing important left". Design
     approval remains pending; the check is not implementation/hardware evidence. No real API,
     private key, device serial port, flash write or environment publication performed.
+- 2026-11-18 (Asia/Seoul): User requested name/gesture activation instead of touch
+  - User prefers a particular name or finger gesture to trigger interaction. Marked
+    the touch-first proposal as superseded pending the concrete trigger choice; did
+    not interpret this feedback as approval of the previous voice design.
+  - Existing source has a Hi StackChan WakeNet setting. Custom Multinet configuration
+    mentions Chinese pinyin; arbitrary Korean-name support is unverified. Si12T head
+    touch/swipe is not visual-hand or finger-snap recognition. Asked for the desired
+    name/movement to distinguish local voice, camera and audio-event detection.
+  - No product code, microphone/camera activation, paid API or device write performed.
