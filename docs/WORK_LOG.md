@@ -956,3 +956,21 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
     truncation, label privacy and actual CLI/input-unchanged checks PASS. Ruff/format PASS.
     No real backup image or device accessed; no paid API request. Product integration
     and installation are outside this spike. Operator metadata output still pending.
+  - Follow-up source review found official-app Wi-Fi fallback, board-constructor
+    hardware/timer coupling, shared24kHz audio framing, microphone errors returned as
+    a positive sample count, legacy audio NVS writes and20s OTA confirmation. Recorded
+    these as standalone-mode porting requirements, not completed firmware behavior.
+    Proposed staged direct GPT/audio/observation/autonomy work; actual layout, active
+    slot, memory headroom and independent TLS/audio operation remain unverified.
+- 2026-11-18 (Asia/Seoul): Actual backup layout reported; standalone voice design prepared
+  - User ran the hash-pinned spike at e81ffe4: full-image SHA and partition MD5 PASS,
+    seven partitions with two5,177,344B app slots at0x20000/0x510000. Saved metadata-only
+    evidence; no factory binary received. Active/spare slot and safe install remain unknown.
+  - Wrote a reviewable native GPT voice design: no laptop/official app/server runtime,
+    separate USB provisioning, bounded STT/Responses/TTS, persistent job/API reservations,
+    fail-closed NVS with explicit new-namespace writes, STOP and no actuator commands.
+    Camera/autonomous behavior remain later milestones. First implementation/build and
+    actual device installation are separate decisions; no implementation approval claimed.
+  - Fresh ESP-IDF/audio builder check returned "nothing important left". Design
+    approval remains pending; the check is not implementation/hardware evidence. No real API,
+    private key, device serial port, flash write or environment publication performed.

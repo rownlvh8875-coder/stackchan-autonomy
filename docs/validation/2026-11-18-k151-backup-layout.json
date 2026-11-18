@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-18",
+  "timezone": "Asia/Seoul",
+  "evidence_source": "User-supplied Windows stdout from the read-only layout spike; no original binary uploaded",
+  "tool_source_commit": "e81ffe49423b75719df3533b0cd61e4fc81a8793",
+  "backup_file": "factory-a.bin",
+  "expected_sha256": "C1241A7C87145EE8B9569CFBCFBB1F8C289641856F9B9B5DDF2CCD565019543E",
+  "agent_recomputed_binary_hash": false,
+  "reported_result": {
+    "status": "LAYOUT_ONLY_NOT_INSTALL_APPROVAL",
+    "backup_bytes": 16777216,
+    "backup_sha256_matches_expected": true,
+    "table_offset_hex": "0x00008000",
+    "table_md5_verified": true,
+    "partitions": [
+      {"label": "nvs", "type": 1, "subtype": 2, "offset_hex": "0x00009000", "size_bytes": 16384, "flags": 0},
+      {"label": "otadata", "type": 1, "subtype": 0, "offset_hex": "0x0000d000", "size_bytes": 8192, "flags": 0},
+      {"label": "phy_init", "type": 1, "subtype": 1, "offset_hex": "0x0000f000", "size_bytes": 4096, "flags": 0},
+      {"label": "ota_0", "type": 0, "subtype": 16, "offset_hex": "0x00020000", "size_bytes": 5177344, "flags": 0},
+      {"label": "ota_1", "type": 0, "subtype": 17, "offset_hex": "0x00510000", "size_bytes": 5177344, "flags": 0},
+      {"label": "assets", "type": 1, "subtype": 130, "offset_hex": "0x00a00000", "size_bytes": 4194304, "flags": 0},
+      {"label": "coredump", "type": 1, "subtype": 3, "offset_hex": "0x00e00000", "size_bytes": 65536, "flags": 0}
+    ],
+    "app_partition_count": 2,
+    "active_app_slot": "NOT_DETERMINED",
+    "spare_slot_verified": false,
+    "installation_safe": false
+  },
+  "verdict": "PASS_user_report: pinned backup SHA and standard partition-table MD5/layout validation",
+  "active_slot_or_safe_install_target_verified": false,
+  "device_flash_written": false,
+  "restoration_write_tested": false
+}

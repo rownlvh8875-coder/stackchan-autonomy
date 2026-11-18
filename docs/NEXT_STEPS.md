@@ -6,8 +6,13 @@
 최종 목표는 로봇 자체의 GPT API 연결·독립 기능이며, 기존 USB 규약은 개발·진단에
 재사용한다. [개발 전 확인](validation/2026-11-18-direct-observer-development.md)과
 [읽기 전용 파티션 진단 시제품](../experiments/k151_layout_spike/README.ko.md)을 준비했다.
-실제 파티션·설정 보존·실행 모드를 확정하기 전에는 새 이미지를 설치하지 않는다.
+사용자가 원본 SHA·표 MD5와 실제 앱 슬롯2개를 확인했다.
+[실제 배치 기록](validation/2026-11-18-k151-backup-layout.json)과
+[독립 GPT 음성 펌웨어 검토용 설계](superpowers/specs/2026-11-18-standalone-gpt-design.md)를 참고한다.
+활성/빈 슬롯과 안전한 설치 대상은 아직 미확인이다. 실제 설치는 별도로 결정한다.
 제조사 키 추출이나 공식 인증 재현으로 해결하지 않는다.
+
+## 기존 PC/출고 펌웨어 경로의 구현·현장 기록
 
 PC MCP 자동 재연결과 Windows 간편 실행을 구현했고,2026-11-18(한국 시간)에
 사용자가 진단 연결의 단절 후 자동 복구와 이후 GPT 모드의 ANSWERED·로봇 답변을
