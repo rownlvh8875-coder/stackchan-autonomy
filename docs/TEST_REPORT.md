@@ -1,5 +1,10 @@
 # Test Report
 
+최신 현장 확인: **2026-11-18(한국 시간) / Windows PC MCP 진단 모드 자동 재연결 PASS**.
+단절 후2→4→8초 대기,3회차 재접속,INITIALIZED·새 확인 코드·TOOLS_LISTED를 사용자
+출력으로 확인했다. [현장 기록](validation/2026-11-18-mcp-reconnect-live.md) 참고.
+GPT 모드 전환 후 답변·로봇 음성 복구와 정확한 실경과 시간은 이 출력에서 미확인이다.
+
 PC MCP 자동 재연결 추가: 로컬 전체485 PASS, Windows 전용2 SKIP /69.59초.
 검토 수정 후 대상146 PASS+2 SKIP, 린트·배포·독립 설치의 로컬 실제 WebSocket 재연결과 SDK 검증 PASS.
 처리 중 연결을 끊은 요청의 자동 재전송 없음과 사용량 보존을 확인했다.
@@ -9,7 +14,7 @@ Linux·Windows × Python3.11/3.12 네 조합 모두 **485 PASS,2 SKIP,실패0**�
 첫 Windows 시험 환경의 pywin32 경로 누락과 진단·수정 내역은 검증 기록에 남겼다.
 [검토·플랫폼별 기록](validation/2026-11-17-mcp-reconnect.md),
 [Windows 간편 실행과 현장 확인](MCP_RECONNECT.ko.md)을 참고한다.
-이는 실제 인터넷 장애·유료 API·로봇 음성 복구의 현장 판정은 아니다.
+자동 검증의 범위는 위 별도 진단 연결 현장 확인 및 GPT·로봇 음성 복구 확인과 구분한다.
 
 추가 호환성 검토: [원본 백업·복구 준비와 근거](validation/2026-11-17-k151-recovery-compatibility.md).
 공식 저장소 기여자가 공개 빌드의 제품 인증 구현/설정 경로 미공개를 확인했다.

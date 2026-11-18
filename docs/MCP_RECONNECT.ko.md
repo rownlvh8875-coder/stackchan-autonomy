@@ -84,7 +84,12 @@ git -C "%USERPROFILE%\stackchan-soak-24h" pull --ff-only
 실행 전에 오류로 중단한다. USB 사진 요청이나 물리 장치 재접속을 자동 반복하지 않는다.
 공식 앱 인증을 유지하는 새 펌웨어 설치는 [기존 호환성 HOLD](K151_BACKUP_RECOVERY.ko.md) 상태다.
 
-## 집에서 할 짧은 확인 — 아직 미실행
+## 집에서 할 짧은 확인 — 진단 연결 복구 확인 완료
+
+2026-11-18(한국 시간)에 사용자가 제공한 Windows cmd 출력에서 단절 감지,
+2→4→8초 대기 후 3회차 재접속, 재초기화·새 확인 코드·툴 목록 공개를 확인했다.
+[진단 모드 현장 PASS 기록](validation/2026-11-18-mcp-reconnect-live.md)을 참고한다.
+아래는 같은 확인을 다시 수행할 때의 순서이며, GPT 모드 복귀·음성 확인은 남아 있다.
 
 첫 시험은 API를 사용하지 않는 진단 모드로 할 수 있다. 기존 GPT 프로그램을 먼저
 종료하고 아래 모드 하나만 실행한다.
@@ -96,5 +101,5 @@ git -C "%USERPROFILE%\stackchan-soak-24h" pull --ff-only
 초기화를 확인한 뒤 노트북 Wi-Fi를 잠시 끊었다 복구하고, WAIT/RECONNECTING 다음에
 새 INITIALIZED와 새 연결 확인 코드가 나오는지 확인한다. 이 모드에는 유료 GPT 도구가 없다.
 Ctrl+C로 종료한 뒤 GPT 간편 실행으로 돌아와 새 질문의 ANSWERED와 실제 음성을 확인한다.
-자동 시험은 로컬 WebSocket·실제 SDK의 MockTransport를 쓰며, 실제 인터넷 장애나 로봇
-음성 복구의 현장 PASS는 이 사용자 확인을 받은 뒤에 기록한다.
+자동 시험은 로컬 WebSocket·실제 SDK의 MockTransport를 쓴다. 위 진단 연결 복구의
+현장 확인과 GPT 처리·로봇 음성 복구는 각각 확인하며, 후자는 아직 추가 확인이 필요하다.

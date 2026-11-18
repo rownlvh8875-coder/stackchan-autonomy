@@ -76,7 +76,7 @@ Reviewer set-aside items and executor rulings:
 
 | Considered item | Disposition and practical limit |
 |---|---|
-| Actual endpoint/Wi-Fi/robot recovery | Operator acceptance pending; local recovery tests do not prove service availability |
+| Actual endpoint/Wi-Fi/robot recovery | Diagnostic endpoint recovery confirmed by user console on2026-11-18; GPT/robot voice recovery still pending ([live record](2026-11-18-mcp-reconnect-live.md)) |
 | Billing/model permission/server reissuance | No paid calls; reservation/no-client-replay tested, exactly-once billing not promised |
 | Physical observer/firmware/credential migration | Excluded, existing installation HOLD; forbidden combination rejected before input |
 | Windows GUI/interrupt/codepage | Hosted headless path/config/cold-cache coverage; actual double-click/Ctrl+C and robot sound remain operator checks |
@@ -84,8 +84,9 @@ Reviewer set-aside items and executor rulings:
 
 No second review was performed. Corrected local full suite **485 PASS,2 Windows-only
 SKIP /69.59s**, lint/format, distributions and all independent installed-wheel probes
-PASS. Final hosted results follow below. Actual internet outage and robot voice
-recovery remain operator checks in [the guide](../MCP_RECONNECT.ko.md).
+PASS. Final hosted results follow below. Diagnostic endpoint recovery was later
+confirmed by the user on2026-11-18; GPT/robot voice recovery remains an operator
+check in [the guide](../MCP_RECONNECT.ko.md).
 
 ## Hosted Windows fixture diagnosis
 
@@ -125,3 +126,12 @@ MCP/GPT/recovery/observer probes and accelerated virtual24h (2880 cycles,
 the already recorded actual Windows24h run or establish real device24h behavior.
 The final completion commit changes documentation only; its runtime/tests match
 this tested source. Stock firmware and official app remain unchanged.
+
+## User follow-up — 2026-11-18 (Asia/Seoul)
+
+The user supplied Windows diagnostic-mode console output after the instructed Wi-Fi
+interruption/recovery procedure: REMOTE_CLOSED, waits2/4/8, two failed attempts, then
+third-attempt CONNECTED/INITIALIZED, changed check code and TOOLS_LISTED. Record
+diagnostic real-endpoint recovery PASS; no GPT request, robot voice recovery, exact
+elapsed time or firmware installation is established by this output. Full scope and
+sanitized markers are in [the live record](2026-11-18-mcp-reconnect-live.md).

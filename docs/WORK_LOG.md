@@ -859,3 +859,13 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
     Exact hashes and prior failures are in validation/2026-11-17-mcp-reconnect-ci.json.
     Actual Wi-Fi outage/robot speech recovery and GUI interrupt acceptance remain
     operator checks; one cleanup-inclusive delay-reset minor remains disclosed.
+- 2026-11-18 (Asia/Seoul): User diagnostic MCP reconnection acceptance
+  - User ran --reconnect without --gpt and supplied Windows console output after the
+    instructed laptop Wi-Fi interruption/recovery. Initial session ended; waits2/4/8,
+    two failed dials, then third-attempt CONNECTED/INITIALIZED and TOOLS_LISTED with
+    a different check code. Diagnostic real-endpoint reconnection PASS by user log.
+  - No new GPT response, robot speech recovery, measured outage duration or current
+    Ctrl+C/launcher transition is established by this log. Next operator step: stop
+    diagnostic bridge, run start-gpt.cmd, confirm GPT_READY/ANSWERED and robot sound.
+  - Recorded sanitized live markers and updated current guide/report. Documentation
+    only; no local device/official endpoint/paid API/secret access or firmware install.
