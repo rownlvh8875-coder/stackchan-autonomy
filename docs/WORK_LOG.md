@@ -983,3 +983,18 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
     touch/swipe is not visual-hand or finger-snap recognition. Asked for the desired
     name/movement to distinguish local voice, camera and audio-event detection.
   - No product code, microphone/camera activation, paid API or device write performed.
+  - User then selected the Korean wake phrase "조수야". Updated the design's current
+    requirement to local wake detection followed by question capture/automatic end,
+    rather than touch-first or an assumed visual gesture. Trigger detector still unbuilt.
+  - Confirmed ESP-SR2.4.7 cache and public HEAD bb552f1a559396a17681299cb3e199a0f1a4520a:
+    Korean wake-word TTS training remains listed as planned; MultiNet supports Chinese/
+    English. No claim that a config string enables Korean. Asked whether initial local
+    voice enrollment is acceptable; model choice/accuracy and revised review remain pending.
+  - User accepted initial local voice enrollment. Revised full design proposes a bounded
+    MFCC/template-DTW prototype, MCU feature extraction and private USB enrollment,
+    wake/ready/question VAD lifecycle, self-playback suppression, <=4KiB template blob,
+    fail-closed NVS capacity and held-out real detection/false-wake acceptance gates.
+    This is a proposed detector, not a verified Korean recognizer or speaker authentication.
+  - A fresh embedded-audio builder check of the revision returned "nothing important left".
+    Design implementation approval remains pending. No product implementation, voice
+    recording, template training, microphone/device/API access or firmware installation.
