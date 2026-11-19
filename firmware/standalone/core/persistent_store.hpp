@@ -32,6 +32,8 @@ class AtomicKv {
 };
 
 enum class ProfileLoad { valid, missing, invalid_or_io };
+// Calls are one-shot, ordered, and RAM-only. Reboot cannot resurrect a permit.
+enum class PaidStage : uint8_t { transcribe = 0, respond = 1, synthesize = 2 };
 
 class PersistentGuard {
  public:
@@ -90,11 +92,15 @@ class PersistentGuard {
   // Caller must check SNTP, trusted epoch and paid-request owner consent.
   // The first remote request is forbidden until NVS commit and read-back pass.
   bool reserve(uint64_t epoch, bool trusted_clock, bool paid_owner_consent) {
-    if (fatal_ || !paid_owner_consent || !budget_) return false;
+    if (fatal_ || !paid_owner_consent || !budget_ || permit_active_) return false;
     const bool ok = budget_->reserve(epoch, trusted_clock, [this](std::span<const uint8_t> wire) {
       return verified_commit(kBudgetKey, wire);
     });
     if (budget_->faulted()) fatal_ = true;
+    if (ok && !fatal_) {
+      permit_active_ = true;
+      next_step_ = 0;
+    }
     return ok && !fatal_;
   }
 
@@ -102,9 +108,21 @@ class PersistentGuard {
   bool has_budget() const { return budget_.has_value(); }
   bool fatal() const { return fatal_; }
   size_t reserved_conversations() const { return budget_ ? budget_->count() : 0; }
-  bool may_transmit(bool paid_owner_consent, bool trusted_clock) const {
-    return !fatal_ && budget_ && profile_ && paid_owner_consent && trusted_clock;
+  // Consume the permit BEFORE each outbound API send. Even if the HTTP
+  // request times out, the same step cannot be authorized twice.
+  bool authorize_step(PaidStage step, bool paid_owner_consent, bool trusted_clock) {
+    if (fatal_ || !permit_active_ || !budget_ || !profile_ ||
+        !paid_owner_consent || !trusted_clock ||
+        static_cast<unsigned>(step) != next_step_ || next_step_ >= 3) return false;
+    ++next_step_;
+    if (next_step_ == 3) permit_active_ = false;
+    return true;
   }
+
+  // STOP, error or timeout discards unused tokens without refund. The durable
+  // conversation/3-request reservation remains charged after cancellation.
+  void cancel_permit() { permit_active_ = false; next_step_ = 0; }
+  bool permit_active() const { return permit_active_; }
 
  private:
   bool verified_commit(std::string_view key, std::span<const uint8_t> wire) {
@@ -125,6 +143,8 @@ class PersistentGuard {
   std::optional<std::vector<uint8_t>> profile_;
   std::optional<BudgetLedger> budget_;
   bool fatal_ = false;
+  bool permit_active_ = false;
+  unsigned next_step_ = 0;
 };
 
 }  // namespace stackchan::standalone

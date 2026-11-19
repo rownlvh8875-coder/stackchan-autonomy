@@ -135,3 +135,22 @@ uses the pinned ESP-IDF v6.1 release tag (commit
 machine/slot-length/SHA manifest when a real build succeeds. A host `g++`
 PASS does not imply this CI's ESP32 build PASS. Do not flash, merge or
 replace the factory firmware based solely on compilation.
+
+### 2026-11-19 follow-up hardening
+
+The portable persistence contract now refuses outbound stages until a fresh,
+durable three-request reservation exists. It exposes three **one-shot** stage
+permits, strictly ordered `transcribe → respond → synthesize`. Duplicate,
+out-of-order or post-STOP stages are rejected; reboot cannot restore in-RAM
+permits. The caller MUST still gate each real HTTP request by the `Session`
+epoch/timeout/state and must invalidate unused permits on STOP/error.
+
+`AudioGuard` turns the amplifier off independently even if the mic-off driver
+reports failure: stop/initialization/manual resume never short-circuit the
+separate mute attempts. These are mock-hook tests, not actual K151 I2S proof.
+
+The initial independent ESP-IDF v6.1/ESP32-S3 HOLD target compiled at
+[GitHub Actions run 44434628479](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44434628479)
+from commit `b1f98e168564`: Xtensa ELF (e_machine 94), app 197,024 bytes,
+bounded by observed 5,177,344-byte OTA app slot. The app does NOT contain real
+microphone, speaker, LCD, USB or GPT functionality and must NOT be flashed.

@@ -31,8 +31,9 @@ class AudioGuard {
     if (state_ != AudioState::cold || !local_configuration_ready ||
         !hardware_identity_confirmed) return false;
     // Force outputs off BEFORE powering or configuring audio peripherals.
-    if (!call(hooks_.mic_off) || !call(hooks_.amp_off) ||
-        !call(hooks_.init_peripherals)) return fault();
+    const bool mic_quiet = call(hooks_.mic_off);
+    const bool amp_quiet = call(hooks_.amp_off);
+    if (!mic_quiet || !amp_quiet || !call(hooks_.init_peripherals)) return fault();
     state_ = AudioState::idle;
     return true;
   }
@@ -69,13 +70,16 @@ class AudioGuard {
     stop_latched_ = true;  // Set latch before any potentially slow callback.
     state_ = AudioState::stopped;
     // Any uncertainty is still STOPPED/FAULT, never a clean idle retry.
-    if (!call(hooks_.mic_off) || !call(hooks_.amp_off) ||
-        !call(hooks_.mic_flush)) { state_ = AudioState::fault; }
+    const bool mic_quiet = call(hooks_.mic_off);
+    const bool amp_quiet = call(hooks_.amp_off);
+    const bool cleared = call(hooks_.mic_flush);
+    if (!mic_quiet || !amp_quiet || !cleared) { state_ = AudioState::fault; }
   }
   bool manual_resume() {
     if (state_ != AudioState::stopped || !stop_latched_) return false;
-    if (!call(hooks_.mic_off) || !call(hooks_.amp_off) ||
-        !call(hooks_.mic_flush)) return fault();
+    const bool mic_quiet = call(hooks_.mic_off);
+    const bool amp_quiet = call(hooks_.amp_off);
+    if (!mic_quiet || !amp_quiet || !call(hooks_.mic_flush)) return fault();
     stop_latched_ = false;
     state_ = AudioState::idle;
     return true;

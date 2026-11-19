@@ -57,18 +57,31 @@ int main() {
   assert(!first.provision_budget(true));
   assert(!first.save_profile(profile, false));
   assert(first.save_profile(profile, true));
-  assert(first.may_transmit(true, true));
-  assert(!first.may_transmit(false, true));
+  // A loaded ledger/profile WITHOUT a new reservation must not send requests.
+  assert(!first.authorize_step(PaidStage::transcribe, true, true));
   assert(!first.reserve(now, false, true));
   assert(!first.reserve(now, true, false));
   assert(first.reserve(now, true, true));
   assert(first.reserved_conversations() == 1);
+  assert(!first.reserve(now + 1, true, true)); // no overlapping reservations
+  assert(!first.authorize_step(PaidStage::respond, true, true)); // no phase skipping
+  assert(!first.authorize_step(PaidStage::transcribe, false, true)); // owner opt-in
+  assert(first.authorize_step(PaidStage::transcribe, true, true));
+  assert(!first.authorize_step(PaidStage::transcribe, true, true)); // no retry
+  assert(first.authorize_step(PaidStage::respond, true, true));
+  assert(first.authorize_step(PaidStage::synthesize, true, true));
+  assert(!first.permit_active());
+  assert(!first.authorize_step(PaidStage::synthesize, true, true));
 
   PersistentGuard reboot(fresh);
   assert(reboot.restore_profile() == ProfileLoad::valid);
   assert(reboot.restore_budget());
   assert(reboot.reserved_conversations() == 1);
+  assert(!reboot.authorize_step(PaidStage::transcribe, true, true));
   assert(reboot.reserve(now + 1, true, true));
+  assert(reboot.authorize_step(PaidStage::transcribe, true, true));
+  reboot.cancel_permit(); // STOP: no refund and no delayed next stage
+  assert(!reboot.authorize_step(PaidStage::respond, true, true));
   assert(!reboot.reserve(now + 2, true, true)); // 2 conversations per minute
   assert(!reboot.reserve(now - 10, true, true)); // clock rollback, no renewal
 
