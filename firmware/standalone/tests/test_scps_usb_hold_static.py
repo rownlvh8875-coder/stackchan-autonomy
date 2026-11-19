@@ -30,3 +30,12 @@ def test_encrypted_usb_port_requires_sensor_and_disjoint_scfg():
     )
     assert "if(state_==State::complete)return true;" in driver
     assert "setup_.stop();" in driver
+
+
+def test_sas_display_requires_explicit_lvgl_mutex_evidence():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "esp_app" / "main" / "k151_scps_usb.cpp").read_text()
+    header = (root / "esp_app" / "main" / "k151_scps_usb.hpp").read_text()
+    assert "bool poll_once(uint64_t now_ms,bool lvgl_lock_held)" in header
+    assert "trusted_lcd_,true,lvgl_lock_held" in source
+    assert "process(*received.frame,now,lvgl_lock_held)" in source

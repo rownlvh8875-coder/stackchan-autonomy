@@ -32,7 +32,9 @@ class K151ScpsUsbPort final {
   bool start(uint64_t now_ms,bool exact_board_verified,
              bool trusted_lcd_verified,bool uart_console_verified,
              bool usb_exclusively_owned);
-  bool poll_once(uint64_t now_ms);
+  // The owner task must hold the verified LVGL display mutex before a
+  // PC hello is processed. False means no display update and a hard fault.
+  bool poll_once(uint64_t now_ms,bool lvgl_lock_held);
 
   // NEVER called from received USB frames. Only a trusted *local* screen
   // controller, after human SAS comparison, may begin the second hold.
@@ -51,7 +53,8 @@ class K151ScpsUsbPort final {
     cold, wait_pc_hello, wait_sealed, pending_local_review,
     waiting_touch, complete, stopped, fault
   };
-  bool process(const scpswire::Frame& f,uint64_t now_ms);
+  bool process(const scpswire::Frame& f,uint64_t now_ms,
+               bool lvgl_lock_held);
   bool send(scpswire::Op kind,std::span<const uint8_t> payload={});
   bool fault();
   void scrub_pending();

@@ -72,7 +72,8 @@ bool K151ScpsUsbPort::start(uint64_t now,bool exact_board_verified,
 #endif
 }
 
-bool K151ScpsUsbPort::process(const scpswire::Frame& f,uint64_t now) {
+bool K151ScpsUsbPort::process(const scpswire::Frame& f,uint64_t now,
+                                bool lvgl_lock_held) {
   if(stop_.load() || !touch_.owner_window_open(now))return fault();
   if(f.kind==scpswire::Op::stop)return fault();
   if(state_==State::wait_pc_hello && f.kind==scpswire::Op::pc_hello) {
@@ -80,7 +81,7 @@ bool K151ScpsUsbPort::process(const scpswire::Frame& f,uint64_t now) {
     const bool accepted=pairing_.accept_pc_hello(
         now,true,f.payload,sas);
     const bool shown=accepted && display_.present_pairing_sas(
-        std::string_view(sas.data(),8),trusted_lcd_,true,true);
+        std::string_view(sas.data(),8),trusted_lcd_,true,lvgl_lock_held);
     wipe_secret(reinterpret_cast<volatile unsigned char*>(sas.data()),
                 sas.size());
     if(!shown)return fault();
@@ -98,7 +99,7 @@ bool K151ScpsUsbPort::process(const scpswire::Frame& f,uint64_t now) {
   return fault();
 }
 
-bool K151ScpsUsbPort::poll_once(uint64_t now) {
+bool K151ScpsUsbPort::poll_once(uint64_t now,bool lvgl_lock_held) {
   if(!running_ || faulted_)return false;
   if(stop_.load())return fault();
   // A successful second-touch ticket is CONSUMED, which means the sensor's
@@ -115,7 +116,7 @@ bool K151ScpsUsbPort::poll_once(uint64_t now) {
     auto received=frames_.push(data[static_cast<size_t>(i)],now);
     if(received.fault)return fault();
     if(received.frame) {
-      const bool accepted=process(*received.frame,now);
+      const bool accepted=process(*received.frame,now,lvgl_lock_held);
       std::fill(received.frame->payload.begin(),
                 received.frame->payload.end(),uint8_t(0));
       if(!accepted)return false;
