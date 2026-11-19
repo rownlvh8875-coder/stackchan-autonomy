@@ -12,7 +12,7 @@ Status: **DESIGN / EVIDENCE REQUIRED / NOT DEVICE INSTALLATION APPROVAL**.
 | Secret isolation | Credentials absent from Git, stdout, firmware images and test artifacts | Must verify before any live API request |
 | Installation decision | Separate explicit owner approval for a specific reviewed binary and recovery method | Not authorized |
 
-Existing read-only tools: `tools/offline_factory_recovery.py` and `tools/readiness_snapshot.py`. Neither identifies an active slot, flashes, or proves restoration.
+Existing read-only tools: `tools/offline_factory_recovery.py` and `tools/readiness_snapshot.py`. Neither identifies an active slot, flashes, or proves restoration. For previously captured, synchronized instrument timing records, `tools/bench_trace_audit.py` checks only event order and timing arithmetic; [the bench log protocol](2026-11-19-bench-trace-audit.md) explains why its outputs can never certify physical safety or installation.
 
 ## B. Separate physical authorization required — no automatic I2C/USB probing
 
