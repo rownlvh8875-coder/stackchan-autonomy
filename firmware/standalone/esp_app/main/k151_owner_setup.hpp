@@ -39,6 +39,7 @@ class K151LocalOwnerSetup final {
   bool poll(uint64_t now_ms) { return setup_.tick(now_ms); }
   void stop() { setup_.cancel(); }
   bool ready() const { return setup_.ready(); }
+  OwnerSetupPhase phase() const { return setup_.phase(); }
   // This can activate Wi-Fi, so it is intentionally never called from
   // app_main. Only an independently authenticated local UI may invoke it.
   // Credentials are cleared from this object immediately after handoff;
