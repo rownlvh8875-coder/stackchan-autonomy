@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Fully fake (no network/device) wake -> mic -> question -> STT/GPT/TTS turn.
 #include "voice_turn_coordinator.hpp"
+#include "guarded_voice_speaker.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -28,8 +29,8 @@ struct FakeKv : AtomicKv {
 
 struct FakeHardware {
   bool microphone = false, amplifier = false;
-  bool fail_mic_off = false;
-  int mic_on_calls = 0, mic_off_calls = 0;
+  bool fail_mic_off = false, fail_drain = false;
+  int mic_on_calls = 0, mic_off_calls = 0, drain_calls = 0;
   AudioHooks hooks() {
     return {
         [this]() { ++mic_off_calls; if (fail_mic_off) return false;
@@ -39,7 +40,7 @@ struct FakeHardware {
         [this]() { ++mic_on_calls; microphone = true; return true; },
         []() { return true; },
         [this]() { amplifier = true; return true; },
-        []() { return true; }
+        [this]() { ++drain_calls; return !fail_drain; }
     };
   }
 };
@@ -87,12 +88,15 @@ struct FakeApi : VoiceApiPort {
 struct FakeSpeaker : VoiceSpeakerPort {
   FakeHardware& hw;
   int calls = 0;
+  bool fail_output = false;
+  std::atomic_bool* stop_during_output = nullptr;
   explicit FakeSpeaker(FakeHardware& h) : hw(h) {}
   VoicePlaybackResult play_pcm24k(std::span<const int16_t> pcm,
                                   uint64_t started_ms) override {
-    assert(!hw.microphone && !pcm.empty());
+    assert(!hw.microphone && hw.amplifier && !pcm.empty());
     ++calls;
-    return {true, started_ms + 1};
+    if (stop_during_output) stop_during_output->store(true);
+    return {!fail_output, started_ms + 1};
   }
 };
 
@@ -103,13 +107,14 @@ struct Fixture {
   WakeProfile enrolled;
   std::atomic_bool stop{false}, consent{true}, trusted{true}, speaker_busy{false};
   FakeHardware hardware;
+  AudioGuard audio{hardware.hooks()};
   FakeMic mic{hardware};
   FakeApi api{hardware};
-  FakeSpeaker speaker{hardware};
+  FakeSpeaker sink{hardware};
+  GuardedVoiceSpeaker speaker{audio, sink, stop, consent, speaker_busy};
   WakeVoiceEntry entry{session, enrolled, ledger, api, speaker,
                        stop, consent, trusted, speaker_busy};
   MicFrameBridge bridge{mic, stop, speaker_busy};
-  AudioGuard audio{hardware.hooks()};
   VoiceTurnCoordinator controller{session, ledger, entry, bridge, audio,
                                   stop, consent, speaker_busy};
   VoiceModelConfig models{"stt_test", "gpt_test", "tts_test", "voice_test"};
@@ -150,7 +155,9 @@ int main() {
     }
     assert(x.tick(28) == VoiceTurnStep::answered);
     assert(!x.hardware.microphone && !x.controller.active());
-    assert(x.api.calls == 3 && x.speaker.calls == 1);
+    assert(x.api.calls == 3 && x.sink.calls == 1);
+    assert(!x.hardware.amplifier && !x.speaker_busy.load());
+    assert(x.hardware.drain_calls == 1 && x.audio.state() == AudioState::idle);
     assert(x.ledger.reserved_conversations() == 1);
     assert(x.session.state() == State::cooldown);
     assert(x.tick(29) == VoiceTurnStep::inactive);
@@ -211,6 +218,39 @@ int main() {
     }
     assert(x.tick(28) == VoiceTurnStep::aborted);
     assert(x.api.calls == 0 && x.audio.state() == AudioState::fault);
+  }
+  {
+    Fixture x;
+    x.sink.fail_output = true;
+    assert(x.controller.arm(x.epoch, 1120));
+    for (int frame = 0; frame < 28; ++frame)
+      assert(x.tick(frame) != VoiceTurnStep::aborted);
+    assert(x.tick(28) == VoiceTurnStep::aborted);
+    assert(x.sink.calls == 1 && x.api.calls == 3);
+    assert(x.speaker.latched() && x.speaker_busy.load());
+    assert(!x.hardware.microphone && !x.hardware.amplifier);
+    assert(x.audio.stopped() && x.controller.faulted());
+  }
+  {
+    Fixture x;
+    x.sink.stop_during_output = &x.stop;
+    assert(x.controller.arm(x.epoch, 1120));
+    for (int frame = 0; frame < 28; ++frame)
+      assert(x.tick(frame) != VoiceTurnStep::aborted);
+    assert(x.tick(28) == VoiceTurnStep::aborted);
+    assert(x.stop.load() && x.speaker.latched());
+    assert(x.sink.calls == 1 && !x.hardware.amplifier);
+  }
+  {
+    Fixture x;
+    x.hardware.fail_drain = true;
+    assert(x.controller.arm(x.epoch, 1120));
+    for (int frame = 0; frame < 28; ++frame)
+      assert(x.tick(frame) != VoiceTurnStep::aborted);
+    assert(x.tick(28) == VoiceTurnStep::aborted);
+    assert(x.hardware.drain_calls == 1 && x.speaker.latched());
+    assert(x.audio.state() == AudioState::fault);
+    assert(!x.hardware.amplifier && x.speaker_busy.load());
   }
   std::cout << "voice turn coordinator: PASS (offline, fake audio/API)\n";
 }

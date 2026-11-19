@@ -68,7 +68,9 @@ class AudioGuard {
   }
   void stop() {
     stop_latched_ = true;  // Set latch before any potentially slow callback.
-    state_ = AudioState::stopped;
+    // Never downgrade a previously faulted driver to a resumable STOP state.
+    const bool already_faulted = state_ == AudioState::fault;
+    state_ = already_faulted ? AudioState::fault : AudioState::stopped;
     // Any uncertainty is still STOPPED/FAULT, never a clean idle retry.
     const bool mic_quiet = call(hooks_.mic_off);
     const bool amp_quiet = call(hooks_.amp_off);

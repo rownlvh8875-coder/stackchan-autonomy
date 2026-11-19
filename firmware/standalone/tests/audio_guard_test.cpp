@@ -48,6 +48,8 @@ int main() {
   hw.fail_drain = true;
   assert(!guard.playback_end());
   assert(guard.state() == AudioState::fault);
+  guard.stop(); // An extra STOP must never convert a fault into manual-resumable state.
+  assert(guard.state() == AudioState::fault);
   assert(!guard.manual_resume() && !guard.capture_begin());
 
   MockAudio broken;
