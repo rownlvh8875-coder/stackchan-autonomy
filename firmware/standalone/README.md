@@ -53,3 +53,21 @@ corrupt ledger must not be treated as a reset to zero after provisioning.
 
 See `docs/superpowers/specs/2026-11-18-standalone-gpt-design.md` for the source
 of requirements and the outstanding physical-installation HOLD.
+
+## Experimental on-device wake feature algorithm
+
+`core/wake_features.hpp` adds a bounded 24kHz-to-16kHz anti-aliased
+resampler, 25ms/10ms 26-mel/13-cepstral-feature extractor, 64x13 int8
+output, DTW matcher, profile CRC/version validation and held-out
+positive/negative rejection calibration. A profile with up to three
+stored templates uses at most 2507 bytes. The host test uses **synthetic
+sine waves**, so it proves only math/format behavior, **not recognition
+of the Korean phrase `조수야`**. It is not voice biometric authentication.
+
+A real ESP32 integration still needs microphone I2S, segmentation/VAD,
+fixed-point or measured CPU optimization, wake/noise corpus, duration/RAM
+measurements, tests after reboot and the real-device acceptance criteria:
+18/20 new spoken positives at 1m, at most one false wake per quiet/ordinary
+60-minute negative period and zero wakes in 20 robot-playback trials.
+A failure must leave cloud wake activation disabled instead of using
+paid always-on STT as an undocumented fallback.

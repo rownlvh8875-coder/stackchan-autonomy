@@ -48,7 +48,7 @@ jobs:
       - name: Lint and formatting
         run: |
           uv run --frozen ruff check .
-          uv run --frozen ruff format --check --diff .
+          uv run --frozen ruff format --check .
       - name: Offline test suite
         run: uv run --frozen pytest -q -ra --junitxml=.local/ci/junit.xml
       - name: Accelerated virtual 24-hour stability scenario
