@@ -23,6 +23,7 @@ def test_xtensa_elf_and_app_size(tmp_path, validator):
     header[:4] = b"\x7fELF"
     header[4] = 1
     header[5] = 1
+    header[6] = 1
     struct.pack_into("<H", header, 18, 94)
     elf.write_bytes(header)
     app.write_bytes(b"example-app")
@@ -40,4 +41,25 @@ def test_xtensa_elf_and_app_size(tmp_path, validator):
     elf.write_bytes(header)
     app.write_bytes(b"x" * (validator.OBSERVED_K151_OTA_SLOT + 1))
     with pytest.raises(ValueError, match="slot"):
+        validator.validate(elf, app, validator.EXPECTED_IDF_SHA)
+
+
+@pytest.mark.parametrize("corruption", ["truncated", "elf64", "big_endian", "invalid_version"])
+def test_rejects_invalid_elf_identity(tmp_path, validator, corruption):
+    elf, app = tmp_path / "app.elf", tmp_path / "app.bin"
+    header = bytearray(64)
+    header[:4] = b"\x7fELF"
+    header[4:7] = bytes((1, 1, 1))
+    struct.pack_into("<H", header, 18, 94)
+    if corruption == "truncated":
+        header = header[:20]
+    elif corruption == "elf64":
+        header[4] = 2
+    elif corruption == "big_endian":
+        header[5] = 2
+    else:
+        header[6] = 0
+    elf.write_bytes(header)
+    app.write_bytes(b"app")
+    with pytest.raises(ValueError, match="ELF"):
         validator.validate(elf, app, validator.EXPECTED_IDF_SHA)

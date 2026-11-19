@@ -23,8 +23,10 @@ def validate(elf: Path, app: Path, idf_head: str) -> dict:
     if idf_head != EXPECTED_IDF_SHA:
         raise ValueError("ESP-IDF is not the pinned v6.1 commit")
     header = elf.read_bytes()[:64]
-    if header[:4] != b"\x7fELF" or header[5] != 1:
-        raise ValueError("missing little-endian ELF header")
+    if len(header) < 52 or header[:4] != b"\x7fELF":
+        raise ValueError("missing or truncated ELF header")
+    if header[4] != 1 or header[5] != 1 or header[6] != 1:
+        raise ValueError("expected ELF32 little-endian version 1")
     machine = struct.unpack_from("<H", header, 18)[0]
     if machine != 94:  # EM_XTENSA
         raise ValueError(f"expected Xtensa ELF (EM_XTENSA=94), got {machine}")
