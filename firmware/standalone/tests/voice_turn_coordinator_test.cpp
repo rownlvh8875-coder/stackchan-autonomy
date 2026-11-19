@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <span>
 #include <vector>
@@ -121,16 +122,28 @@ struct Fixture {
   uint64_t epoch = 0;
 
   Fixture() {
-    WakeFeature feature;
-    feature.quantized.fill(2);
+    // Exercise the actual local MFCC/DTW wake matching path with a synthetic
+    // frequency fixture; this is NOT an acoustic Korean recognizer trial.
+    static const std::vector<int16_t> wake_pcm = [] {
+      std::vector<int16_t> pcm(24000);
+      for (size_t i = 0; i < pcm.size(); ++i) {
+        const float phase = 2 * kPi * 520.f * static_cast<float>(i) / 24000.f;
+        pcm[i] = static_cast<int16_t>(10000 * std::sin(phase));
+      }
+      return pcm;
+    }();
+    static const auto feature = wake_mfcc_from_24k(wake_pcm);
+    assert(feature);
     enrolled.limit_q8 = 256;
-    enrolled.templates.push_back(feature);
+    enrolled.templates.push_back(*feature);
     assert(ledger.save_profile(*encode_wake_profile(enrolled), true));
     assert(ledger.provision_budget(true));
     session.boot(1000, true, true);
     session.cloud_enable(true);  // Fake API only, never production default.
     assert(audio.initialize(true, true));
-    auto wake = session.wake(1100);
+    const std::vector<int16_t> silence(24000, 0);
+    assert(!entry.detect(silence, 1050));
+    auto wake = entry.detect(wake_pcm, 1100);
     assert(wake);
     epoch = *wake;
   }
