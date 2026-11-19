@@ -2,6 +2,7 @@
 // Fixed-host TLS, no redirect/retry, per-stage deadline and capped reply.
 // Compile-only: app_main never calls post_once or starts a network stack.
 #include "k151_https_voice.hpp"
+#include "live_io_gate.hpp"
 #include <algorithm>
 #include <array>
 #include <climits>
@@ -49,18 +50,15 @@ bool secret_safe(std::string_view s){
  return true;
 }
 int64_t monotonic_ms(){return esp_timer_get_time()/1000;}
-bool allowed(const std::atomic_bool& owner,const std::atomic_bool& stop,int64_t until){
- return owner.load()&&!stop.load()&&monotonic_ms()<until;
-}
 struct Client {
  esp_http_client_handle_t ptr=nullptr;
  ~Client(){if(ptr){(void)esp_http_client_close(ptr);(void)esp_http_client_cleanup(ptr);}}
 };
-bool send_exact(esp_http_client_handle_t c,const char* buf,size_t n,int64_t until,
-                const std::atomic_bool& owner,const std::atomic_bool& stop){
+bool send_exact(esp_http_client_handle_t c,const char* buf,size_t n,
+                LiveIoGate& gate){
  size_t at=0;
  while(at<n){
-  if(!allowed(owner,stop,until))return false;
+  if(!gate.allowed(static_cast<uint64_t>(monotonic_ms())))return false;
   const int want=static_cast<int>(std::min(n-at,size_t(1024)));
   const int sent=esp_http_client_write(c,buf+at,want);
   if(sent<=0||sent>want)return false;
@@ -68,19 +66,19 @@ bool send_exact(esp_http_client_handle_t c,const char* buf,size_t n,int64_t unti
  }
  return true;
 }
-bool send_pcm(esp_http_client_handle_t c,std::span<const int16_t> samples,int64_t until,
-              const std::atomic_bool& owner,const std::atomic_bool& stop){
+bool send_pcm(esp_http_client_handle_t c,std::span<const int16_t> samples,
+              LiveIoGate& gate){
  std::array<char,1024> block{};
  size_t at=0;
  while(at<samples.size()){
-  if(!allowed(owner,stop,until))return false;
+  if(!gate.allowed(static_cast<uint64_t>(monotonic_ms())))return false;
   const size_t count=std::min(block.size()/2,samples.size()-at);
   for(size_t i=0;i<count;++i){
    const auto v=static_cast<uint16_t>(samples[at+i]);
    block[2*i]=static_cast<char>(v&0xffU);
    block[2*i+1]=static_cast<char>(v>>8);
   }
-  const bool success=send_exact(c,block.data(),count*2,until,owner,stop);
+  const bool success=send_exact(c,block.data(),count*2,gate);
   std::fill(block.begin(),block.end(),'\0');
   if(!success)return false;
   at+=count;
@@ -92,11 +90,12 @@ const char* K151HttpsVoicePort::compiled_link_marker(){
  return "OpenAI fixed-host TLS/HTTP adapter linked; no connection at startup";
 }
 bool K151HttpsVoicePort::post_once(
- const Request& req,std::string_view api_key,bool wifi_ready,bool trusted_sntp,
+ const Request& req,std::string_view api_key,
+ const std::function<bool()>& live_network_ready,
  const std::atomic_bool& owner,const std::atomic_bool& stop,
  const std::function<bool()>& paid_stage_permit, Reply& out) const {
  out={};
- if(!wifi_ready||!trusted_sntp||!owner.load()||stop.load()||
+ if(!live_network_ready||!live_network_ready()||!owner.load()||stop.load()||
     !secret_safe(api_key)||!paid_stage_permit||
     std::time(nullptr)<kEarliestTrustedEpoch)return false;
  std::string body;
@@ -122,13 +121,15 @@ bool K151HttpsVoicePort::post_once(
   default:return false;
  }
  const size_t size=multipart?multipart->length:body.size();
- if(size==0||size>INT_MAX||!owner.load()||stop.load())return false;
- // A stage may have reached the server even if later I/O fails:
- // consume exactly once *before* opening a socket, never retry or refund.
- if(!paid_stage_permit())return false;
+ if(size==0||size>INT_MAX)return false;
  const int64_t start=monotonic_ms();
- if(start>INT64_MAX-kStageMs)return false;
+ if(start<0||start>INT64_MAX-kStageMs)return false;
  const int64_t until=start+kStageMs;
+ LiveIoGate gate(live_network_ready,owner,stop,static_cast<uint64_t>(until));
+ if(!gate.allowed(static_cast<uint64_t>(start)))return false;
+ // A stage may have reached the server even if later I/O fails:
+ // consume exactly once BEFORE opening a socket, never retry or refund.
+ if(!paid_stage_permit())return false;
  Headers headers;
  esp_http_client_config_t cfg={};
  cfg.host=kHost;
@@ -157,17 +158,17 @@ bool K151HttpsVoicePort::post_once(
     esp_http_client_set_header(c.ptr,"Accept",
       req.endpoint==httpwire::Endpoint::speech?
         "application/octet-stream":"application/json")!=ESP_OK)return false;
- if(!allowed(owner,stop,until)||
+ if(!gate.allowed(static_cast<uint64_t>(monotonic_ms()))||
     esp_http_client_open(c.ptr,static_cast<int>(size))!=ESP_OK)return false;
  if(multipart){
-  if(!send_exact(c.ptr,multipart->prefix.data(),multipart->prefix.size(),until,owner,stop)||
+  if(!send_exact(c.ptr,multipart->prefix.data(),multipart->prefix.size(),gate)||
      !send_exact(c.ptr,reinterpret_cast<const char*>(multipart->wav.data()),
-                 multipart->wav.size(),until,owner,stop)||
-     !send_pcm(c.ptr,req.pcm24k,until,owner,stop)||
-     !send_exact(c.ptr,multipart->suffix.data(),multipart->suffix.size(),until,owner,stop))
+                 multipart->wav.size(),gate)||
+     !send_pcm(c.ptr,req.pcm24k,gate)||
+     !send_exact(c.ptr,multipart->suffix.data(),multipart->suffix.size(),gate))
     return false;
- }else if(!send_exact(c.ptr,body.data(),body.size(),until,owner,stop))return false;
- if(!allowed(owner,stop,until))return false;
+ }else if(!send_exact(c.ptr,body.data(),body.size(),gate))return false;
+ if(!gate.allowed(static_cast<uint64_t>(monotonic_ms())))return false;
  const int64_t declared=esp_http_client_fetch_headers(c.ptr);
  if(declared<0||headers.duplicate||esp_http_client_get_status_code(c.ptr)!=200||
     esp_http_client_get_transport_type(c.ptr)!=HTTP_TRANSPORT_OVER_SSL)return false;
@@ -178,14 +179,14 @@ bool K151HttpsVoicePort::post_once(
  if(!receiver.begin(200,headers.media,length,chunked))return false;
  std::array<char,1024> chunk{};
  for(;;){
-  if(!allowed(owner,stop,until))return false;
+  if(!gate.allowed(static_cast<uint64_t>(monotonic_ms())))return false;
   const int count=esp_http_client_read(c.ptr,chunk.data(),chunk.size());
   if(count<0||count>static_cast<int>(chunk.size()))return false;
   if(count==0)break;
   if(!receiver.append(std::span<const uint8_t>(
         reinterpret_cast<const uint8_t*>(chunk.data()),static_cast<size_t>(count))))return false;
  }
- if(!allowed(owner,stop,until)||
+ if(!gate.allowed(static_cast<uint64_t>(monotonic_ms()))||
     !receiver.finish(esp_http_client_is_complete_data_received(c.ptr)))return false;
  out.body=receiver.take_bytes();
  out.received_ms=static_cast<uint64_t>(monotonic_ms());

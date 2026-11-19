@@ -17,7 +17,7 @@ bool K151HttpChannel::post_once(
     std::vector<uint8_t>& body, uint64_t& completed_ms) {
   body.clear();
   completed_ms = 0;
-  if (!spend_dispatch || !wifi_.load() || !trusted_.load() ||
+  if (!spend_dispatch || !network_.live_network_ready() ||
       !consent_.load() || stop_.load()) return false;
   httpwire::Endpoint endpoint;
   switch (req.stage) {
@@ -40,23 +40,22 @@ bool K151HttpChannel::post_once(
   // post_once() consumes spend_dispatch() exactly once before establishing
   // TLS. The durable budget was ALREADY spent by OfflineVoiceCycle::stage;
   // this callback consumes only the separate in-RAM session-epoch ticket.
-  if (!http_.post_once(posted, key_, wifi_.load(), trusted_.load(),
+  const auto live_network = [this]() { return network_.live_network_ready(); };
+  if (!http_.post_once(posted, key_, live_network,
                        consent_, stop_, spend_dispatch, result)) return false;
-  if (stop_.load() || !consent_.load() || !trusted_.load() ||
-      !wifi_.load()) return false;
+  if (stop_.load() || !consent_.load() || !network_.live_network_ready()) return false;
   completed_ms = result.received_ms;
   body = std::move(result.body);
   return !body.empty();
 }
 
 K151VoiceApiAdapter::K151VoiceApiAdapter(
-    std::string_view key, const std::atomic_bool& wifi,
-    const std::atomic_bool& trusted, const std::atomic_bool& consent,
-    const std::atomic_bool& stop)
-    : http_(key, wifi, trusted, consent, stop),
+    std::string_view key, const K151WifiTimePort& network,
+    const std::atomic_bool& consent, const std::atomic_bool& stop)
+    : http_(key, network, consent, stop),
       binding_(http_, codec_, []() {
         return static_cast<uint64_t>(esp_timer_get_time() / 1000);
-      }, stop, consent, trusted) {}
+      }, stop, consent, network.admission_flag()) {}
 
 const char* K151VoiceApiAdapter::compiled_link_marker() {
   return K151HttpChannel::compiled_link_marker();

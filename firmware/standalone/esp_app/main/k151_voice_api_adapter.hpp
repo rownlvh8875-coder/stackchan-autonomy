@@ -3,6 +3,7 @@
 #pragma once
 #include "voice_api_bridge.hpp"
 #include "k151_https_voice.hpp"
+#include "k151_wifi_time.hpp"
 #include "k151_voice_decode.hpp"
 #include <atomic>
 #include <cstdint>
@@ -15,11 +16,10 @@ namespace stackchan::standalone {
 class K151HttpChannel final : public VoiceHttpChannel {
  public:
   K151HttpChannel(std::string_view api_key,
-                  const std::atomic_bool& wifi,
-                  const std::atomic_bool& trusted_clock,
+                  const K151WifiTimePort& network,
                   const std::atomic_bool& owner_consent,
                   const std::atomic_bool& physical_stop)
-      : key_(api_key), wifi_(wifi), trusted_(trusted_clock),
+      : key_(api_key), network_(network),
         consent_(owner_consent), stop_(physical_stop) {}
   static const char* compiled_link_marker();
   bool post_once(const VoiceApiRequest& request,
@@ -28,8 +28,7 @@ class K151HttpChannel final : public VoiceHttpChannel {
                  uint64_t& completed_ms) override;
  private:
   std::string_view key_;
-  const std::atomic_bool& wifi_;
-  const std::atomic_bool& trusted_;
+  const K151WifiTimePort& network_;
   const std::atomic_bool& consent_;
   const std::atomic_bool& stop_;
   K151HttpsVoicePort http_;
@@ -53,8 +52,7 @@ class K151ReplyCodec final : public VoiceReplyCodec {
 // instance. No device startup path or model configuration is supplied here.
 class K151VoiceApiAdapter final {
  public:
-  K151VoiceApiAdapter(std::string_view key, const std::atomic_bool& wifi,
-                      const std::atomic_bool& trusted,
+  K151VoiceApiAdapter(std::string_view key, const K151WifiTimePort& network,
                       const std::atomic_bool& consent,
                       const std::atomic_bool& stop);
   static const char* compiled_link_marker();

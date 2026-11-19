@@ -24,7 +24,7 @@ class K151HttpsVoicePort final {
   // The caller MUST supply a durable one-shot stage-permit callback.
   // No call exists in app_main. Wi-Fi/SNTP/owner consent are prerequisites.
   bool post_once(const Request& request, std::string_view key,
-                 bool wifi_ready, bool trusted_sntp,
+                 const std::function<bool()>& live_network_ready,
                  const std::atomic_bool& owner_consent,
                  const std::atomic_bool& stop,
                  const std::function<bool()>& consume_persisted_stage,
