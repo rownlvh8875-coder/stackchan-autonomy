@@ -236,6 +236,7 @@ class Session {
   }
   void cloud_enable(bool enabled) { cloud_enabled_ = enabled; }
   State state() const { return state_; }
+  bool cloud_enabled() const { return cloud_enabled_; }
   uint64_t epoch() const { return epoch_; }
 
   std::optional<uint64_t> wake(uint64_t now) {

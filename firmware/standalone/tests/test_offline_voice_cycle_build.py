@@ -1,0 +1,34 @@
+"""Run the no-network offline STT / Responses / PCM-TTS orchestration core."""
+
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+
+def test_offline_voice_cycle_host(tmp_path):
+    compiler = shutil.which("g++")
+    if compiler is None:
+        pytest.skip("g++ is unavailable")
+    root = Path(__file__).resolve().parents[1]
+    binary = tmp_path / "offline_voice_cycle_test"
+    subprocess.run(
+        [
+            compiler,
+            "-std=c++20",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pedantic",
+            "-I",
+            str(root / "core"),
+            str(root / "tests" / "offline_voice_cycle_test.cpp"),
+            "-o",
+            str(binary),
+        ],
+        check=True,
+        timeout=90,
+    )
+    subprocess.run([str(binary)], check=True, timeout=30)
