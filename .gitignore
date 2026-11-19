@@ -18,6 +18,6 @@ build/
 .worktrees/
 *.swk1
 *.scfgbundle
-# Private wake-phrase samples must never be committed to the repository.
-*.wav
-*.WAV
+# Private wake-phrase samples and local corpus manifests must not be committed.
+*.[wW][aA][vV]
+*.wake-corpus.json
