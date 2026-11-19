@@ -15,8 +15,18 @@ def test_usb_enrollment_host(tmp_path):
     source = root / "tests" / "usb_enrollment_test.cpp"
     output = tmp_path / "usb_enrollment_test"
     args = [
-        compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic",
-        "-I", str(root / "core"), str(source), "-o", str(output),
+        compiler,
+        "-std=c++20",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-pedantic",
+        "-I",
+        str(root / "core"),
+        str(source),
+        "-o",
+        str(output),
     ]
     subprocess.run(args, check=True, timeout=90)
     subprocess.run([str(output)], check=True, timeout=30)

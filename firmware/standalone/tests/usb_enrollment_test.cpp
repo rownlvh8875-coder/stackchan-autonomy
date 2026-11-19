@@ -48,7 +48,7 @@ int main() {
   assert(decoded && reader.buffered()==0);
   const Frame valid_begin=*decoded;
   auto malformed=*packet;
-  malformed.back()^=1;
+  malformed.at(malformed.size()-1)^=1;
   for (uint8_t byte : malformed) decoded=reader.push(byte,5500);
   assert(!decoded && reader.buffered()==0);
 
