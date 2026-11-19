@@ -14,6 +14,7 @@
 #include "k151_pcm_speaker_sink.hpp" // Dormant, 10ms-bounded K151 output.
 #include "k151_audio_hold_hooks.hpp" // Dormant output proof / no hardware startup.
 #include "k151_output_evidence.hpp" // Source-based policy, not physical proof.
+#include "audio_memory_admission.hpp" // Compile-only raw PCM headroom policy.
 #include "k151_https_voice.hpp"
 #include "k151_voice_api_adapter.hpp"
 #include "k151_wifi_time.hpp"
