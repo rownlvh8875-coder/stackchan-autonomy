@@ -15,10 +15,20 @@ def test_openai_http_wire(tmp_path):
     exe = tmp_path / "http_wire"
     subprocess.run(
         [
-            compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
-            "-pedantic", "-I", str(root / "core"),
-            str(root / "tests" / "http_wire_test.cpp"), "-o", str(exe),
+            compiler,
+            "-std=c++20",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pedantic",
+            "-I",
+            str(root / "core"),
+            str(root / "tests" / "http_wire_test.cpp"),
+            "-o",
+            str(exe),
         ],
-        check=True, timeout=90,
+        check=True,
+        timeout=90,
     )
     subprocess.run([str(exe)], check=True, timeout=30)
