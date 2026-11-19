@@ -241,8 +241,8 @@ inline std::optional<WakeProfile> calibrate_wake(
     std::span<const WakeFeature> templates,
     std::span<const WakeFeature> held_out_positive,
     std::span<const WakeFeature> negative) {
-  if (templates.empty() || templates.size()>3 || held_out_positive.empty() ||
-      negative.empty()) return std::nullopt;
+  if (templates.empty() || templates.size()>3 || held_out_positive.size()<5 ||
+      negative.size()<10) return std::nullopt;
   WakeProfile p;
   p.templates.assign(templates.begin(),templates.end());
   auto best = [&](const WakeFeature& sample) {

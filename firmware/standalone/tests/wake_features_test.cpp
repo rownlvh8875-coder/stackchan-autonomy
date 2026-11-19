@@ -33,8 +33,10 @@ int main() {
   assert(wake_dtw_distance(*a,*a)==0.f);
   assert(wake_dtw_distance(*a,*b)>0.f);
   std::array<WakeFeature,1> tmpl{*a};
-  std::array<WakeFeature,1> positive{*a};
-  std::array<WakeFeature,1> negative{*b};
+  std::array<WakeFeature,5> positive{};
+  std::array<WakeFeature,10> negative{};
+  positive.fill(*a);
+  negative.fill(*b);
   auto profile=calibrate_wake(tmpl,positive,negative);
   assert(profile && profile->accepts(*a) && !profile->accepts(*b));
   auto wire=encode_wake_profile(*profile);
@@ -43,6 +45,7 @@ int main() {
   assert(parsed && parsed->accepts(*a) && !parsed->accepts(*b));
   (*wire)[9] ^= 1;
   assert(!decode_wake_profile(*wire));
-  assert(!calibrate_wake(tmpl,positive,positive)); // no separation
+  negative.fill(*a);
+  assert(!calibrate_wake(tmpl,positive,negative)); // no separation
   std::cout<<"wake features: PASS (anti-alias SRC, MFCC, DTW, profile, reject overlap)\n";
 }
