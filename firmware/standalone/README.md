@@ -200,7 +200,12 @@ recordings only to the C++ MFCC/DTW SWK1 writer; then use independent
 user-labeled evaluation recordings and publish the new private profile only
 after both C++ stages return valid results. `--check-only` requires no C++
 compiler. This workflow does not verify Korean wake accuracy or authorize
-hardware installation. See `docs/2026-11-20-wake-corpus-offline-pipeline.md`.
+hardware installation. The opt-in `--offline-zig` flag can compile locally
+with a previously cached pinned Zig toolchain, without runtime downloads.
+A local Windows Heami (ko-KR) synthesized Korean '조수야' smoke test, still
+**not a human speech recognition evaluation**, is documented at
+`docs/2026-11-20-korean-heami-tts-smoke.md`. See
+`docs/2026-11-20-wake-corpus-offline-pipeline.md`.
 
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 

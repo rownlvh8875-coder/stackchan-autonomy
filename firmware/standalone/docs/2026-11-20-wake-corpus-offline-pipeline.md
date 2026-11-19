@@ -20,9 +20,12 @@ uv run --frozen python firmware/standalone/tools/wake_corpus_pipeline.py C:\priv
 
 # C++20 g++가 설치된 개인 PC에서만 등록 및 독립 평가까지 수행
 uv run --frozen python firmware/standalone/tools/wake_corpus_pipeline.py C:\private\stackchan-corpus\owner.wake-corpus.json --output C:\private\stackchan-corpus\owner.swk1
+
+# 이전에 준비한 Zig C++20 사용: 실행 중 패키지 다운로드 금지
+uv run --frozen python firmware/standalone/tools/wake_corpus_pipeline.py C:\private\stackchan-corpus\owner.wake-corpus.json --output C:\private\stackchan-corpus\owner-zig.swk1 --offline-zig
 ```
 
-컴파일러가 없으면 `gpp_compiler_unavailable`로 종료한다. 컴파일러를 자동 설치하지 않으며 임의의 시스템 권한 변경을 요청하지 않는다. 처음 호출할 때부터 `SWK1` 출력 경로는 존재하지 않아야 한다. 개인 WAV/목록/결과 파일은 **Git 저장소 밖**에 있어야 하며, 코드는 저장소 내부 출력도 거부한다.
+기본 모드에 시스템 `g++`가 없으면 `gpp_compiler_unavailable`로 종료한다. 별도로 사용자가 미리 uv 캐시에 저장한 `ziglang==0.15.2`가 있다면 `--offline-zig` 옵션으로 **`uvx --offline`** Zig C++20 컴파일러를 사용해 로컬 처리할 수 있다. 컴파일러를 실행 중 자동 설치하지 않으며 네트워크 다운로드를 허용하지 않는다. 캐시를 최초 준비할 때만 사용자 명시적 개발환경 작업으로 `uvx --from ziglang==0.15.2 python-zig version`을 실행한다. 시스템 권한 변경은 요구하지 않는다. 처음 호출할 때부터 `SWK1` 출력 경로는 존재하지 않아야 한다. 개인 WAV/목록/결과 파일은 **Git 저장소 밖**에 있어야 하며, 코드는 저장소 내부 출력도 거부한다.
 
 ## 평가 독립성과 보호 조건
 

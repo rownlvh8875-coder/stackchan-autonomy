@@ -130,6 +130,27 @@ def test_profile_inside_source_checkout_rejected(pipeline, private_manifest):
         )
 
 
+def test_optional_cached_zig_uses_strictly_offline_toolchain(pipeline, monkeypatch):
+    monkeypatch.setattr(
+        pipeline.shutil,
+        "which",
+        lambda executable: "C:/Tools/uvx.exe" if executable == "uvx" else None,
+    )
+    assert pipeline._compiler_command(offline_zig=True) == [
+        "C:/Tools/uvx.exe",
+        "--offline",
+        "--from",
+        "ziglang==0.15.2",
+        "python-zig",
+        "c++",
+    ]
+    with pytest.raises(pipeline.PipelineRejected, match="gpp_compiler_unavailable"):
+        pipeline._compiler_command(offline_zig=False)
+    monkeypatch.setattr(pipeline.shutil, "which", lambda _name: None)
+    with pytest.raises(pipeline.PipelineRejected, match="uvx_unavailable_for_cached_zig"):
+        pipeline._compiler_command(offline_zig=True)
+
+
 def test_compiler_unavailable_never_creates_profile(pipeline, private_manifest, monkeypatch):
     manifest, _ = private_manifest
     output = manifest.parent / "new.swk1"

@@ -129,11 +129,11 @@ def _require_unchanged(manifest: Path, grouped: dict, initial: dict[str, str]) -
         raise PipelineRejected("private_inputs_changed_during_processing")
 
 
-def _build(compiler: str, source: Path, output: Path, core: Path) -> None:
+def _build(compiler: list[str], source: Path, output: Path, core: Path) -> None:
     try:
         result = subprocess.run(
             [
-                compiler,
+                *compiler,
                 "-std=c++20",
                 "-O2",
                 "-Wall",
@@ -204,7 +204,23 @@ def _private_paths(manifest: Path, samples: list[dict]) -> list[str]:
     return [str(_safe_relative_file(root, row["file"])) for row in samples]
 
 
-def run_pipeline(manifest: Path, destination: Path, *, check_only: bool = False) -> dict:
+def _compiler_command(*, offline_zig: bool) -> list[str]:
+    if offline_zig:
+        uvx = shutil.which("uvx")
+        if not uvx:
+            raise PipelineRejected("uvx_unavailable_for_cached_zig")
+        # Strictly no package retrieval during enrollment. An operator must
+        # have explicitly cached this pinned compiler before using the flag.
+        return [uvx, "--offline", "--from", "ziglang==0.15.2", "python-zig", "c++"]
+    compiler = shutil.which("g++")
+    if not compiler:
+        raise PipelineRejected("gpp_compiler_unavailable")
+    return [compiler]
+
+
+def run_pipeline(
+    manifest: Path, destination: Path, *, check_only: bool = False, offline_zig: bool = False
+) -> dict:
     audit, grouped, original = prepare(manifest, destination)
     counts = audit["counts"]
     base = {
@@ -227,9 +243,7 @@ def run_pipeline(manifest: Path, destination: Path, *, check_only: bool = False)
             "independent_evaluation_run": False,
         }
 
-    compiler = shutil.which("g++")
-    if not compiler:
-        raise PipelineRejected("gpp_compiler_unavailable")
+    compiler = _compiler_command(offline_zig=offline_zig)
 
     tools = Path(__file__).resolve().parent
     core = tools.parent / "core"
@@ -304,9 +318,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="preflight without C++ compiler, SWK1 output, or independent evaluation",
     )
+    parser.add_argument(
+        "--offline-zig",
+        action="store_true",
+        help="use ONLY already-cached ziglang==0.15.2 via uvx --offline",
+    )
     args = parser.parse_args(argv)
     try:
-        result = run_pipeline(args.manifest, args.output, check_only=args.check_only)
+        result = run_pipeline(
+            args.manifest,
+            args.output,
+            check_only=args.check_only,
+            offline_zig=args.offline_zig,
+        )
         exit_code = 0
     except (PipelineRejected, OSError, CorpusError) as exc:
         result = {
