@@ -84,11 +84,13 @@ def test_full_encrypted_pairing_and_no_secret_echo():
             "HomeNetwork",
         ]
     )
+
     def visible(prompt: str) -> str:
         if "8 digits" in prompt:
             assert port.sas is not None
             return port.sas
         return next(entries)
+
     secrets = iter([password, api])
     assert run_pairing(
         port, text_input=visible, hidden_input=lambda _: next(secrets), say=messages.append

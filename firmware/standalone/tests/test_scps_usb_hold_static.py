@@ -25,9 +25,7 @@ def test_encrypted_usb_port_requires_sensor_and_disjoint_scfg():
     assert "touch_.take_scps_final_touch(now)" in driver
     assert "pairing_.open_sealed(" in driver
     assert "setup_.confirm(now,true)" in driver
-    assert driver.index("touch_.take_scps_final_touch(now)") < driver.index(
-        "pairing_.open_sealed("
-    )
+    assert driver.index("touch_.take_scps_final_touch(now)") < driver.index("pairing_.open_sealed(")
     assert "if(state_==State::complete)return true;" in driver
     assert "setup_.stop();" in driver
 
