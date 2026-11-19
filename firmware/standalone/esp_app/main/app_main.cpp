@@ -14,6 +14,7 @@
 #include "k151_setup_lvgl.hpp"
 #include "k151_secure_pc_setup.hpp"
 #include "k151_scps_usb.hpp"
+#include "k151_install_hold.hpp"
 #include "k151_voice_decode.hpp"
 namespace stackchan::standalone { const char* offline_voice_cycle_compiled_marker(); }
 #include "nvs_port.hpp"
@@ -49,6 +50,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151SetupLvgl::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151SecurePcSetup::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151ScpsUsbPort::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151InstallHold::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151VoiceDecoder::compiled_link_marker());
 
   IsolatedNvs nvs;
