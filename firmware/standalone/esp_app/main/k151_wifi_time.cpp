@@ -40,9 +40,14 @@ void K151WifiTimePort::on_event(void* arg, esp_event_base_t base,
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
     evt.type = EventType::associated;
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-    self->link_down_.store(true);
+    self->link_down_.store(true, std::memory_order_release);
+    self->admission_ready_.store(false, std::memory_order_release);
     evt.type = EventType::disconnected;
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+    // A DHCP renewal can replace the route while a voice request is active.
+    // Revoke readiness in the callback, not on the next owner poll.
+    self->link_down_.store(true, std::memory_order_release);
+    self->admission_ready_.store(false, std::memory_order_release);
     evt.type = EventType::ip;
   } else if (base == NETIF_SNTP_EVENT && id == NETIF_SNTP_TIME_SYNC && data) {
     const auto* sync = static_cast<const esp_netif_sntp_time_sync_t*>(data);
@@ -130,12 +135,23 @@ bool K151WifiTimePort::handle_event(const Event& evt, uint64_t now_ms) {
       return true;
     case EventType::ip:
       if (!policy_.ip_acquired(policy_.attempt_id(), now_ms)) return false;
-      return esp_netif_sntp_start() == ESP_OK;
+      // On renewal the same esp-netif SNTP service is already running.
+      // Starting it twice is not a recovery operation and may fail.
+      if (sntp_started_) return true;
+      if (esp_netif_sntp_start() != ESP_OK) return false;
+      sntp_started_ = true;
+      return true;
     case EventType::sync: {
       // SNTP is ordinary, unauthenticated; only time plausibility is checked.
       const bool accepted = policy_.time_synchronized(
           policy_.attempt_id(), evt.epoch_seconds, now_ms);
-      if (accepted) link_down_.store(false);
+      if (accepted) {
+        admission_ready_.store(false, std::memory_order_release);
+        last_sync_epoch_seconds_.store(evt.epoch_seconds, std::memory_order_release);
+        last_sync_monotonic_ms_.store(now_ms, std::memory_order_release);
+        link_down_.store(false, std::memory_order_release);
+        admission_ready_.store(true, std::memory_order_release);
+      }
       return accepted;
     }
   }
@@ -146,6 +162,8 @@ bool K151WifiTimePort::poll(const std::atomic_bool& physical_stop) {
   if (!active_ || faulted_) return false;
   if (physical_stop.load() || queue_overflow_.load()) return fail();
   if (!policy_.tick(millis())) return fail();
+  if (policy_.phase() != ConnectivityPhase::ready)
+    admission_ready_.store(false, std::memory_order_release);
   Event event{};
   for (size_t n = 0; n < kQueueLength &&
           xQueueReceive(queue_, &event, 0) == pdTRUE; ++n) {
@@ -155,16 +173,34 @@ bool K151WifiTimePort::poll(const std::atomic_bool& physical_stop) {
     auto attempt = policy_.claim_connect(millis());
     if (attempt && esp_wifi_connect() != ESP_OK) policy_.disconnected(millis());
   }
+  if (physical_stop.load()) admission_ready_.store(false, std::memory_order_release);
   return !faulted_ && !physical_stop.load();
+}
+
+bool K151WifiTimePort::live_network_ready() const {
+  // This method is safe to call on the HTTPS task. Do not read NetworkTimeGuard
+  // directly across tasks: its policy state belongs to the owning poll task.
+  if (!active_.load(std::memory_order_acquire) ||
+      faulted_.load(std::memory_order_acquire) ||
+      link_down_.load(std::memory_order_acquire) ||
+      !admission_ready_.load(std::memory_order_acquire)) return false;
+  const uint64_t synced_ms = last_sync_monotonic_ms_.load(std::memory_order_acquire);
+  const uint64_t epoch = last_sync_epoch_seconds_.load(std::memory_order_acquire);
+  const uint64_t now_ms = millis();
+  const std::time_t wall = std::time(nullptr);
+  if (now_ms < synced_ms || now_ms - synced_ms > NetworkTimeGuard::kMaxClockAgeMs ||
+      wall < 0) return false;
+  const uint64_t estimated = epoch + (now_ms - synced_ms) / 1000U;
+  const uint64_t actual = static_cast<uint64_t>(wall);
+  const uint64_t delta = estimated >= actual ? estimated - actual : actual - estimated;
+  return delta <= NetworkTimeGuard::kMaxWallSkewSeconds &&
+         !link_down_.load(std::memory_order_acquire) &&
+         admission_ready_.load(std::memory_order_acquire);
 }
 
 bool K151WifiTimePort::allow_paid_request(bool owner_paid_consent,
                                            bool physical_stop) const {
-  if (!active_ || faulted_ || link_down_.load()) return false;
-  const std::time_t now = std::time(nullptr);
-  if (now <= 0) return false;
-  return policy_.can_attempt_paid_request(millis(), static_cast<uint64_t>(now),
-                                          owner_paid_consent, physical_stop);
+  return owner_paid_consent && !physical_stop && live_network_ready();
 }
 
 bool K151WifiTimePort::fail() {
@@ -176,7 +212,8 @@ bool K151WifiTimePort::fail() {
 
 void K151WifiTimePort::cleanup() {
   active_ = false;
-  link_down_.store(true);
+  admission_ready_.store(false, std::memory_order_release);
+  link_down_.store(true, std::memory_order_release);
   if (wifi_started_) {
     (void)esp_wifi_stop();
     wifi_started_ = false;
@@ -184,6 +221,7 @@ void K151WifiTimePort::cleanup() {
   if (sntp_initialized_) {
     esp_netif_sntp_deinit();
     sntp_initialized_ = false;
+    sntp_started_ = false;
   }
   if (event_loop_owned_) {
     if (sync_h_) (void)esp_event_handler_instance_unregister(

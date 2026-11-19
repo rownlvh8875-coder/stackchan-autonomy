@@ -35,6 +35,11 @@ class K151WifiTimePort final {
   bool poll(const std::atomic_bool& physical_stop);
   bool allow_paid_request(bool owner_paid_consent,
                           bool physical_stop) const;
+  // Atomic admission flag for the stage controller. The actual network port
+  // MUST call live_network_ready() for every outbound I/O operation; a stale
+  // flag alone cannot prove time is still trusted.
+  const std::atomic_bool& admission_flag() const { return admission_ready_; }
+  bool live_network_ready() const;
   bool shutdown();
   bool active() const { return active_ && !faulted_; }
   bool faulted() const { return faulted_; }
@@ -62,14 +67,18 @@ class K151WifiTimePort final {
   // Disconnect is latched immediately in the ESP event callback, before the
   // owning task drains the event queue; no paid work during that gap.
   std::atomic_bool link_down_{true};
+  std::atomic_bool admission_ready_{false};
+  std::atomic<uint64_t> last_sync_monotonic_ms_{0};
+  std::atomic<uint64_t> last_sync_epoch_seconds_{0};
   bool event_loop_owned_ = false;
   bool wifi_initialized_ = false;
   bool wifi_started_ = false;
   bool sntp_initialized_ = false;
+  bool sntp_started_ = false;
   bool received_start_event_ = false;
   bool attempted_ = false;
-  bool active_ = false;
-  bool faulted_ = false;
+  std::atomic_bool active_{false};
+  std::atomic_bool faulted_{false};
 };
 
 } // namespace stackchan::standalone

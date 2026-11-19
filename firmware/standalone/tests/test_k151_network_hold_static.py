@@ -29,3 +29,16 @@ def test_network_adapter_is_only_linked_in_hold_entrypoint():
     assert "CONFIG_ESP_WIFI_NVS_ENABLED=n" in sdk
     assert "sk-" not in sdk
     assert "password=" not in sdk.lower()
+
+
+def test_ip_renewal_immediately_revokes_network_and_sntp_start_is_idempotent():
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "esp_app" / "main" / "k151_wifi_time.cpp").read_text()
+    header = (root / "esp_app" / "main" / "k151_wifi_time.hpp").read_text()
+    assert 'admission_ready_.store(false, std::memory_order_release)' in src
+    assert 'if (sntp_started_) return true;' in src
+    assert "bool K151WifiTimePort::live_network_ready() const" in src
+    assert "last_sync_epoch_seconds_.load(std::memory_order_acquire)" in src
+    assert "last_sync_monotonic_ms_.load(std::memory_order_acquire)" in src
+    assert "std::atomic_bool admission_ready_{false}" in header
+    assert "std::atomic_bool active_{false}" in header
