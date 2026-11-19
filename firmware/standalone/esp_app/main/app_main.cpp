@@ -2,6 +2,7 @@
 // Compile-only K151 standalone probe. NO motor, Wi-Fi, I2S or USB requests.
 #include "k151_contract.hpp"
 #include "k151_codec_port.hpp"
+#include "k151_readonly_probe.hpp"
 #include "nvs_port.hpp"
 #include "standalone_core.hpp"
 
@@ -21,6 +22,8 @@ extern "C" void app_main() {
   // Link the codec transport into the Xtensa image without construction,
   // I2C/I2S initialization, power-rail changes or microphone enable.
   ESP_LOGI(kTag, "%s", K151CodecPort::compiled_link_marker());
+  // Compile/link proof only. NOT an I2C scan or GPIO initialization.
+  ESP_LOGI(kTag, "%s", K151ReadOnlyProbe::compiled_link_marker());
 
   IsolatedNvs nvs;
   if (!nvs.init_without_erase()) {

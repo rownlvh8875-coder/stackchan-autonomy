@@ -176,3 +176,18 @@ Later commits must be judged against their own CI runs. Power rails/expander
 reset, board LCD variant, real mic/reference lane mapping, USB enable and
 physical STOP latency have NOT been established or enabled. No firmware binary
 may be installed as a consequence of these builds.
+
+## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
+
+`core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
+add bounded observation-only I2C support for AXP2101/AW9523/FT6336 and
+ES7210/AW88298 ACKs. No power register, amp reset or LCD initialization is
+performed; a register-pointer read may still affect a device, which is why the
+probe is not run in HOLD. The exact AW9523 reset sequence is a data-only
+source reference and has no executor. FT6336 vendor/firmware fields can yield
+an ILI9342E **candidate**; everything else remains unknown, including C.
+No observation is a hardware authorization or an electrical mute proof.
+
+See `docs/2026-11-19-k151-i2c-readonly-preflight.md` for pinned sources,
+evidence limits, and required physical approval. Host parser and boot source
+guards are tested; only a real ESP32-S3 CI build establishes cross-compilation.

@@ -57,3 +57,16 @@ The constructor and explicit `prepare()` remain sealed behind separate
 physical owner/board/amp-power confirmations. Partial or failed codec opens
 attempt best-effort close, but **electrical mute and interruption latency have
 not been proved**. A compile success is NOT a safe live install.
+
+## Read-only I2C preflight *compiled but not executed*
+
+The `K151ReadOnlyProbe` diagnostic is linked, but the HOLD `app_main`
+only references its `compiled_link_marker()`; it never constructs/executes
+`observe_once`. Future physical usage requires separate authorization and
+verification of factory backups and physical STOP. Creating the I2C bus would
+remap GPIO, so even address-only probing is **not** an electrically inert
+operation. The preflight's single register-pointer query at FT6336 0xA3
+does not send the manufacturer's work-mode write. Consequently a failed
+read cannot imply ILI9342C. An ILI9342E signature is a **hint**, not a verified
+LCD type; no LCD initialization is enabled. See
+`../docs/2026-11-19-k151-i2c-readonly-preflight.md`.

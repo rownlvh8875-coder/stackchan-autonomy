@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: MIT
+// Interpretation-only source evidence; NEVER grants permission to power a K151.
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+namespace stackchan::standalone::k151 {
+
+enum class Device : std::size_t {
+  pmic_axp2101 = 0,
+  io_aw9523 = 1,
+  touch_ft6336 = 2,
+  mic_es7210 = 3,
+  amp_aw88298 = 4,
+  count = 5,
+};
+
+enum class PanelHint { unknown, ili9342e_candidate };
+
+struct ReadOnlyEvidence {
+  bool bus_opened = false;
+  std::array<bool, static_cast<std::size_t>(Device::count)> acknowledged{};
+  bool touch_version_read = false;
+  std::array<std::uint8_t, 6> touch_version{};
+  bool finished_without_bus_error = false;
+};
+
+constexpr std::size_t index(Device device) {
+  return static_cast<std::size_t>(device);
+}
+
+// M5Stack official source reads FT6336 at register 0xA3 (six bytes).
+// It uses a separate write to enter work mode; this observer NEVER sends it.
+// It consequently cannot claim to have definitively identified an LCD.
+constexpr PanelHint panel_hint(const ReadOnlyEvidence& evidence) {
+  if (!evidence.finished_without_bus_error ||
+      !evidence.acknowledged[index(Device::touch_ft6336)] ||
+      !evidence.touch_version_read || evidence.touch_version[0] == 0 ||
+      evidence.touch_version[5] == 0) {
+    return PanelHint::unknown;
+  }
+  if (evidence.touch_version[3] == 0x12 &&
+      evidence.touch_version[5] == 0x11) {
+    return PanelHint::ili9342e_candidate;
+  }
+  // Never infer ILI9342C from a failed/mismatched read.
+  return PanelHint::unknown;
+}
+
+constexpr bool expected_devices_acknowledged(const ReadOnlyEvidence& evidence) {
+  if (!evidence.bus_opened || !evidence.finished_without_bus_error) return false;
+  for (const bool seen : evidence.acknowledged) {
+    if (!seen) return false;
+  }
+  return true;
+}
+
+// The manufacturer code toggles AW9523 P0 register 0x02 to reset AW88298.
+// Reference sequence ONLY. There is deliberately no executor or I2C writer.
+enum class ReferenceAction { write_register, delay_ms };
+struct ReferenceStep {
+  ReferenceAction action;
+  std::uint8_t reg;
+  std::uint8_t value;
+  std::uint16_t delay_ms;
+};
+constexpr std::array<ReferenceStep, 4> kAw88298ResetReference{{
+    {ReferenceAction::write_register, 0x02, 0x03, 0},
+    {ReferenceAction::delay_ms, 0, 0, 10},
+    {ReferenceAction::write_register, 0x02, 0x07, 0},
+    {ReferenceAction::delay_ms, 0, 0, 50},
+}};
+
+}  // namespace stackchan::standalone::k151
