@@ -73,27 +73,29 @@ measurements, tests after reboot and the real-device acceptance criteria:
 A failure must leave cloud wake activation disabled instead of using
 paid always-on STT as an undocumented fallback.
 
-## Offline SCFG USB feature-enrollment protocol (next stage)
+## Offline USB feature-enrollment protocol (next stage)
 
-`core/usb_enrollment.hpp` adds a bounded, fragmented host-side SCFG v1 stream
-receiver and a feature-only enrollment handler: BEGIN (length/CRC), ordered
-FEATURE chunks, and COMMIT. It requires explicit local enrollment arming,
-validates versioned 64×13 int8 SWK1 wake profiles, and uses a supplied durable
-storage callback. Unknown, reordered, corrupt, or raw-PCM-like blobs are refused.
-STATUS and STOP remain accepted during enrollment; STOP aborts the transaction.
-A failed/uncertain storage commit latches an error until verified restart.
+`core/usb_enrollment.hpp` includes the capped SCFG stream reader and a strictly
+**offline** receiver. It accepts `enroll_begin` (length + profile CRC), ordered
+`enroll_features` chunks, and `enroll_commit` only after an explicitly armed
+local enrollment mode. It validates the fixed `SWK1` 64x13 int8 wake template
+format and calls a supplied persistence callback; a failed/uncertain commit
+latches a fault until a fresh, verified startup. `status` and `stop` remain
+available during enrollment. STOP aborts registration; resume is not a USB
+command. Invalid/raw PCM profile bytes cannot reach the persistence callback.
 
-Replies use a fixed 18-byte SACK envelope (opcode/error/state/nonce/sequence/CRC);
-no keys, identifiers, raw audio, features, or conversation content are echoed.
-CRC protects integrity but **is not authentication**. Cloud and configuration
-write commands remain explicitly unsupported; no paid API call is possible in
-this module. A 2-second partial-frame timeout does not prove physical STOP
-latency; the eventual MCU driver must give the physical STOP independent priority.
+Fixed 18-byte `SACK` replies carry only operation, result, state, nonce, sequence
+and CRC32; **CRC is not authentication**. No keys, identifiers, raw voice,
+features, or conversation contents are reflected. Configure and cloud-enable
+remain unsupported and cloud stays off. The streaming codec has a 2-second
+incomplete-frame timeout. An eventual device driver must read USB without
+blocking physical STOP; this host component does not claim that guarantee.
 
-`tools/scfg_offline.py` can validate a previously obtained SWK1 profile and
-prepare a feature-only packet bundle using an explicit local output path.
-It performs **no serial, microphone, network, flash or cloud I/O** and
-does not capture or calibrate a real speaker. Example:
+`tools/scfg_offline.py` validates a *previously obtained* SWK1 feature blob and,
+with explicit `--output`, writes only a private local enrollment packet bundle.
+It never opens COM/USB, microphone, network, or GPIO. It never records or
+calibrates a real voice. The robot-side voice capture, feature extraction,
+first-time enrollment, and operator-approved install are still missing.
 
 ```bash
 python firmware/standalone/tools/scfg_offline.py PRIVATE_FILE.swk1
@@ -101,11 +103,35 @@ python firmware/standalone/tools/scfg_offline.py PRIVATE_FILE.swk1 --output PRIV
 python -m pytest -q firmware/standalone/tests
 ```
 
-Never commit `.swk1` or `.scfgbundle` files: they contain voice-derived
-features. The tool uses owner-only permissions on POSIX and refuses overwrite.
-Actual robot microphone capture, NVS, USB peripheral, TLS/GPT/TTS, ESP-IDF
-link/build and real-device Korean wake accuracy remain not implemented.
+**Do not commit `.swk1` or `.scfgbundle` files**; they can carry personalized
+voice-derived features. The CLI creates bundles with owner-only permissions on
+POSIX and rejects overwriting existing files. Treat the source as private too.
+The early GitHub Linux CI at commit `dc4ec5b` failed on a GCC array-bounds
+warning in a test; this follow-up replaces the problematic test accessor and
+must be judged against its own later CI run, not that earlier green Python run.
 
-CI note: the initial 2026-11-19 run at `dc4ec5b` failed a GCC -Werror
-array-bounds warning in a test. Later commits address this test and must
-be assessed against their own GitHub Actions results, not earlier green runs.
+## 2026-11-19: isolated storage and compile-only board gate
+
+Portable `core/persistent_store.hpp` adds fail-closed profile/ledger storage,
+explicit first-time budget provisioning, re-read verification after each write,
+and durable spend reservation across reboot. No existing NVS namespace is
+read/cleared by the future `IsolatedNvs` adapter. A missing/corrupt budget on
+normal boot is HOLD, never an implicit fresh ledger. `core/audio_guard.hpp`
+adds a STOP-latched, exclusive mic/amp driver contract with mute-first init,
+complete playback drain and no implicit recovery. Both are host-tested using
+synthetic stores and audio hooks; they do not operate any real microphone.
+
+`esp_app/` is a fresh ESP-IDF v6.1 standalone project that **compiles for
+ESP32-S3 but intentionally starts in HOLD**. It checks read-only `sc_gpt` NVS
+without erasing; it does not initialize camera/LCD/ES7210/AW88298/I2S,
+Wi-Fi, USB handler, GPT or servos. Its default partition layout is not the
+factory K151 layout. `esp_app/main/k151_contract.hpp` records official pin
+constants; it does not attest to physical wiring, codec or panel compatibility.
+The app deliberately contains no flash/install script or device API access.
+
+The separate GitHub Actions workflow `.github/workflows/standalone-esp32s3.yml`
+uses the pinned ESP-IDF v6.1 release tag (commit
+`fff9895c82d744c7237be8847347bdd1b07c6643`) and publishes only an ELF
+machine/slot-length/SHA manifest when a real build succeeds. A host `g++`
+PASS does not imply this CI's ESP32 build PASS. Do not flash, merge or
+replace the factory firmware based solely on compilation.

@@ -1,0 +1,3 @@
+DO NOT FLASH THIS TARGET
+An Xtensa ESP32-S3 build confirms only compilation and link, not hardware
+operation, flash/partition compatibility, real wake accuracy or safe restore.
