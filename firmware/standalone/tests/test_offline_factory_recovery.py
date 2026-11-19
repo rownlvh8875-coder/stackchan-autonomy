@@ -16,17 +16,17 @@ from offline_factory_recovery import EXPECTED_PARTITIONS, verify_copies  # noqa:
 ENTRY = struct.Struct("<2sBBII16sI")
 IMAGE_BYTES = 0x1000000
 TABLE_START = 0x8000
-MD5_PREFIX = b"\\xeb\\xeb" + b"\\xff" * 14
+MD5_PREFIX = b"\xeb\xeb" + b"\xff" * 14
 
 
 @pytest.fixture(scope="module")
 def synthetic(tmp_path_factory):
     temp = tmp_path_factory.mktemp("safe_factory_fixture")
-    data = bytearray(b"\\xff" * IMAGE_BYTES)
+    data = bytearray(b"\xff" * IMAGE_BYTES)
     for i, (label, address, length, part_type, subtype) in enumerate(EXPECTED_PARTITIONS):
-        raw_label = label.encode().ljust(16, b"\\0")
+        raw_label = label.encode().ljust(16, b"\0")
         record = ENTRY.pack(
-            b"\\xaa\\x50",
+            b"\xaa\x50",
             part_type,
             subtype,
             int(address, 16),
