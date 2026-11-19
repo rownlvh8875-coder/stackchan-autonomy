@@ -35,7 +35,7 @@ g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic \
 
 ## Not implemented or proved in this reconstruction
 
-- `조수야` Korean keyword DSP/MFCC-DTW and real acoustic thresholds; NVS adapter,
+- Actual Korean wake accuracy or acoustic thresholds; real NVS adapter,
   USB transport, board pin/power/LCD/codec drivers, I2S capture/playback,
   Wi-Fi/TLS/clock/HTTP + STT/Responses/TTS clients, speaker feedback suppression,
   exact IDF link/build, ROM recovery/OTA slot handling.
@@ -44,8 +44,9 @@ g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic \
 
 No automatic flashing, no manufacturer AI startup, no servo initialization,
 no factory settings erase, no model fallback, and no cloud request are provided.
-USB enrollment must transmit features only; this module rejects large chunks
-but the eventual device handler must validate the feature schema before NVS.
+USB enrollment transfers wake features only; the portable host receiver validates
+SWK1 profiles before invoking a simulated durable write. A real NVS implementation,
+physical local arming, and MCU USB driver are **not** supplied.
 The durable-store callback MUST perform one atomic NVS commit; if a commit
 fails or its outcome is uncertain, the caller must not send any API request.
 First installation must explicitly initialize an absent ledger; a missing or
@@ -71,3 +72,40 @@ measurements, tests after reboot and the real-device acceptance criteria:
 60-minute negative period and zero wakes in 20 robot-playback trials.
 A failure must leave cloud wake activation disabled instead of using
 paid always-on STT as an undocumented fallback.
+
+## Offline SCFG USB feature-enrollment protocol (next stage)
+
+`core/usb_enrollment.hpp` adds a bounded, fragmented host-side SCFG v1 stream
+receiver and a feature-only enrollment handler: BEGIN (length/CRC), ordered
+FEATURE chunks, and COMMIT. It requires explicit local enrollment arming,
+validates versioned 64×13 int8 SWK1 wake profiles, and uses a supplied durable
+storage callback. Unknown, reordered, corrupt, or raw-PCM-like blobs are refused.
+STATUS and STOP remain accepted during enrollment; STOP aborts the transaction.
+A failed/uncertain storage commit latches an error until verified restart.
+
+Replies use a fixed 18-byte SACK envelope (opcode/error/state/nonce/sequence/CRC);
+no keys, identifiers, raw audio, features, or conversation content are echoed.
+CRC protects integrity but **is not authentication**. Cloud and configuration
+write commands remain explicitly unsupported; no paid API call is possible in
+this module. A 2-second partial-frame timeout does not prove physical STOP
+latency; the eventual MCU driver must give the physical STOP independent priority.
+
+`tools/scfg_offline.py` can validate a previously obtained SWK1 profile and
+prepare a feature-only packet bundle using an explicit local output path.
+It performs **no serial, microphone, network, flash or cloud I/O** and
+does not capture or calibrate a real speaker. Example:
+
+```bash
+python firmware/standalone/tools/scfg_offline.py PRIVATE_FILE.swk1
+python firmware/standalone/tools/scfg_offline.py PRIVATE_FILE.swk1 --output PRIVATE_FILE.scfgbundle
+python -m pytest -q firmware/standalone/tests
+```
+
+Never commit `.swk1` or `.scfgbundle` files: they contain voice-derived
+features. The tool uses owner-only permissions on POSIX and refuses overwrite.
+Actual robot microphone capture, NVS, USB peripheral, TLS/GPT/TTS, ESP-IDF
+link/build and real-device Korean wake accuracy remain not implemented.
+
+CI note: the initial 2026-11-19 run at `dc4ec5b` failed a GCC -Werror
+array-bounds warning in a test. Later commits address this test and must
+be assessed against their own GitHub Actions results, not earlier green runs.

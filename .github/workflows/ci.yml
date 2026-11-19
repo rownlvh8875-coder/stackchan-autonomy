@@ -51,9 +51,9 @@ jobs:
           uv run --frozen ruff format --check .
       - name: Offline test suite
         run: uv run --frozen pytest -q -ra --junitxml=.local/ci/junit.xml
-      - name: Offline standalone C++ safety and wake tests (host only)
+      - name: Offline standalone C++ safety, wake, and SCFG enrollment tests (host only)
         if: runner.os == 'Linux'
-        run: uv run --frozen pytest -q firmware/standalone/tests/test_standalone_core_build.py firmware/standalone/tests/test_wake_features_build.py
+        run: uv run --frozen pytest -q firmware/standalone/tests
       - name: Accelerated virtual 24-hour stability scenario
         run: uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --report .local/ci/soak.json
       - name: Build distributions

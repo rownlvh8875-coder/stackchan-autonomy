@@ -16,3 +16,5 @@ build/
 .superpowers/
 .local/
 .worktrees/
+*.swk1
+*.scfgbundle
