@@ -45,4 +45,6 @@ uv run --frozen python firmware/standalone/tools/bench_trace_audit.py C:\\privat
 
 정상적인 형식을 처리하더라도 `status=UNVERIFIED_OPERATOR_SUPPLIED_TRACE`, `source_authenticity_verified=false`, `common_clock_proven=false`, `electrical_safety_proven=false`, `install_authorized=false`가 유지된다. 불완전하거나 무효인 데이터는 `REJECTED_BENCH_LOG`로 거부한다. 고유 장치 ID·비밀번호·원본 오디오·개인 정보는 이 형식에 포함하면 안 된다. 측정 후에도 별도의 원본 계측 장비 캡처, 장비 교정/동기화 증거, 원본 백업·복구 절차, 정확한 OTA 슬롯 및 명시적 실기기 설치 승인이 필요하다.
 
+별도 시험 파일을 2개 이상 확보한 후에는 [다중 로그 비교기](2026-11-19-bench-campaign-review.md)로 시험 종류별 분포를 계산할 수 있다. 파일과 수치가 서로 다르더라도 재현성·측정 장비 교정·안전성은 자동 인증되지 않는다.
+
 본 저장소의 `app_main`은 여전히 HOLD 루프이며, `kK151PhysicalOutputEnabledInHoldImage=false` 등 하드웨어 기동 차단은 그대로 유지한다. 코드 검증 성공으로 공장 펌웨어를 변경하거나 K151의 물리적 STOP·증폭기·DMA 안전이 입증됐다고 결론 내리지 않는다.
