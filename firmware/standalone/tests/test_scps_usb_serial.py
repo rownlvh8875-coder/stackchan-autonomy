@@ -79,15 +79,20 @@ def test_full_encrypted_pairing_and_no_secret_echo():
     messages = []
     password = "fake-password-12345"
     api = "synthetic-not-real-api-key-012345"
-    entries = iter(["HomeNetwork", ])
+    entries = iter(
+        [
+            "HomeNetwork",
+        ]
+    )
     def visible(prompt: str) -> str:
         if "8 digits" in prompt:
             assert port.sas is not None
             return port.sas
         return next(entries)
     secrets = iter([password, api])
-    assert run_pairing(port, text_input=visible, hidden_input=lambda _: next(secrets),
-                       say=messages.append)
+    assert run_pairing(
+        port, text_input=visible, hidden_input=lambda _: next(secrets), say=messages.append
+    )
     assert port.credentials is not None
     assert port.credentials.password == password
     assert port.credentials.api_key == api
@@ -100,9 +105,12 @@ def test_full_encrypted_pairing_and_no_secret_echo():
 def test_wrong_sas_never_sends_credentials():
     port = FakePort()
     with pytest.raises(ScpsWireError):
-        run_pairing(port, text_input=lambda _: "0000000x",
-                    hidden_input=lambda _: pytest.fail("secret prompt before SAS"),
-                    say=lambda _: None)
+        run_pairing(
+            port,
+            text_input=lambda _: "0000000x",
+            hidden_input=lambda _: pytest.fail("secret prompt before SAS"),
+            say=lambda _: None,
+        )
     assert all(x.op is not Op.SEALED for x in port.writes)
     assert port.writes[-1].op is Op.STOP
 
@@ -110,9 +118,12 @@ def test_wrong_sas_never_sends_credentials():
 def test_unexpected_status_never_prompts_secret():
     port = FakePort(wrong_ack=True)
     with pytest.raises(ScpsWireError):
-        run_pairing(port, text_input=lambda _: pytest.fail("no input permitted"),
-                    hidden_input=lambda _: pytest.fail("secret request"),
-                    say=lambda _: None)
+        run_pairing(
+            port,
+            text_input=lambda _: pytest.fail("no input permitted"),
+            hidden_input=lambda _: pytest.fail("secret request"),
+            say=lambda _: None,
+        )
     assert port.writes[-1].op is Op.STOP
 
 
@@ -120,7 +131,7 @@ def test_partial_write_fails_closed_no_retry():
     class ShortPort(FakePort):
         def write(self, wire: bytes) -> int:
             super().write(wire)
-            return len(wire)-1
+            return len(wire) - 1
 
     port = ShortPort()
     with pytest.raises(ScpsWireError, match="incomplete"):

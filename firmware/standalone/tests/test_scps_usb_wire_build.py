@@ -15,10 +15,18 @@ def test_scps_usb_wire_host(tmp_path):
     binary = tmp_path / "scps_usb_wire_test"
     subprocess.run(
         [
-            compiler, "-std=c++20", "-O2", "-Wall", "-Wextra",
-            "-Werror", "-pedantic", "-I", str(root / "core"),
+            compiler,
+            "-std=c++20",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pedantic",
+            "-I",
+            str(root / "core"),
             str(root / "tests" / "scps_usb_wire_test.cpp"),
-            "-o", str(binary),
+            "-o",
+            str(binary),
         ],
         check=True,
         timeout=90,

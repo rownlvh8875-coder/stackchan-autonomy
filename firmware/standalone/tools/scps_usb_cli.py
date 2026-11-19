@@ -68,7 +68,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--port", required=True, help="Exact COM/tty port; never auto-discovered")
     parser.add_argument(
-        "--interactive", action="store_true",
+        "--interactive",
+        action="store_true",
         help="Explicitly acknowledge this opens the selected serial device",
     )
     args = parser.parse_args(argv)

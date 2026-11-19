@@ -100,10 +100,13 @@ bool K151ScpsUsbPort::process(const scpswire::Frame& f,uint64_t now) {
 
 bool K151ScpsUsbPort::poll_once(uint64_t now) {
   if(!running_ || faulted_)return false;
-  if(stop_.load() || now<began_ms_ || now-began_ms_>=kSessionMaxMs ||
+  if(stop_.load())return fault();
+  // A successful second-touch ticket is CONSUMED, which means the sensor's
+  // owner_window_open() becomes false. Never treat that as a fresh failure.
+  if(state_==State::complete)return true;
+  if(now<began_ms_ || now-began_ms_>=kSessionMaxMs ||
      !touch_.owner_window_open(now) ||
      !frames_.tick(now))return fault();
-  if(state_==State::complete)return true;
   std::array<uint8_t,kUsbReadChunk> data{};
   const int count=usb_serial_jtag_read_bytes(data.data(),data.size(),0);
   if(count<0 || static_cast<size_t>(count)>data.size())return fault();
@@ -163,6 +166,9 @@ bool K151ScpsUsbPort::finalize_after_touch(uint64_t now) {
 
 bool K151ScpsUsbPort::fault() {
   faulted_=true;
+  // Even a post-success physical STOP cancels the still-in-RAM setup.
+  setup_.stop();
+  touch_.revoke();
   (void)shutdown();
   state_=State::fault;
   return false;
@@ -174,8 +180,8 @@ bool K151ScpsUsbPort::shutdown() {
   frames_.invalidate();
   scrub_pending();
   pairing_.stop();
-  if(state_!=State::complete)setup_.stop();
-  if(state_!=State::complete)touch_.revoke();
+  if(state_!=State::complete || stop_.load())setup_.stop();
+  if(state_!=State::complete || stop_.load())touch_.revoke();
   state_=state_==State::complete?State::complete:State::stopped;
   if(was_running && usb_serial_jtag_driver_uninstall()!=ESP_OK)
     faulted_=true;
