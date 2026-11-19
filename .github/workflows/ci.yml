@@ -42,7 +42,7 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Install Linux codec
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes libopus0
+        run: sudo apt-get update && sudo apt-get install --yes libopus0 libcjson-dev
       - name: Install locked dependencies
         run: uv sync --frozen --python '${{ matrix.python }}'
       - name: Lint and formatting
