@@ -5,6 +5,7 @@
 // Nothing invokes hardware operations from app_main.
 #include "k151_codec_port.hpp"
 #include "k151_contract.hpp"
+#include "pcm_frame.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,7 +16,7 @@
 namespace stackchan::standalone {
 namespace {
 constexpr char kTag[] = "SC_K151_AUDIO";
-constexpr size_t kMaxFrames = 240; // 10ms at 24kHz; bounds synchronous reads/writes
+constexpr size_t kMaxFrames = kPcmFramesPerTenMs; // 10ms at 24kHz; bounds synchronous reads/writes
 constexpr int kLowVolume = 10;
 constexpr int kInputGain = 30;
 constexpr int kI2cPort = 1;
@@ -175,7 +176,9 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
     std::fill(mono.begin(), mono.end(), 0);
     return fail();
   }
-  for (size_t i = 0; i < mono.size(); ++i) mono[i] = interleaved[i * 2];
+  if (!extract_k151_mic0(std::span<const int16_t>(interleaved.data(), mono.size() * 2), mono)) {
+    return fail();
+  }
   std::fill(interleaved.begin(), interleaved.end(), 0);
   return true;
 }
@@ -201,8 +204,8 @@ bool K151CodecPort::speaker_off() {
 }
 
 bool K151CodecPort::play_mono_24k(std::span<const int16_t> mono) {
-  if (!prepared() || !output_open_ || input_open_ || mono.empty() ||
-      mono.size() > kMaxFrames) return false;
+  if (!prepared() || !output_open_ || input_open_ ||
+      !valid_pcm_playback(mono)) return false;
   // Copy avoids const-casting the caller's buffer through esp_codec_dev.
   std::array<int16_t, kMaxFrames> chunk = {};
   std::copy(mono.begin(), mono.end(), chunk.begin());
