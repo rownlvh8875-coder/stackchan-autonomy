@@ -5,9 +5,9 @@
 
 #include "k151_codec_port.hpp"
 #include "offline_voice_cycle.hpp"
-#include "pcm_frame.hpp"
+#include "pcm_chunk_guard.hpp"
 
-#include <algorithm>
+#include <optional>
 #include <atomic>
 #include <cstdint>
 #include <esp_timer.h>
@@ -26,22 +26,22 @@ class K151PcmSpeakerSink final : public VoiceSpeakerPort {
 
   VoicePlaybackResult play_pcm24k(std::span<const int16_t> pcm,
                                   uint64_t started_ms) override {
-    if (!codec_.prepared() || stop_.load() || !consent_.load() ||
-        pcm.empty() || pcm.size() > OfflineVoiceCycle::kMaxSynthFrames)
-      return {};
-    for (size_t pos = 0; pos < pcm.size();) {
-      if (stop_.load() || !consent_.load() || !codec_.prepared())
-        return {};
-      const size_t count = std::min(kPcmFramesPerTenMs, pcm.size() - pos);
-      if (!codec_.play_mono_24k(pcm.subspan(pos, count))) return {};
-      pos += count;
-    }
-    if (stop_.load() || !consent_.load()) return {};
-    // Must share this timebase with the calling session's monotonic_ms.
-    const int64_t now_us = esp_timer_get_time();
-    if (now_us < 0 || static_cast<uint64_t>(now_us / 1000) < started_ms)
-      return {};
-    return {true, static_cast<uint64_t>(now_us / 1000)};
+    // Codec remains hard-disabled in the factory-incompatible HOLD image.
+    if (!codec_.prepared()) return {};
+    // The caller MUST use the same esp_timer-based monotonic millisecond
+    // clock for started_ms; no conversion from UTC or another timer.
+    const auto finished = stream_pcm_chunks_guarded(
+        pcm, started_ms, stop_, consent_,
+        [this](std::span<const int16_t> chunk) {
+          return codec_.prepared() && codec_.play_mono_24k(chunk);
+        },
+        []() -> std::optional<uint64_t> {
+          const int64_t now_us = esp_timer_get_time();
+          if (now_us < 0) return std::nullopt;
+          return static_cast<uint64_t>(now_us / 1000);
+        });
+    if (!finished) return {};
+    return {true, *finished};
   }
 
  private:
