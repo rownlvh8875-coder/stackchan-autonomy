@@ -3,6 +3,7 @@
 #pragma once
 
 #include "owner_setup.hpp"
+#include "k151_wifi_time.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -20,7 +21,8 @@ class K151LocalOwnerSetup final {
   K151LocalOwnerSetup(const std::atomic_bool& hardware_owner_mode,
                       const std::atomic_bool& trusted_local_input,
                       const std::atomic_bool& stop)
-      : setup_(secrets_, hardware_owner_mode, trusted_local_input, stop) {}
+      : setup_(secrets_, hardware_owner_mode, trusted_local_input, stop),
+        owner_(hardware_owner_mode), input_(trusted_local_input), stop_(stop) {}
   K151LocalOwnerSetup(const K151LocalOwnerSetup&) = delete;
   K151LocalOwnerSetup& operator=(const K151LocalOwnerSetup&) = delete;
   bool arm(uint64_t now_ms) { return setup_.arm(now_ms); }
@@ -37,13 +39,19 @@ class K151LocalOwnerSetup final {
   bool poll(uint64_t now_ms) { return setup_.tick(now_ms); }
   void stop() { setup_.cancel(); }
   bool ready() const { return setup_.ready(); }
-  // Future owner-controlled runtime must read this only after ready().
-  // Returned views are invalidated by cancel(), STOP and destruction.
-  const RuntimeSecrets& volatile_secrets() const { return secrets_; }
+  // This can activate Wi-Fi, so it is intentionally never called from
+  // app_main. Only an independently authenticated local UI may invoke it.
+  // Credentials are cleared from this object immediately after handoff;
+  // the Wi-Fi adapter copies them to RAM-only driver storage.
+  bool start_wifi_once(K151WifiTimePort& network);
 
  private:
   RuntimeSecrets secrets_;
   OwnerSetupController setup_;
+  const std::atomic_bool& owner_;
+  const std::atomic_bool& input_;
+  const std::atomic_bool& stop_;
+  bool network_handoff_attempted_ = false;
 };
 
 }  // namespace stackchan::standalone

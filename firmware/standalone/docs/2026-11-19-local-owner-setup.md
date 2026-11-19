@@ -44,3 +44,16 @@ rollback, revocation after success, replay denial and preserving preexisting
 credentials when not armed. These prove a portable policy, not authentication
 of a physical button, Wi-Fi association, USB confidentiality or deployment
 readiness.
+
+## One-shot dormant Wi-Fi handoff boundary
+
+`K151LocalOwnerSetup::start_wifi_once()` has been added to the compile-only
+ESP32 adapter. If a **future authenticated physical local owner controller**
+calls it after final setup confirmation, it passes the RAM-only input to the
+existing `K151WifiTimePort::start()`, refuses any second launch attempt, and
+erases this component's copy immediately whether the Wi-Fi driver succeeds
+or fails. If STOP is seen on return, it also asks the Wi-Fi port to shut down.
+This function is **not called from `app_main`**, and no physical owner
+controller has been implemented, so no network starts in the shipping HOLD
+image. The former unguarded `volatile_secrets()` getter was removed.
+No persistent storage or automatic re-provisioning was introduced.

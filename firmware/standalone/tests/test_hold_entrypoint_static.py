@@ -46,3 +46,17 @@ def test_scfg_port_not_started_and_no_console_multiplex():
     assert "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED" in usb
     assert "EnrollmentServer" in (root / "esp_app" / "main" / "k151_usb_scfg.hpp").read_text()
     assert "raw_pcm" not in usb.lower()
+
+
+def test_first_use_setup_has_no_unguarded_secret_getter_or_auto_wifi_start():
+    root = Path(__file__).resolve().parents[1]
+    boot = (root / "esp_app" / "main" / "app_main.cpp").read_text()
+    header = (root / "esp_app" / "main" / "k151_owner_setup.hpp").read_text()
+    implementation = (root / "esp_app" / "main" / "k151_owner_setup.cpp").read_text()
+    assert "K151LocalOwnerSetup::compiled_link_marker()" in boot
+    assert "K151LocalOwnerSetup setup" not in boot
+    assert "start_wifi_once(" not in boot
+    assert "volatile_secrets()" not in header
+    assert "network_handoff_attempted_ = true" in implementation
+    assert "setup_.cancel();" in implementation
+    assert "network.start(owner_.load(), input_.load()" in implementation
