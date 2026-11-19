@@ -194,6 +194,14 @@ Korean wake recognition or installation readiness. See
 `docs/2026-11-20-private-wake-corpus-preflight.md`. Actual speech files and
 private manifests must never be committed to GitHub.
 
+`tools/wake_corpus_pipeline.py` adds an **offline, source-compiled** workflow:
+strictly screen a local private corpus; feed enrollment and calibration
+recordings only to the C++ MFCC/DTW SWK1 writer; then use independent
+user-labeled evaluation recordings and publish the new private profile only
+after both C++ stages return valid results. `--check-only` requires no C++
+compiler. This workflow does not verify Korean wake accuracy or authorize
+hardware installation. See `docs/2026-11-20-wake-corpus-offline-pipeline.md`.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`

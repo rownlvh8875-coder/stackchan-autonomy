@@ -64,5 +64,10 @@ int main(int argc, char** argv) {
     save(directory / ("negative_" + std::to_string(i) + ".wav"),
          make_wav(synth(870.f + i*7.f, i*0.15f, 0.30f)));
   }
+  // Evaluation samples are never included in template/holdout calibration.
+  save(directory / "eval_positive.wav",
+       make_wav(synth(520.1f, 0.031f, 0.30f)));
+  save(directory / "eval_negative.wav",
+       make_wav(synth(975.f, 0.41f, 0.30f)));
   assert(parse_wake_pcm24k_wav(base));
 }

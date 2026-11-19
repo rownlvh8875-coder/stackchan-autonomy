@@ -49,4 +49,4 @@ uv run --frozen python firmware/standalone/tools/wake_corpus_audit.py C:\private
 
 ## 4. 오프라인 다음 단계
 
-검사를 통과하고 실제 독립 발화가 준비됐다면, 이미 구현된 `tools/wake_wav_enroll.cpp`를 사용해 개인 로컬 컴퓨터에서 등록용 SWK1를 생성한다. 최종 평가용 WAV는 임계값 보정에 **절대로 포함하지 않는다**. `tools/wake_wav_eval.cpp`로 최종 평가 집계만 계산한다. 로봇 하드웨어용 HOLD 펌웨어는 그대로 유지하며, 공장 펌웨어 복구 및 전원·마이크·스피커·물리 STOP 검증 전 설치하지 않는다.
+검사를 통과하고 실제 독립 발화가 준비됐다면 [비공개 SWK1 자동 보정·독립 평가 실행기](2026-11-20-wake-corpus-offline-pipeline.md)를 이용할 수 있다. `--check-only`는 구조·품질만 검증하고, `g++`를 갖춘 개인 PC에서는 `tools/wake_wav_enroll.cpp`와 `tools/wake_wav_eval.cpp`를 순서대로 연결해 새 프로필을 생성할 수 있다. 최종 평가용 WAV는 임계값 보정에 **절대로 포함하지 않는다**. 로봇 하드웨어용 HOLD 펌웨어는 그대로 유지하며, 공장 펌웨어 복구 및 전원·마이크·스피커·물리 STOP 검증 전 설치하지 않는다.
