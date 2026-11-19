@@ -90,6 +90,17 @@ bool K151HeadTouchOwner::owner_window_open(uint64_t now_ms) const {
          gesture_.owner_window_open(now_ms);
 }
 
+bool K151HeadTouchOwner::start_scps_final_touch(
+    bool trusted_local_reviewed,uint64_t now_ms) {
+  return trusted_local_reviewed && owner_window_open(now_ms) &&
+         gesture_.request_final_confirmation(true,now_ms);
+}
+
+bool K151HeadTouchOwner::take_scps_final_touch(uint64_t now_ms) {
+  return owner_window_open(now_ms) &&
+         gesture_.take_final_confirmation(now_ms,stop_.load());
+}
+
 bool K151HeadTouchOwner::failed() {
   faulted_ = true;
   revoke();

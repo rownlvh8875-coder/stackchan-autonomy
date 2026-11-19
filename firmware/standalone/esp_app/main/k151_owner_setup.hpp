@@ -47,6 +47,7 @@ class K151LocalOwnerSetup final {
 
  private:
   friend class K151HeadTouchOwner;
+  friend class K151ScpsUsbPort;
   // Only the sensor-owned second 3-second touch ticket may consume this
   // path. Other application code cannot impersonate final confirmation.
   bool confirm(uint64_t now_ms, bool physical_confirmation) {

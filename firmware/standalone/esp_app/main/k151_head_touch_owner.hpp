@@ -51,6 +51,11 @@ class K151HeadTouchOwner final {
   bool faulted() const { return faulted_; }
 
  private:
+  // Friend access is only the one-use encrypted pairing controller, NEVER
+  // the SCPS byte framing or any on-wire operation.
+  friend class K151ScpsUsbPort;
+  bool start_scps_final_touch(bool trusted_local_reviewed,uint64_t now_ms);
+  bool take_scps_final_touch(uint64_t now_ms);
   bool failed();
   std::atomic_bool& owner_mode_;
   const std::atomic_bool& stop_;
