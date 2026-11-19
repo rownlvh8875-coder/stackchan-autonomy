@@ -14,9 +14,10 @@ def test_portable_standalone_core(tmp_path: Path):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("g++ unavailable; no host C++ compiler on this CI runner")
-    exe = tmp_path / (
-        "standalone_core_test.exe" if os.name == "nt" else "standalone_core_test"
-    )
+    exe_name = "standalone_core_test"
+    if os.name == "nt":
+        exe_name += ".exe"
+    exe = tmp_path / exe_name
     subprocess.run(
         [
             compiler,
@@ -37,6 +38,10 @@ def test_portable_standalone_core(tmp_path: Path):
         timeout=90,
     )
     output = subprocess.run(
-        [str(exe)], check=True, capture_output=True, text=True, timeout=30
+        [str(exe)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert "standalone core: PASS" in output.stdout
