@@ -9,6 +9,7 @@
 #include "k151_https_voice.hpp"
 #include "k151_voice_api_adapter.hpp"
 #include "k151_wifi_time.hpp"
+#include "k151_owner_setup.hpp"
 #include "k151_voice_decode.hpp"
 namespace stackchan::standalone { const char* offline_voice_cycle_compiled_marker(); }
 #include "nvs_port.hpp"
@@ -39,6 +40,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151HttpsVoicePort::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151VoiceApiAdapter::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151WifiTimePort::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151LocalOwnerSetup::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151VoiceDecoder::compiled_link_marker());
 
   IsolatedNvs nvs;
