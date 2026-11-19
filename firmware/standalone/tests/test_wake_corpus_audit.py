@@ -108,7 +108,10 @@ def test_complete_corpus_readonly(audit_module, corpus):
     assert result["counts"]["evaluation_nonwake"] == 1
     assert result["missing_minimum_groups"] == []
     assert not result["safe_to_install"]
-    assert not result["recorded_audio_or_device_accessed"]
+    assert result["prerecorded_audio_files_read"]
+    assert not result["live_microphone_or_robot_accessed"]
+    assert not result["network_accessed"]
+    assert not result["audio_files_modified"]
     assert not result["korean_wake_accuracy_proven"]
     assert not result["recording_independence_proven"]
     assert manifest.read_bytes() == original

@@ -232,7 +232,10 @@ def inspect_corpus(manifest_path: Path) -> dict:
         "label_correctness_proven": False,
         "korean_wake_accuracy_proven": False,
         "safe_to_install": False,
-        "recorded_audio_or_device_accessed": False,
+        "prerecorded_audio_files_read": True,
+        "live_microphone_or_robot_accessed": False,
+        "network_accessed": False,
+        "audio_files_modified": False,
         "explanation": "Only local format, declared-split, duplicate-PCM and heuristic quality checks.",
     }
 
@@ -249,7 +252,9 @@ def main(argv: list[str] | None = None) -> int:
             "status": "REJECTED_PRIVATE_WAKE_CORPUS",
             "reason": str(exc) if isinstance(exc, CorpusError) else "file_unavailable",
             "safe_to_install": False,
-            "recorded_audio_or_device_accessed": False,
+            "live_microphone_or_robot_accessed": False,
+            "network_accessed": False,
+            "audio_files_modified": False,
         }
         code = 2
     print(json.dumps(report, ensure_ascii=False, indent=2))
