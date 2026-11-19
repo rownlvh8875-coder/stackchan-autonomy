@@ -177,6 +177,10 @@ reset, board LCD variant, real mic/reference lane mapping, USB enable and
 physical STOP latency have NOT been established or enabled. No firmware binary
 may be installed as a consequence of these builds.
 
+## 2026-11-19 private wake WAV enrollment and offline evaluation
+
+The host-only C++20 tools `tools/wake_wav_enroll.cpp` and `tools/wake_wav_eval.cpp` accept private 24kHz mono PCM16 WAVs, use the same MFCC/DTW core, and generate/evaluate SWK1 locally. Enrollment requires 1-3 templates, at least 5 distinct held-out positive inputs and 10 negative inputs; exact duplicate PCM across those groups is refused. Output is an exclusively created private profile, never an API request. See `docs/2026-11-19-wake-wav-enrollment.md`. No real Korean speech performance or physical K151 recording is claimed.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
