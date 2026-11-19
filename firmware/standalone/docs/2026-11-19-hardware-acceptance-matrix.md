@@ -33,7 +33,7 @@ Reference only: [M5Stack pinned board construction](https://github.com/m5stack/S
 
 The enrollment implementation uses 24 kHz PCM → MFCC/template-DTW features. `calibrate_wake()` requires at least **5 separate held-out positive** samples and **10 separate negative** samples for calibration, distinct from enrollment templates. That is a minimum **software input requirement**, not an adequate statistical accuracy study.
 
-Capture additional independent real recordings across distance, noise, competing speech, different pronunciations and speaker self-playback. Keep training and evaluation disjoint, report raw true/false activations, denominator, test conditions and time/CPU measurements. No fabricated recognition percentage or biometric identity claim is permitted.
+Capture additional independent real recordings across distance, noise, competing speech, different pronunciations and speaker self-playback. Keep training and evaluation disjoint, report raw true/false activations, denominator, test conditions and time/CPU measurements. No fabricated recognition percentage or biometric identity claim is permitted. The new [private host-only WAV evaluator](2026-11-19-wake-wav-offline-evaluation.md) checks bounded PCM input and compares user-labeled WAVs to an existing SWK1 profile without writing audio, enabling an initial *unverified* aggregate evaluation before hardware activation.
 
 After verified speech capture, test the bounded question recorder, one-shot STT/Responses/TTS paid ledger, user consent withdrawal, API failure and STOP suppression. A mock or synthetic-waveform PASS cannot be presented as Korean recognition validation.
 
