@@ -4,6 +4,7 @@
 #include "k151_codec_port.hpp"
 #include "k151_readonly_probe.hpp"
 #include "k151_usb_scfg.hpp"
+#include "k151_usb_enrollment_store.hpp"
 #include "nvs_port.hpp"
 #include "standalone_core.hpp"
 
@@ -27,6 +28,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151ReadOnlyProbe::compiled_link_marker());
   // Dedicated SCFG USB driver is linked for proof but is NOT installed.
   ESP_LOGI(kTag, "%s", K151ScfgUsbPort::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151UsbEnrollmentStorage::compiled_link_marker());
 
   IsolatedNvs nvs;
   if (!nvs.init_without_erase()) {
