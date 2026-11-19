@@ -178,6 +178,15 @@ int main() {
     assert(x.guard.reserved_conversations()==0);
   }
   {
+    Fixture x; x.stop.store(true);
+    assert(!x.run() && x.api.calls==0);
+    assert(x.session.state()==State::stopped);
+    assert(x.guard.reserved_conversations()==0);
+    x.stop.store(false);
+    // An old captured utterance is not eligible for a delayed paid dispatch.
+    assert(!x.run() && x.api.calls==0);
+  }
+  {
     Fixture x; x.recorded.resize(192001);
     assert(!x.run() && x.api.calls==0);
   }

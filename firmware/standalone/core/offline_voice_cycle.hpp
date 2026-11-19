@@ -141,10 +141,16 @@ class OfflineVoiceCycle final {
            uint64_t unix_seconds, const VoiceModelConfig& models) {
     // Any call without consent, enrollment, models or a configured session
     // is rejected BEFORE the durable reservation or a fake transport call.
-    if (session_.state() != State::record || !session_.cloud_enabled() ||
-        !models.valid() || question_pcm24k.empty() ||
-        question_pcm24k.size() > kMaxRecordedFrames ||
-        !consent_.load() || !time_.load() || stop_.load()) return false;
+    if (session_.state() != State::record) return false;
+    // A disallowed/cancelled recording must never remain reusable if owner
+    // consent, trusted time or cloud enablement changes later.
+    if (stop_.load() || !session_.cloud_enabled() || !models.valid() ||
+        question_pcm24k.empty() || question_pcm24k.size() > kMaxRecordedFrames ||
+        !consent_.load() || !time_.load()) {
+      session_.stop();
+      ledger_.cancel_permit();
+      return false;
+    }
 
     const uint64_t epoch = session_.epoch();
     if (!ledger_.reserve(unix_seconds, time_.load(), consent_.load())) {
@@ -193,11 +199,11 @@ class OfflineVoiceCycle final {
     if (!session_.synthesized(now, epoch, true)) { ledger_.cancel_permit(); return false; }
     // The real speaker driver must implement a STOP latch + bounded complete
     // playback drain. This port is a host fake, NOT real I2S.
-    if (stop_.load() || !consent_.load()) {
+    if (stop_.load() || !consent_.load() || !time_.load()) {
       session_.stop(); ledger_.cancel_permit(); return false;
     }
     const auto played = speaker_.play_pcm24k(synthesis->pcm24k, now);
-    if (stop_.load() || !consent_.load()) {
+    if (stop_.load() || !consent_.load() || !time_.load()) {
       session_.stop(); ledger_.cancel_permit(); return false;
     }
     const bool complete = played.complete && played.finished_ms >= now;
