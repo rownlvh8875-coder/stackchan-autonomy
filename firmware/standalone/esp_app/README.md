@@ -46,3 +46,14 @@ Before real hardware wiring: inspect factory LCD variant and power/I2S TDM
 codec driver, enforce mute-first and stop-latched `AudioGuard`, implement
 an isolated USB SCFG handler with physical owner permission, and measure actual
 memory/latency/Korean wake recognition. No manufacturer AI or servo init.
+
+## Gated codec compilation (not powered on)
+
+`main/k151_codec_port.cpp` now compiles with pinned `esp_codec_dev==1.6.2`,
+the K151 ES7210/AW88298 codec interfaces, 24kHz STD TX and TDM RX.
+It is linked for compile proof through `compiled_link_marker()`; the HOLD
+`app_main()` never constructs a codec, accesses I2S/I2C or enables an amp.
+The constructor and explicit `prepare()` remain sealed behind separate
+physical owner/board/amp-power confirmations. Partial or failed codec opens
+attempt best-effort close, but **electrical mute and interruption latency have
+not been proved**. A compile success is NOT a safe live install.

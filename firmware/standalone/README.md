@@ -1,6 +1,6 @@
 # K151 Standalone GPT: portable safety core (reconstruction)
 
-**STATUS: HOST-TESTED ONLY. NOT APPROVED FOR DEVICE INSTALLATION.**
+**STATUS: PORTABLE HOST TESTS + ESP32-S3 COMPILE-ONLY DRIVER. NOT APPROVED FOR DEVICE INSTALLATION.**
 
 This directory is a fresh reconstruction of **portable** mechanisms from the
 approved 2026-11-18 standalone design, not a recovery of the prior Codex
@@ -35,18 +35,20 @@ g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic \
 
 ## Not implemented or proved in this reconstruction
 
-- Actual Korean wake accuracy or acoustic thresholds; real NVS adapter,
-  USB transport, board pin/power/LCD/codec drivers, I2S capture/playback,
+- Actual Korean wake accuracy or acoustic thresholds, physical USB receiver,
+  verified K151 board power/mute/reset, LCD and microphone/speaker operation,
   Wi-Fi/TLS/clock/HTTP + STT/Responses/TTS clients, speaker feedback suppression,
-  exact IDF link/build, ROM recovery/OTA slot handling.
-- Real hardware timing, power, RAM/PSRAM, Korean wake accuracy, API charges, or
-  firmware behavior on K151. A green host test is **not** an ESP32-S3 build.
+  ROM recovery/OTA slot handling.
+- A real NVS implementation and ESP32-S3 CODEC-DRIVER COMPILE now exist, but
+  neither has been approved for device execution. Host tests and ESP32 builds
+  cannot establish real hardware timing, RAM/PSRAM, audio or paid API behavior.
 
 No automatic flashing, no manufacturer AI startup, no servo initialization,
 no factory settings erase, no model fallback, and no cloud request are provided.
 USB enrollment transfers wake features only; the portable host receiver validates
-SWK1 profiles before invoking a simulated durable write. A real NVS implementation,
-physical local arming, and MCU USB driver are **not** supplied.
+SWK1 profiles before invoking a simulated durable write. A guarded NVS adapter
+exists in the compile-only ESP-IDF app, but physical local arming and MCU USB
+driver are **not** supplied.
 The durable-store callback MUST perform one atomic NVS commit; if a commit
 fails or its outcome is uncertain, the caller must not send any API request.
 First installation must explicitly initialize an absent ledger; a missing or
@@ -123,8 +125,8 @@ synthetic stores and audio hooks; they do not operate any real microphone.
 
 `esp_app/` is a fresh ESP-IDF v6.1 standalone project that **compiles for
 ESP32-S3 but intentionally starts in HOLD**. It checks read-only `sc_gpt` NVS
-without erasing; it does not initialize camera/LCD/ES7210/AW88298/I2S,
-Wi-Fi, USB handler, GPT or servos. Its default partition layout is not the
+without erasing; the compiled ES7210/AW88298/I2S implementation is dormant.
+It does not initialize camera/LCD/audio, Wi-Fi, USB handler, GPT or servos. Its default partition layout is not the
 factory K151 layout. `esp_app/main/k151_contract.hpp` records official pin
 constants; it does not attest to physical wiring, codec or panel compatibility.
 The app deliberately contains no flash/install script or device API access.
@@ -154,3 +156,23 @@ The initial independent ESP-IDF v6.1/ESP32-S3 HOLD target compiled at
 from commit `b1f98e168564`: Xtensa ELF (e_machine 94), app 197,024 bytes,
 bounded by observed 5,177,344-byte OTA app slot. The app does NOT contain real
 microphone, speaker, LCD, USB or GPT functionality and must NOT be flashed.
+
+### 2026-11-19 codec driver compilation (no audio run)
+
+`esp_app/main/k151_codec_port.{hpp,cpp}` links `esp_codec_dev==1.6.2`,
+ES7210, AW88298, ESP-IDF I2S STD output / four-slot TDM input and the
+documented K151 GPIO and I2C pins. `app_main` links only a marker, **never
+constructs or invokes the codec**. `prepare()` requires explicit independent
+owner, board and power/reset confirmations; there is no caller.
+Codec I/O is limited to 10ms chunks. Reads/writes check actual codec return
+codes and latch errors. A partially failed codec open attempts an independent
+close rather than silently declaring the amplifier muted. Closure failures
+remain faults, not evidence of electrical safety. `core/pcm_frame.hpp` host
+tests channel-0 extraction and rejects malformed/interleaved frames.
+
+[ESP32-S3 build of the codec driver](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44436984692)
+passed for commit `1bdd94441957`, 197,152-byte app and Xtensa ELF.
+Later commits must be judged against their own CI runs. Power rails/expander
+reset, board LCD variant, real mic/reference lane mapping, USB enable and
+physical STOP latency have NOT been established or enabled. No firmware binary
+may be installed as a consequence of these builds.

@@ -151,8 +151,10 @@ bool K151CodecPort::microphone_on() {
   fs.channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) |
                     ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
   fs.sample_rate = k151::kInputHz;
-  if (esp_codec_dev_open(in_dev_, &fs) != 0) return fail();
+  // Even an unsuccessful open can leave codec state uncertain.
+  // Track it before the call so fail() attempts an independent close.
   input_open_ = true;
+  if (esp_codec_dev_open(in_dev_, &fs) != 0) return fail();
   if (esp_codec_dev_set_in_channel_gain(
           in_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), kInputGain) != 0) return fail();
   return true;
@@ -161,8 +163,8 @@ bool K151CodecPort::microphone_on() {
 bool K151CodecPort::microphone_off() {
   if (!input_open_) return true;
   const int rc = esp_codec_dev_close(in_dev_);
-  input_open_ = false;
   if (rc != 0) { fault_ = true; return false; }
+  input_open_ = false;
   return true;
 }
 
@@ -189,8 +191,9 @@ bool K151CodecPort::speaker_on_low_volume() {
   fs.bits_per_sample = 16;
   fs.channel = 1;
   fs.sample_rate = k151::kOutputHz;
-  if (esp_codec_dev_open(out_dev_, &fs) != 0) return fail();
+  // Preserve a best-effort close even after a partially failed open.
   output_open_ = true;
+  if (esp_codec_dev_open(out_dev_, &fs) != 0) return fail();
   if (esp_codec_dev_set_out_vol(out_dev_, kLowVolume) != 0) return fail();
   return true;
 }
@@ -198,8 +201,8 @@ bool K151CodecPort::speaker_on_low_volume() {
 bool K151CodecPort::speaker_off() {
   if (!output_open_) return true;
   const int rc = esp_codec_dev_close(out_dev_);
-  output_open_ = false;
   if (rc != 0) { fault_ = true; return false; }
+  output_open_ = false;
   return true;
 }
 
@@ -224,6 +227,7 @@ bool K151CodecPort::quiet() {
 }
 
 bool K151CodecPort::shutdown() {
+  const bool previously_faulted = fault_;
   bool ok = quiet();
   if (in_dev_) { esp_codec_dev_delete(in_dev_); in_dev_ = nullptr; }
   if (out_dev_) { esp_codec_dev_delete(out_dev_); out_dev_ = nullptr; }
@@ -251,7 +255,8 @@ bool K151CodecPort::shutdown() {
   }
   prepared_ = false;
   if (!ok) { fault_ = true; ESP_LOGE(kTag, "audio shutdown uncertain"); }
-  return ok;
+  // Releasing a handle cannot prove the earlier hardware fault was cleared.
+  return ok && !previously_faulted;
 }
 
 } // namespace stackchan::standalone
