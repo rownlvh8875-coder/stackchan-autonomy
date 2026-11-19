@@ -10,12 +10,18 @@ from stackchan_autonomy.settings import Settings
 
 
 async def test_cycle_timeout_cannot_leave_background_action_running():
+    # An overloaded runner may expire the whole-cycle timer during capture
+    # BEFORE ActionExecutor starts; only an action-stage timeout must fault
+    # that executor. Both paths must leave zero device side effects.
+    action_entered = asyncio.Event()
+
     class SlowRobot(FakeRobotAdapter):
         async def capture(self):
             await asyncio.sleep(0.05)
             return await super().capture()
 
         async def execute(self, command):
+            action_entered.set()
             await asyncio.sleep(0.06)
             await super().execute(command)
 
@@ -30,7 +36,13 @@ async def test_cycle_timeout_cannot_leave_background_action_running():
         assert not result.executed
         await asyncio.sleep(0.1)
         assert not robot.history
-        assert engine.actions.faulted
+        if action_entered.is_set():
+            # Only cancellation inside the action stage proves an action fault.
+            assert engine.actions.faulted
+        else:
+            # Earlier whole-cycle expiration must not be invented as an
+            # unobserved device fault, even on a slow Windows test runner.
+            assert result.code == "cycle_unavailable"
     finally:
         await engine.aclose()
 
