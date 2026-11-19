@@ -85,8 +85,22 @@ int main() {
                        {"stt_test", "gpt_test", "tts_test", "voice_test"}));
   assert(api.calls == 0 && ledger.reserved_conversations() == 0);
   playback.store(false);
-  assert(entry.answer(std::vector<int16_t>(2400, 10), 1250, 1800000000,
-                      {"stt_test", "gpt_test", "tts_test", "voice_test"}));
+  QuestionCapture capture;
+  std::array<int16_t, QuestionCapture::kFrame> voiced{}, quiet{};
+  voiced.fill(2000);
+  assert(!entry.answer_captured(capture, *epoch, 1250, 1800000000,
+                                {"stt_test", "gpt_test", "tts_test", "voice_test"}));
+  for (int i = 0; i < 3; ++i) (void)capture.push(voiced, false, false);
+  for (int i = 0; i < 25; ++i) (void)capture.push(quiet, false, false);
+  assert(capture.status() == CaptureResult::ready);
+  assert(!entry.answer_captured(capture, *epoch + 1, 1850, 1800000000,
+                                {"stt_test", "gpt_test", "tts_test", "voice_test"}));
+  assert(capture.audio().empty() && api.calls == 0);
+  for (int i = 0; i < 3; ++i) (void)capture.push(voiced, false, false);
+  for (int i = 0; i < 25; ++i) (void)capture.push(quiet, false, false);
+  assert(entry.answer_captured(capture, *epoch, 1850, 1800000000,
+                               {"stt_test", "gpt_test", "tts_test", "voice_test"}));
+  assert(capture.audio().empty());
   assert(api.calls == 3 && speaker.calls == 1);
   assert(session.state() == State::cooldown);
   assert(!entry.detect(wake, 1300));

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "offline_voice_cycle.hpp"
+#include "question_capture.hpp"
 #include "wake_features.hpp"
 
 #include <atomic>
@@ -44,6 +45,22 @@ class WakeVoiceEntry final {
     if (stop_.load() || speaker_busy_.load() || !consent_.load()) return false;
     OfflineVoiceCycle cycle(session_, ledger_, api_, speaker_, stop_, consent_, time_);
     return cycle.run(question_pcm24k, now_ms, unix_seconds, models);
+  }
+
+  // Exact session epoch + completed capture are mandatory before dispatch.
+  // Consume/zero the PCM even on failure; never resend a stale utterance.
+  bool answer_captured(QuestionCapture& capture, uint64_t epoch,
+                       uint64_t now_ms, uint64_t unix_seconds,
+                       const VoiceModelConfig& models) {
+    if (capture.status() != CaptureResult::ready) return false;
+    if (session_.state() != State::record || session_.epoch() != epoch ||
+        stop_.load() || speaker_busy_.load() || !consent_.load()) {
+      capture.reset();
+      return false;
+    }
+    const bool result = answer(capture.audio(), now_ms, unix_seconds, models);
+    capture.reset();
+    return result;
   }
 
  private:

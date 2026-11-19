@@ -24,6 +24,9 @@ int main() {
     assert(cap.push(silence, false, false) == CaptureResult::ready);
     assert(cap.audio().size() == 7 * QuestionCapture::kFrame);
     assert(cap.push(speech, false, false) == CaptureResult::ready);
+    // STOP arriving after end-of-speech must still destroy ready audio.
+    assert(cap.push(silence, true, false) == CaptureResult::rejected);
+    assert(cap.audio().empty());
     cap.reset();
     assert(cap.audio().empty() && cap.status() == CaptureResult::listening);
   }

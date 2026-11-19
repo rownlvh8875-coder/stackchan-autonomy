@@ -26,10 +26,12 @@ class QuestionCapture final {
 
   CaptureResult push(std::span<const int16_t> pcm, bool stop,
                      bool speaker_active) {
+    // A late STOP/playback signal must invalidate even a completed capture.
+    // Never allow a previously ready buffer to be reused after cancellation.
+    if (stop || speaker_active) return reject();
     if (state_ == CaptureResult::ready || state_ == CaptureResult::rejected)
       return state_;
-    if (stop || speaker_active || pcm.size() != kFrame || min_rms_ == 0)
-      return reject();
+    if (pcm.size() != kFrame || min_rms_ == 0) return reject();
     if (++frames_seen_ > kMaxFrames) return reject();
     uint64_t sum_sq = 0;
     for (const int16_t value : pcm) {
