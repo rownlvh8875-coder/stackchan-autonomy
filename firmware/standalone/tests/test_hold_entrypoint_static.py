@@ -31,3 +31,18 @@ def test_i2c_preflight_has_no_register_configuration_writes():
     assert "0xA3" in probe
     assert "kTouchVersionReg" in probe
     assert "std::atomic_bool" in probe
+
+
+def test_scfg_port_not_started_and_no_console_multiplex():
+    root = Path(__file__).resolve().parents[1]
+    boot = (root / "esp_app" / "main" / "app_main.cpp").read_text()
+    usb = (root / "esp_app" / "main" / "k151_usb_scfg.cpp").read_text()
+    config = (root / "esp_app" / "sdkconfig.defaults").read_text()
+    assert "K151ScfgUsbPort::compiled_link_marker()" in boot
+    assert "K151ScfgUsbPort::start(" not in boot
+    assert "usb_serial_jtag_driver_install(" not in boot
+    assert "CONFIG_ESP_CONSOLE_UART_DEFAULT=y" in config
+    assert "CONFIG_ESP_CONSOLE_SECONDARY_NONE=y" in config
+    assert "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED" in usb
+    assert "EnrollmentServer" in (root / "esp_app" / "main" / "k151_usb_scfg.hpp").read_text()
+    assert "raw_pcm" not in usb.lower()

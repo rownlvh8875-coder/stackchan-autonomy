@@ -70,3 +70,17 @@ does not send the manufacturer's work-mode write. Consequently a failed
 read cannot imply ILI9342C. An ILI9342E signature is a **hint**, not a verified
 LCD type; no LCD initialization is enabled. See
 `../docs/2026-11-19-k151-i2c-readonly-preflight.md`.
+
+## Dedicated SCFG USB receiver (compile only)
+
+The code in `k151_usb_scfg.{hpp,cpp}` compiles a dedicated USB
+Serial/JTAG packet receiver using ESP-IDF v6.1, SCFGv1 and SWK1 feature-only
+enrollment. It is never instantiated or started by `app_main`; the UART
+console option is pinned to prevent console/protocol multiplexing.
+Explicit local owner mode + profile-store preparation + STOP clearance
+are mandatory. A USB packet alone cannot arm enrollment.
+No raw PCM transfer, cloud request, Wi-Fi, local settings mutation, servo
+command or device flashing is performed. A future port must verify
+partial sends and drain completion; successfully queueing 18 SACK bytes
+does NOT prove physical delivery. See
+`../docs/2026-11-19-k151-usb-compile-only.md`.

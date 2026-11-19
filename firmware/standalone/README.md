@@ -191,3 +191,13 @@ No observation is a hardware authorization or an electrical mute proof.
 See `docs/2026-11-19-k151-i2c-readonly-preflight.md` for pinned sources,
 evidence limits, and required physical approval. Host parser and boot source
 guards are tested; only a real ESP32-S3 CI build establishes cross-compilation.
+
+## 2026-11-19 SCFG USB port compile-only stage
+
+The independent `esp_app` now links `K151ScfgUsbPort`, a dedicated
+ESP32-S3 USB Serial/JTAG SCFGv1 receiver. The boot HOLD app references only
+its marker; it never calls `start`, so it does not install the USB driver
+or open a port. The runtime API explicitly guards trusted local enrollment,
+preserves a STOP latch, handles only feature data and returns fixed no-secret
+SACK frames. The K151 factory firmware and actual USB console are unchanged.
+Source and remaining limits: `docs/2026-11-19-k151-usb-compile-only.md`.
