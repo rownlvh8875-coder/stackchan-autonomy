@@ -136,8 +136,11 @@ class NetworkTimeGuard final {
     return true;
   }
   bool ip_acquired(uint64_t id, uint64_t now_ms) {
-    if (!tick(now_ms) || phase_ != ConnectivityPhase::associated ||
-        id != attempt_) return false;
+    if (!tick(now_ms) || id != attempt_ ||
+        (phase_ != ConnectivityPhase::associated &&
+         phase_ != ConnectivityPhase::ready &&
+         phase_ != ConnectivityPhase::waiting_time)) return false;
+    // A renewed IP invalidates time readiness until a new SNTP event.
     phase_ = ConnectivityPhase::waiting_time;
     return true;
   }
@@ -152,7 +155,9 @@ class NetworkTimeGuard final {
   }
   bool time_synchronized(uint64_t id, uint64_t epoch_seconds,
                          uint64_t monotonic_ms) {
-    if (!tick(monotonic_ms) || phase_ != ConnectivityPhase::waiting_time ||
+    if (!tick(monotonic_ms) ||
+        (phase_ != ConnectivityPhase::waiting_time &&
+         phase_ != ConnectivityPhase::ready) ||
         id != attempt_ || epoch_seconds < kMinPlausibleEpoch ||
         epoch_seconds > kMaxPlausibleEpoch) return false;
     // A large calendar-time jump within one uninterrupted boot is unsafe for

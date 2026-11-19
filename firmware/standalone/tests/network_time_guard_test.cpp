@@ -44,6 +44,14 @@ int main() {
   assert(!n.can_attempt_paid_request(203,e,true,true));
   assert(!n.can_attempt_paid_request(203,e+100,true,false));
   assert(n.can_attempt_paid_request(2103,e+2,true,false));
+  // Periodic SNTP while already ready is normal and must not fatal-fault.
+  assert(n.time_synchronized(1,e+2,2104));
+  assert(n.can_attempt_paid_request(2104,e+2,true,false));
+  // DHCP IP renewal invalidates readiness and requests another SNTP sample.
+  assert(n.ip_acquired(1,2110));
+  assert(n.phase()==ConnectivityPhase::waiting_time);
+  assert(!n.can_attempt_paid_request(2110,e+2,true,false));
+  assert(n.time_synchronized(1,e+2,2111));
   n.disconnected(2200);
   assert(n.phase()==ConnectivityPhase::offline && n.next_retry_ms()==3200);
   assert(!n.can_attempt_paid_request(2200,e+2,true,false));
