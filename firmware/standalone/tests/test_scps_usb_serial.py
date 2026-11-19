@@ -130,9 +130,10 @@ def test_unexpected_status_never_prompts_secret():
 
 
 def test_partial_write_fails_closed_no_retry():
-    class ShortPort(FakePort):
+    class ShortPort:
         def write(self, wire: bytes) -> int:
-            super().write(wire)
+            # Driver accepts a partial byte sequence. Do not interpret any
+            # sent bytes as a valid PC public key or fake device state.
             return len(wire) - 1
 
     port = ShortPort()

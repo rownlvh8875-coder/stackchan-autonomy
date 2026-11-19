@@ -65,7 +65,7 @@ class Reader final {
  public:
   bool tick(uint64_t now) {
     if(fault_)return false;
-    if(used_ && (now<start_ms_||now-start_ms_>kPartialTimeoutMs))
+    if(used_ && (now<start_ms_||now-start_ms_>=kPartialTimeoutMs))
       return fail();
     return true;
   }
