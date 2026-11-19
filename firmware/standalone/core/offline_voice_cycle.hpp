@@ -199,11 +199,13 @@ class OfflineVoiceCycle final {
     if (!session_.synthesized(now, epoch, true)) { ledger_.cancel_permit(); return false; }
     // The real speaker driver must implement a STOP latch + bounded complete
     // playback drain. This port is a host fake, NOT real I2S.
-    if (stop_.load() || !consent_.load() || !time_.load()) {
+    if (stop_.load() || !consent_.load() || !time_.load() ||
+        !session_.cloud_enabled()) {
       session_.stop(); ledger_.cancel_permit(); return false;
     }
     const auto played = speaker_.play_pcm24k(synthesis->pcm24k, now);
-    if (stop_.load() || !consent_.load() || !time_.load()) {
+    if (stop_.load() || !consent_.load() || !time_.load() ||
+        !session_.cloud_enabled()) {
       session_.stop(); ledger_.cancel_permit(); return false;
     }
     const bool complete = played.complete && played.finished_ms >= now;
@@ -223,7 +225,7 @@ class OfflineVoiceCycle final {
                                       PaidStage permit, State required,
                                       uint64_t& now, uint64_t epoch) {
     session_.tick(now);
-    if (stop_.load() || !consent_.load()) {
+    if (stop_.load() || !consent_.load() || !session_.cloud_enabled()) {
       session_.stop(); ledger_.cancel_permit(); return std::nullopt;
     }
     if (session_.state() != required || session_.epoch() != epoch ||
@@ -234,7 +236,7 @@ class OfflineVoiceCycle final {
     }
     // Exactly one dispatch; no automatic retry of possibly-billed requests.
     auto reply = api_.request(request);
-    if (stop_.load() || !consent_.load()) {
+    if (stop_.load() || !consent_.load() || !session_.cloud_enabled()) {
       session_.stop(); ledger_.cancel_permit(); return std::nullopt;
     }
     if (!reply.success || reply.http_status != 200 ||

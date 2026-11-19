@@ -29,6 +29,8 @@ struct FakeKv : AtomicKv {
 struct FakeApi : VoiceApiPort {
   int calls = 0;
   int fail_at = -1, stop_at = -1, delay_at = -1, overflow_at = -1;
+  int disable_cloud_at = -1;
+  Session* session = nullptr;
   bool invalid_utf8 = false;
   uint64_t duration = 5;
   std::atomic_bool* stop = nullptr;
@@ -53,6 +55,7 @@ struct FakeApi : VoiceApiPort {
       assert(false); // No retry or fourth request
     }
     if (stop && index == stop_at) stop->store(true);
+    if (session && index == disable_cloud_at) session->cloud_enable(false);
     VoiceApiReply out;
     out.success = index != fail_at;
     out.http_status = out.success ? 200 : 500;
@@ -140,6 +143,11 @@ int main() {
   {
     Fixture x; x.api.stop=&x.stop; x.api.stop_at=1;
     assert(!x.run() && x.api.calls==2 && x.speaker.calls==0);
+  }
+  {
+    Fixture x; x.api.session=&x.session; x.api.disable_cloud_at=0;
+    assert(!x.run() && x.api.calls==1 && x.speaker.calls==0);
+    assert(x.session.state()==State::stopped);
   }
   {
     Fixture x; x.api.delay_at=0;
