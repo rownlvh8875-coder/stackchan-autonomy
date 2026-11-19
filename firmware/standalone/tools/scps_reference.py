@@ -9,6 +9,7 @@ keys are unauthenticated until the human *visually compares* the eight-digit
 SAS on the physical device and PC. If the display/input path is compromised,
 manual SAS verification cannot establish authenticity.
 """
+
 from __future__ import annotations
 
 import os
