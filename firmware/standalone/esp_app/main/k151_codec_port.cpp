@@ -6,6 +6,7 @@
 #include "k151_codec_port.hpp"
 #include "k151_contract.hpp"
 #include "pcm_frame.hpp"
+#include "k151_output_evidence.hpp"
 
 #include <algorithm>
 #include <array>
@@ -186,6 +187,10 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
 }
 
 bool K151CodecPort::speaker_on_low_volume() {
+  // Source-derived AW9523/AXP2101 sequence is not a measured K151 power-up.
+  // No real reset, mute verification or DMA-drain observer exists in this image.
+  if (!kK151PhysicalOutputEnabledInHoldImage ||
+      !kK151SafeDmaDrainDriverAvailable) return false;
   if (!prepared() || input_open_ || output_open_) return false;
   esp_codec_dev_sample_info_t fs = {};
   fs.bits_per_sample = 16;
@@ -217,6 +222,12 @@ bool K151CodecPort::play_mono_24k(std::span<const int16_t> mono) {
   std::fill(chunk.begin(), chunk.end(), 0);
   if (rc != 0) return fail();
   return true;
+}
+
+bool K151CodecPort::drain_output_before_mute() {
+  // esp_codec_dev_write success is NOT independently verified amp/DMA drain.
+  // Do not substitute a fixed delay or a queue-accepted acknowledgement.
+  return false;
 }
 
 bool K151CodecPort::quiet() {

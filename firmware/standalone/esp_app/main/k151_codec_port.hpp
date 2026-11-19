@@ -32,6 +32,7 @@ class K151CodecPort final {
   bool speaker_on_low_volume();
   bool speaker_off();
   bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms
+  bool drain_output_before_mute(); // False until real DMA+codec drain telemetry.
   bool quiet();      // Both codecs; error latches fault
   bool shutdown();   // Release only, never erase/flash/NVS
   bool prepared() const { return prepared_ && !fault_; }

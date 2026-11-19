@@ -12,6 +12,8 @@
 #include "voice_turn_coordinator.hpp" // Compile-only mic/session/API controller.
 #include "guarded_voice_speaker.hpp" // Compile-only speaker lifecycle gate.
 #include "k151_pcm_speaker_sink.hpp" // Dormant, 10ms-bounded K151 output.
+#include "k151_audio_hold_hooks.hpp" // Dormant output proof / no hardware startup.
+#include "k151_output_evidence.hpp" // Source-based policy, not physical proof.
 #include "k151_https_voice.hpp"
 #include "k151_voice_api_adapter.hpp"
 #include "k151_wifi_time.hpp"
