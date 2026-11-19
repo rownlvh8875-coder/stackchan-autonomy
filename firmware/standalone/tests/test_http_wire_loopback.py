@@ -101,7 +101,9 @@ def test_openai_wire_loopback(tmp_path):
         ):
             client = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
             client.request(
-                "POST", endpoint, body=(tmp_path / file).read_bytes(),
+                "POST",
+                endpoint,
+                body=(tmp_path / file).read_bytes(),
                 headers={"Content-Type": media},
             )
             reply = client.getresponse()
