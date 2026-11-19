@@ -7,6 +7,7 @@
 #include "k151_usb_enrollment_store.hpp"
 #include "offline_voice_cycle.hpp"
 #include "k151_https_voice.hpp"
+#include "k151_voice_api_adapter.hpp"
 #include "k151_voice_decode.hpp"
 namespace stackchan::standalone { const char* offline_voice_cycle_compiled_marker(); }
 #include "nvs_port.hpp"
@@ -35,6 +36,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151UsbEnrollmentStorage::compiled_link_marker());
   ESP_LOGI(kTag, "%s", offline_voice_cycle_compiled_marker());
   ESP_LOGI(kTag, "%s", K151HttpsVoicePort::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151VoiceApiAdapter::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151VoiceDecoder::compiled_link_marker());
 
   IsolatedNvs nvs;

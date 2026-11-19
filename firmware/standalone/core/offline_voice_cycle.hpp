@@ -18,6 +18,31 @@ namespace stackchan::standalone {
 
 enum class VoiceApiStage : uint8_t { transcribe, respond, synthesize };
 
+// This in-memory token is emitted ONLY after PersistentGuard consumes the
+// durable one-shot stage permit. It binds a single outbound send to the
+// session epoch and exact endpoint. It is never stored across reboots.
+// Not cryptographic authentication or an API budget by itself.
+class OfflineVoiceCycle;
+class DispatchPermit final {
+ public:
+  DispatchPermit(const DispatchPermit&) = delete;
+  DispatchPermit& operator=(const DispatchPermit&) = delete;
+  bool consume_once(VoiceApiStage stage, uint64_t epoch) {
+    if (static_cast<unsigned>(stage) != static_cast<unsigned>(stage_) ||
+        epoch != epoch_) return false;
+    bool unused = false;
+    return used_.compare_exchange_strong(unused, true);
+  }
+  bool used() const { return used_.load(); }
+ private:
+  friend class OfflineVoiceCycle;
+  explicit DispatchPermit(PaidStage stage, uint64_t epoch)
+      : stage_(stage), epoch_(epoch) {}
+  PaidStage stage_;
+  uint64_t epoch_;
+  std::atomic_bool used_{false};
+};
+
 struct VoiceApiRequest {
   VoiceApiStage stage;
   std::string_view fixed_path;
@@ -32,6 +57,9 @@ struct VoiceApiRequest {
   unsigned max_output_tokens = 0;
   bool store = false;
   bool pcm_output = false;
+  // Synchronous: the transport MUST consume once immediately before socket I/O.
+  // Null is valid for the old pure mock interface, never for a network adapter.
+  DispatchPermit* dispatch_permit = nullptr;
 };
 
 // The fake test port returns *already parsed* data; it does not validate
@@ -234,8 +262,13 @@ class OfflineVoiceCycle final {
       ledger_.cancel_permit();
       return std::nullopt;
     }
-    // Exactly one dispatch; no automatic retry of possibly-billed requests.
-    auto reply = api_.request(request);
+    // The NVS budget stage has been spent exactly once. Issue a second,
+    // non-billable *transport handoff* bound to this precise stage and epoch.
+    // This is NOT another durable reservation and cannot be reused.
+    DispatchPermit dispatch(permit, epoch);
+    VoiceApiRequest signed_request = request;
+    signed_request.dispatch_permit = &dispatch;
+    auto reply = api_.request(signed_request);
     if (stop_.load() || !consent_.load() || !session_.cloud_enabled()) {
       session_.stop(); ledger_.cancel_permit(); return std::nullopt;
     }
