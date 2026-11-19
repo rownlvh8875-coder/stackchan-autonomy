@@ -70,8 +70,12 @@ bool K151WifiTimePort::start(bool explicit_owner, bool physical_mode_verified,
   if (attempted_ || !explicit_owner || !physical_mode_verified ||
       physical_stop.load()) return false;
   attempted_ = true;
-  if (!secrets_.provision(ssid, passphrase, api_key, true) ||
-      !policy_.arm(true, secrets_.valid(), millis())) return fail();
+  bool secrets_ok = false;
+  {
+    std::lock_guard<std::mutex> lock(secrets_mutex_);
+    secrets_ok = secrets_.provision(ssid, passphrase, api_key, true);
+  }
+  if (!secrets_ok || !policy_.arm(true, secrets_ok, millis())) return fail();
 
   queue_ = xQueueCreate(kQueueLength, sizeof(Event));
   if (!queue_) return fail();
@@ -203,6 +207,14 @@ bool K151WifiTimePort::allow_paid_request(bool owner_paid_consent,
   return owner_paid_consent && !physical_stop && live_network_ready();
 }
 
+bool K151WifiTimePort::copy_api_key(EphemeralApiKey& out) const {
+  out.clear();
+  if (!live_network_ready()) return false;
+  std::lock_guard<std::mutex> lock(secrets_mutex_);
+  if (!live_network_ready() || !secrets_.valid()) return false;
+  return out.load(secrets_.api_key());
+}
+
 bool K151WifiTimePort::fail() {
   faulted_ = true;
   policy_.fault();
@@ -256,7 +268,10 @@ void K151WifiTimePort::cleanup() {
     vQueueDelete(queue_);
     queue_ = nullptr;
   }
-  secrets_.clear();
+  {
+    std::lock_guard<std::mutex> lock(secrets_mutex_);
+    secrets_.clear();
+  }
 }
 
 bool K151WifiTimePort::shutdown() {

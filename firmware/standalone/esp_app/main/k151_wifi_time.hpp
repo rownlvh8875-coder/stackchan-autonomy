@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <span>
 #include <string_view>
 
@@ -44,8 +45,9 @@ class K151WifiTimePort final {
   bool active() const { return active_ && !faulted_; }
   bool faulted() const { return faulted_; }
   ConnectivityPhase phase() const { return policy_.phase(); }
-  // RAM-only; unavailable if not explicitly provisioned.
-  std::string_view api_key() const { return active() ? secrets_.api_key() : std::string_view{}; }
+  // Scoped snapshot, never a raw view into mutable Wi-Fi credential storage.
+  // Caller must drop the copy after its single synchronous POST.
+  bool copy_api_key(EphemeralApiKey& out) const;
 
  private:
   enum class EventType : uint8_t { started, associated, disconnected, ip, sync };
@@ -55,6 +57,7 @@ class K151WifiTimePort final {
   bool fail();
   void cleanup();
   RuntimeSecrets secrets_;
+  mutable std::mutex secrets_mutex_;
   NetworkTimeGuard policy_;
   QueueHandle_t queue_ = nullptr;
   esp_netif_t* station_ = nullptr;

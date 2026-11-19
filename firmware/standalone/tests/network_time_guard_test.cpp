@@ -19,6 +19,13 @@ int main() {
   assert(s.valid() && s.ssid().size()==4 && s.passphrase()=="eightpass");
   s.clear();
   assert(!s.valid() && s.ssid().empty() && s.api_key().empty());
+  EphemeralApiKey request_key;
+  assert(!request_key.load("short"));
+  assert(request_key.view().empty());
+  assert(request_key.load("sk-test-secret-device-only"));
+  assert(request_key.view() == "sk-test-secret-device-only");
+  request_key.clear();
+  assert(request_key.view().empty());
   std::string long_hex(64,'a');
   assert(s.provision(wifi,long_hex,"sk-test-secret-device-only",true));
   s.clear();

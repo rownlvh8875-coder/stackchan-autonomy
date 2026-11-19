@@ -19,6 +19,35 @@ inline void wipe_secret(volatile unsigned char* ptr, size_t n) noexcept {
   for (size_t i = 0; i < n; ++i) ptr[i] = 0;
 }
 
+// A per-request copy of a RAM-only API token. This type cannot be copied,
+// moved, serialized or persisted and always zeroes its own buffer.
+class EphemeralApiKey final {
+ public:
+  EphemeralApiKey() = default;
+  EphemeralApiKey(const EphemeralApiKey&) = delete;
+  EphemeralApiKey& operator=(const EphemeralApiKey&) = delete;
+  EphemeralApiKey(EphemeralApiKey&&) = delete;
+  EphemeralApiKey& operator=(EphemeralApiKey&&) = delete;
+  ~EphemeralApiKey() { clear(); }
+  bool load(std::string_view key) {
+    clear();
+    if (key.size() < 16 || key.size() > bytes_.size()) return false;
+    for (unsigned char c : key) if (c <= 0x20 || c >= 0x7f) return false;
+    std::copy(key.begin(), key.end(), bytes_.begin());
+    count_ = key.size();
+    return true;
+  }
+  std::string_view view() const { return {bytes_.data(), count_}; }
+  void clear() noexcept {
+    wipe_secret(reinterpret_cast<volatile unsigned char*>(bytes_.data()),
+                bytes_.size());
+    count_ = 0;
+  }
+ private:
+  std::array<char, 224> bytes_{};
+  size_t count_ = 0;
+};
+
 class RuntimeSecrets final {
  public:
   RuntimeSecrets() = default;

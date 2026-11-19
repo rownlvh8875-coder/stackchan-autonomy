@@ -34,6 +34,8 @@ bool K151HttpChannel::post_once(
       return false;
   }
   if (req.fixed_path != httpwire::path(endpoint)) return false;
+  EphemeralApiKey one_request_key;
+  if (!network_.copy_api_key(one_request_key)) return false;
   K151HttpsVoicePort::Request posted{endpoint, req.model, req.voice,
                                     req.text, req.pcm24k};
   K151HttpsVoicePort::Reply result{};
@@ -41,8 +43,9 @@ bool K151HttpChannel::post_once(
   // TLS. The durable budget was ALREADY spent by OfflineVoiceCycle::stage;
   // this callback consumes only the separate in-RAM session-epoch ticket.
   const auto live_network = [this]() { return network_.live_network_ready(); };
-  if (!http_.post_once(posted, key_, live_network,
+  if (!http_.post_once(posted, one_request_key.view(), live_network,
                        consent_, stop_, spend_dispatch, result)) return false;
+  one_request_key.clear();
   if (stop_.load() || !consent_.load() || !network_.live_network_ready()) return false;
   completed_ms = result.received_ms;
   body = std::move(result.body);
@@ -50,9 +53,9 @@ bool K151HttpChannel::post_once(
 }
 
 K151VoiceApiAdapter::K151VoiceApiAdapter(
-    std::string_view key, const K151WifiTimePort& network,
+    const K151WifiTimePort& network,
     const std::atomic_bool& consent, const std::atomic_bool& stop)
-    : http_(key, network, consent, stop),
+    : http_(network, consent, stop),
       binding_(http_, codec_, []() {
         return static_cast<uint64_t>(esp_timer_get_time() / 1000);
       }, stop, consent, network.admission_flag()) {}

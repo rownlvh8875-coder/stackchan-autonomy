@@ -11,23 +11,20 @@
 
 namespace stackchan::standalone {
 
-// Owner of the fixed-host TLS client. The API key's storage belongs to the
-// future approved configuration controller and MUST outlive this object.
+// TLS client uses a fresh zeroized per-request API key snapshot from
+// K151WifiTimePort. It never holds an unowned string_view between requests.
 class K151HttpChannel final : public VoiceHttpChannel {
  public:
-  K151HttpChannel(std::string_view api_key,
-                  const K151WifiTimePort& network,
+  K151HttpChannel(const K151WifiTimePort& network,
                   const std::atomic_bool& owner_consent,
                   const std::atomic_bool& physical_stop)
-      : key_(api_key), network_(network),
-        consent_(owner_consent), stop_(physical_stop) {}
+      : network_(network), consent_(owner_consent), stop_(physical_stop) {}
   static const char* compiled_link_marker();
   bool post_once(const VoiceApiRequest& request,
                  const std::function<bool()>& spend_dispatch,
                  std::vector<uint8_t>& body,
                  uint64_t& completed_ms) override;
  private:
-  std::string_view key_;
   const K151WifiTimePort& network_;
   const std::atomic_bool& consent_;
   const std::atomic_bool& stop_;
@@ -52,7 +49,7 @@ class K151ReplyCodec final : public VoiceReplyCodec {
 // instance. No device startup path or model configuration is supplied here.
 class K151VoiceApiAdapter final {
  public:
-  K151VoiceApiAdapter(std::string_view key, const K151WifiTimePort& network,
+  K151VoiceApiAdapter(const K151WifiTimePort& network,
                       const std::atomic_bool& consent,
                       const std::atomic_bool& stop);
   static const char* compiled_link_marker();
