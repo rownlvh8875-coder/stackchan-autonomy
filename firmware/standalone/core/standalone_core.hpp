@@ -175,7 +175,7 @@ class BudgetLedger {
   using Commit = std::function<bool(std::span<const uint8_t>)>;
   bool reserve(uint64_t epoch_seconds, bool trusted_clock, const Commit& persist) {
     // A valid SNTP epoch is a caller precondition; time rollback fails closed.
-    if (!trusted_clock || epoch_seconds < 1'600'000'000ULL ||
+    if (faulted_ || !trusted_clock || epoch_seconds < 1'600'000'000ULL ||
         epoch_seconds < last_ || !persist) return false;
     std::vector<uint64_t> recent;
     size_t minute = 0, hour = 0;
@@ -194,7 +194,10 @@ class BudgetLedger {
     proposal.events_ = std::move(recent);
     proposal.last_ = epoch_seconds;
     const std::vector<uint8_t> wire = proposal.serialize();
-    if (!persist(wire)) return false;  // No network send after ambiguous commit failure.
+    if (!persist(wire)) {
+      faulted_ = true;  // Ambiguous NVS result: block until independent durable reload.
+      return false;
+    }
     *this = std::move(proposal);
     return true;
   }
@@ -206,9 +209,11 @@ class BudgetLedger {
     return out;
   }
   size_t count() const { return events_.size(); }
+  bool faulted() const { return faulted_; }
  private:
   uint64_t last_ = 0;
   std::vector<uint64_t> events_;
+  bool faulted_ = false;
 };
 
 enum class State : uint8_t {

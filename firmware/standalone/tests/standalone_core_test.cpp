@@ -69,10 +69,15 @@ void budget_tests() {
   const auto before = durable;
   assert(!recovered.reserve(t+120,true,[&](std::span<const uint8_t>) {return false;}));
   assert(durable == before); // failed store -> no send/reclaim
+  assert(recovered.faulted());
+  assert(!recovered.reserve(t+120,true,save)); // no retry after ambiguous commit
+  auto reloaded = BudgetLedger::restore(durable);
+  assert(reloaded);
+  recovered = *reloaded; // only a verified persistent reload can clear the fault
   assert(recovered.reserve(t+120,true,save));
   assert(recovered.count()==4);
   auto corrupted = durable;
-  corrupted.back() ^= 1;
+  corrupted.at(corrupted.size() - 1) ^= 1;
   assert(!BudgetLedger::restore(corrupted));
   corrupted = durable;
   corrupted[5] = 101;
