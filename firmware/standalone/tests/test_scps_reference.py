@@ -1,4 +1,5 @@
 """SCPS reference uses only synthetic credentials, no USB or external network."""
+
 import sys
 from pathlib import Path
 
@@ -96,14 +97,17 @@ def test_stop_never_accepts_sealed_data():
         device.open_sealed(blob, True, True)
 
 
-@pytest.mark.parametrize("ssid,pw,token", [
-    (b"", FAKE_PASS, FAKE_KEY),
-    (b"Bad\x00Net", FAKE_PASS, FAKE_KEY),
-    (b"Network", "short", FAKE_KEY),
-    (b"Network", FAKE_PASS, "too-short"),
-    (b"Network", "g" * 64, FAKE_KEY),
-    (b"Network", FAKE_PASS, "A" * 221),
-])
+@pytest.mark.parametrize(
+    "ssid,pw,token",
+    [
+        (b"", FAKE_PASS, FAKE_KEY),
+        (b"Bad\x00Net", FAKE_PASS, FAKE_KEY),
+        (b"Network", "short", FAKE_KEY),
+        (b"Network", FAKE_PASS, "too-short"),
+        (b"Network", "g" * 64, FAKE_KEY),
+        (b"Network", FAKE_PASS, "A" * 221),
+    ],
+)
 def test_invalid_credential_data_rejected(ssid, pw, token):
     device, pc, code = _make_pair()
     with pytest.raises(ValueError):
