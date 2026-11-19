@@ -54,6 +54,10 @@ jobs:
       - name: Offline standalone C++ safety, wake, and SCFG enrollment tests (host only)
         if: runner.os == 'Linux'
         run: uv run --frozen pytest -q firmware/standalone/tests
+      - name: Offline SCPS P-256 / AES-GCM authenticated pairing fixtures (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          uv run --frozen --with cryptography==46.0.4 python -m pytest -q firmware/standalone/tests/test_scps_reference.py
       - name: Accelerated virtual 24-hour stability scenario
         run: uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --report .local/ci/soak.json
       - name: Build distributions

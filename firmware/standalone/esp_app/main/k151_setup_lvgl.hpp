@@ -4,6 +4,7 @@
 
 #include "setup_screen_model.hpp"
 #include <atomic>
+#include <string_view>
 #include <lvgl.h>
 
 namespace stackchan::standalone {
@@ -22,6 +23,10 @@ class K151SetupLvgl final {
   bool present(TouchConsentPhase touch, OwnerSetupPhase owner,
                bool trusted_input_ready, bool sensor_read_failed,
                bool lvgl_lock_held);
+  // Non-secret eight-digit SAS only; physical LCD must be independently
+  // verified, already initialized, and owned by the caller's LVGL task.
+  bool present_pairing_sas(std::string_view code, bool trusted_display,
+                           bool owner_window, bool lvgl_lock_held);
   bool detach(bool lvgl_lock_held);
   bool attached() const { return root_ != nullptr; }
 

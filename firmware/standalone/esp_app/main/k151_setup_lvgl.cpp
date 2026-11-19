@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Compile-only optional LVGL renderer. app_main invokes the marker ONLY.
 #include "k151_setup_lvgl.hpp"
+#include <algorithm>
+#include <array>
 
 namespace stackchan::standalone {
 const char* K151SetupLvgl::compiled_link_marker() {
@@ -44,6 +46,22 @@ bool K151SetupLvgl::present(TouchConsentPhase touch, OwnerSetupPhase owner,
   lv_label_set_text(first_, frame.line1);
   lv_label_set_text(second_, frame.line2);
   return !stop_.load() && frame.kind != SetupScreenKind::fault;
+}
+
+bool K151SetupLvgl::present_pairing_sas(std::string_view code,
+                                       bool trusted_display, bool owner_window,
+                                       bool lvgl_lock_held) {
+  if (!root_ || !first_ || !title_ || !second_ || !trusted_display ||
+      !owner_window || !lvgl_lock_held || stop_.load() || code.size()!=8 ||
+      !std::all_of(code.begin(),code.end(),
+                   [](char c){return c>='0' && c<='9';})) return false;
+  std::array<char,9> digits{};
+  std::copy(code.begin(),code.end(),digits.begin());
+  // The caller must keep the LVGL lock until all changes are complete.
+  lv_label_set_text(title_, "USB pairing check");
+  lv_label_set_text(first_, digits.data());
+  lv_label_set_text(second_, "Compare all 8 digits on your PC");
+  return !stop_.load();
 }
 
 bool K151SetupLvgl::detach(bool lvgl_lock_held) {
