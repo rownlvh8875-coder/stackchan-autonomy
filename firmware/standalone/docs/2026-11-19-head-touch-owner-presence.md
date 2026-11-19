@@ -20,3 +20,12 @@ token before asking the existing owner controller to commit RAM credentials. The
 The portable host fixture additionally composes a touch-presence event with the existing `OwnerSetupController`: physical contact alone cannot set `trusted_local_input`. That independent signal must originate from a future *verified* on-device input path. The final one-use gesture proof can authorize `OwnerSetupController::confirm()` only after fake credentials are staged. No real credentials are committed or transmitted.
 
 **NOT PROVED:** hardware gesture detection and false-positive rate, electrical contact, identity authentication, reliable I2C sampling under load, physical STOP interrupt latency, LCD UI, safe first-use secret entry, Wi-Fi association or real GPT/STT/TTS. The official factory head-touch initialization cannot run in the standalone HOLD image without touching registers; it remains intentionally unimplemented.
+
+## Final confirmation API restriction
+
+The device-facing `K151LocalOwnerSetup::confirm()` is **private** and can be
+invoked by `K151HeadTouchOwner` as a friend. This prevents accidental
+production-device call sites from passing `true` without spending a validated
+second physical touch ticket. The portable `OwnerSetupController` remains
+public for host-only tests but is encapsulated by the device adapter. This is
+a source-level authorization boundary, not a proof of authenticated identity.

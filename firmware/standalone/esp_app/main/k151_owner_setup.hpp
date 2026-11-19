@@ -15,6 +15,8 @@ namespace stackchan::standalone {
 // This binds the host-tested state machine but supplies NO GPIO, USB command,
 // keyboard, display, or automatic trusted-input mode. The real physical
 // authorization mechanism is deliberately NOT provided or guessed here.
+class K151HeadTouchOwner;
+
 class K151LocalOwnerSetup final {
  public:
   static const char* compiled_link_marker();
@@ -33,9 +35,6 @@ class K151LocalOwnerSetup final {
   bool submit_api_key(std::string_view key, uint64_t now_ms) {
     return setup_.submit_api_key(key, now_ms);
   }
-  bool confirm(uint64_t now_ms, bool physical_confirmation) {
-    return setup_.confirm(now_ms, physical_confirmation);
-  }
   bool poll(uint64_t now_ms) { return setup_.tick(now_ms); }
   void stop() { setup_.cancel(); }
   bool ready() const { return setup_.ready(); }
@@ -47,6 +46,12 @@ class K151LocalOwnerSetup final {
   bool start_wifi_once(K151WifiTimePort& network);
 
  private:
+  friend class K151HeadTouchOwner;
+  // Only the sensor-owned second 3-second touch ticket may consume this
+  // path. Other application code cannot impersonate final confirmation.
+  bool confirm(uint64_t now_ms, bool physical_confirmation) {
+    return setup_.confirm(now_ms, physical_confirmation);
+  }
   RuntimeSecrets secrets_;
   OwnerSetupController setup_;
   const std::atomic_bool& owner_;
