@@ -7,6 +7,7 @@
 #include "k151_usb_enrollment_store.hpp"
 #include "offline_voice_cycle.hpp"
 #include "wake_voice_entry.hpp" // Compile-only: never instantiate on startup.
+#include "question_capture.hpp" // Compile-only question segmentation.
 #include "k151_https_voice.hpp"
 #include "k151_voice_api_adapter.hpp"
 #include "k151_wifi_time.hpp"
