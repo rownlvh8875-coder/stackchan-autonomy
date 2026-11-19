@@ -4,3 +4,5 @@ dependencies:
   espressif/esp_codec_dev: "==1.6.2"
 
   espressif/cjson: "==1.7.19~2"
+
+  lvgl/lvgl: "==9.5.0"
