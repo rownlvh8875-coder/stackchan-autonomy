@@ -12,6 +12,7 @@ from .ports import RobotAdapter
 from .safety import SafetyPolicy, UnsafeDecision
 from .settings import Settings
 from .state_store import StateUnavailable
+from .timing_diagnostics import control_deadline, operation_label
 
 
 class ActionExecutor:
@@ -67,6 +68,13 @@ class ActionExecutor:
 
     async def _lease_io(self, operation, *args, extends=False):
         started = time.monotonic()
+        label = (
+            "lease_acquire"
+            if operation == self._acquire_lease
+            else "lease_check"
+            if operation == self.lease.check
+            else "lease_renew"
+        )
         # Unowned setup has no lease yet. Held ownership must never outlive the
         # actual verified expiry, including admission, commit and result delivery.
         timeout = (
@@ -75,6 +83,7 @@ class ActionExecutor:
             else self._authorized_until - started
         )
         if timeout <= 0:
+            control_deadline(label, "pre_submission_deadline", 0)
             raise TimeoutError
 
         def observe():
@@ -84,14 +93,17 @@ class ActionExecutor:
             # overwrite validity metadata before this caller consumes its result.
             return result, self.lease.valid_until_monotonic, self._observation_sequence
 
-        async with asyncio.timeout(timeout):
-            result, valid_until, sequence = await self._storage.call(observe)
+        with operation_label(label):
+            async with asyncio.timeout(timeout):
+                result, valid_until, sequence = await self._storage.call(observe)
         # A descheduled loop may deliver a ready result before its overdue timer.
         finished = time.monotonic()
         if finished - started >= timeout:
+            control_deadline(label, "post_delivery_deadline", finished - started)
             raise TimeoutError
         if result is not None and result is not False:
             if valid_until is None or valid_until <= finished:
+                control_deadline(label, "expired_observation", finished - started)
                 raise TimeoutError
             if sequence > self._applied_sequence:
                 self._authorized_until = (

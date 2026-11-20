@@ -3,6 +3,7 @@
 #include "k151_contract.hpp"
 #include "k151_wakenet_port.hpp"
 #include "native_wake_controller.hpp" // Compile only; no controller/model constructed.
+#include "native_voice_loop.hpp" // Dormant owner loop; no readiness is asserted.
 #include "k151_codec_port.hpp"
 #include "k151_readonly_probe.hpp"
 #include "k151_usb_scfg.hpp"

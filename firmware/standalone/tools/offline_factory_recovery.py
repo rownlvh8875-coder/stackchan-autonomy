@@ -7,8 +7,10 @@ write API. A successful report is NOT installation or restore approval.
 from __future__ import annotations
 
 import argparse
+import binascii
 import hashlib
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -27,6 +29,66 @@ EXPECTED_PARTITIONS = (
     ("assets", "0x00a00000", 4194304, 1, 130),
     ("coredump", "0x00e00000", 65536, 1, 3),
 )
+
+
+def inspect_otadata(region: bytes) -> dict:
+    """Sanitized historical candidates, NOT the currently running or spare slot.
+
+    Pinned IDF fff9895: esp_flash_partitions.h, bootloader_common_loader.c,
+    bootloader_utility.c and otatool.py. Do not export the 20-byte seq_label.
+    Factory bootloader config/image validation/fallback may change selection.
+    """
+    if len(region) != 8192:
+        raise ValueError("invalid OTA region size")
+    states = {
+        0: "new",
+        1: "pending_verify",
+        2: "valid",
+        3: "invalid",
+        4: "aborted",
+        0xFFFFFFFF: "undefined",
+    }
+    records = []
+    for offset in (0, 4096):
+        seq = struct.unpack_from("<I", region, offset)[0]
+        state, crc = struct.unpack_from("<II", region, offset + 24)
+        crc_valid = crc == binascii.crc32(region[offset : offset + 4], 0xFFFFFFFF)
+        records.append(
+            {
+                "sequence": seq,
+                "state": states.get(state, "unknown"),
+                "crc_valid": crc_valid,
+                "eligible": seq != 0xFFFFFFFF and crc_valid and state in (0, 1, 2, 0xFFFFFFFF),
+            }
+        )
+
+    def select(rollback):
+        choices = [
+            i
+            for i, r in enumerate(records)
+            if r["eligible"] and not (rollback and r["state"] == "pending_verify")
+        ]
+        # IDF takes the numerically largest uint32 sequence; ties favor copy 0.
+        selected = max(choices, key=lambda i: records[i]["sequence"]) if choices else None
+        slot = (
+            f"ota_{((records[selected]['sequence'] - 1) & 0xFFFFFFFF) % 2}"
+            if selected is not None
+            else None
+        )
+        return selected, slot
+
+    selected, candidate = select(False)
+    _, rollback_candidate = select(True)
+    return {
+        "records": records,
+        "selected_record_without_rollback": selected,
+        "without_rollback_candidate": candidate,
+        "with_rollback_candidate": rollback_candidate,
+        "factory_bootloader_policy_verified": False,
+        "running_slot_verified": False,
+        "spare_slot_verified": False,
+        "evidence_scope": "HASH_VERIFIED_BACKUP_SNAPSHOT_ONLY",
+    }
 
 
 def verify_copies(path_a: Path, path_b: Path, expected_sha256: str) -> dict:
@@ -68,6 +130,7 @@ def verify_copies(path_a: Path, path_b: Path, expected_sha256: str) -> dict:
         "ota_partition_count": 2,
         "ota_slot_bytes": 5177344,
         "active_slot_identified": False,
+        "ota_metadata": inspect_otadata(images[0][0xD000:0xF000]),
         "independent_offsite_copy_verified": False,
         "restore_write_tested": False,
         "factory_official_app_compatibility_verified": False,

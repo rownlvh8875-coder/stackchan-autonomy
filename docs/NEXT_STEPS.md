@@ -1,5 +1,16 @@
 # Next steps
 
+## Windows 인수 (2026-11-20, PR #3 후속)
+
+기존 clean `feat/wakeword-josu`를696460c로 fast-forward한 뒤 Windows Mock
+지연 진단·검증한 백업의 sanitized OTA 분석·고정 모델 재패킹·휴면 owner loop와
+model/TLS 동시 peak admission을 추가했다. [인수 결과](validation/2026-11-20-windows-handoff.md)와
+[설치/복구 준비](K151_NATIVE_INSTALL_PREP.ko.md)를 따른다. 기존696460c CI는 **8/9**이며
+과거 check_timeout의 root cause는 아직 미확정이다. 새 진단은 제한 완화나 실패 재시도 없이
+큐/worker/SQLite/전달/loop 지연을 나눈다. 현재 PnP에서 과거COM3은Unknown이고
+present Espressif 장치는 없어 포트를 열지 않았다. 설치/실물 모델 추론/유료 API는 미실행이다.
+기존 한국어 보정 반복과 임의 문턱 변경은 하지 않는다.
+
 ## 현재 우선 작업 (2026-11-20)
 
 최신 사용자 보정은 **calibration_not_separable**로 확인됐다. 기존 문턱으로 호출과 비호출을 분리할 수 없어 동일 등록 반복을 중단한다. 사용자는 추천한 **기본 호출어 지원 검증 → 독립 GPT 대화 우선** 방향에 진행을 지시했다. 공식 Hi StackChan 모델과 고정 IDF6.1/ESP-SR2.4.7의 실제 ESP32-S3 컴파일/링크/패킹을 임시 사본에서 확인했다. 24k→16k 스트림 변환·기성 모델 어댑터·호출 이벤트와 기존 질문/STT/GPT/TTS Mock 연결을 구현했다. 다음은 모델 자산/배치·무결성·동적 메모리와 운영 bootstrap 및 복구 계획 준비다. [현재 결과와 다음 순서](K151_BUILTIN_WAKE.ko.md), [검증 증거](validation/2026-11-20-k151-builtin-wakenet-preflight.md)를 따른다. 실물 인식/자원/독립 대화는 미검증이다. 아래는 이전 진단 이력이다.

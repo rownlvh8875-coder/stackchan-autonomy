@@ -43,6 +43,13 @@ def built(tmp_path_factory):
 @pytest.mark.parametrize(
     "case",
     [
+        "loop_turn",
+        "loop_cloud_off",
+        "loop_stop",
+        "loop_revoke",
+        "loop_memory_lost",
+        "loop_no_memory",
+        "loop_no_model",
         "admission_valid",
         "admission_default_closed",
         "admission_gates",

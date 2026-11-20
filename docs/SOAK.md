@@ -5,6 +5,38 @@ MockDecisionProvider only. It uses private temporary coordination/memory SQLite
 files and ignores application env/.env, keys, URLs and operator database paths.
 It never connects a robot, opens a public port or calls a paid API.
 
+## Bounded delay evidence (2026-11-20)
+
+Start investigation with a finite Mock run, for example:
+
+```text
+uv run --frozen stackchan-soak --cycles 500 --warmup-cycles 40 --diagnostics --report .local/soak/diagnostic-new.json
+```
+
+`--diagnostics` adds numerical `timing_diagnostics`; default is null. CI enables
+it without changing the 2880 cycles, deadlines, lease or pass/failure criteria.
+It separates serial storage admission, shared executor wait, operation wall time
+and result delivery. SQLite connect/BEGIN/schema/body/COMMIT/close timings are
+nested inside the operation, so their totals must not be added to the outer span.
+Operation labels are fixed lease_acquire/check/renew/other. No SQL, arguments,
+paths, DB content or exception text is captured. Counts/totals/maxima have fixed
+keys; at most16 interruption records survive. The callback-based loop monitor
+does not add a live task. perf_counter gives high-resolution diagnostic timing
+on Windows Python3.12; safety deadlines still use the original monotonic clock.
+
+Interruptions identify the phase at cancellation, including queued/late workers.
+Pre-submission, post-delivery and expired-observation deadline checks are also
+recorded when delayed loop timers never canceled an await. A canceled atomic
+worker still owns its storage slot until completion and is drained before cleanup.
+An interruption is evidence, never authorization to accept late ownership.
+
+These are wall timings of APIs and scheduling boundaries, **not physical disk
+telemetry**. A long SQLite stage can include filesystem I/O, lock wait or OS
+descheduling. Loop lag is independently observed and cannot retrospectively
+identify the root cause of older CI logs lacking these measurements. The original
+696460c Windows3.12 PR failure remains unresolved; do not rerun until green or
+increase TTLs to mask it. [Windows evidence](validation/2026-11-20-windows-handoff.md).
+
 ```text
 # Accelerated24-hour virtual scenario: 2880 cycles ×30 virtual seconds.
 uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --report .local/soak/virtual-24h.json

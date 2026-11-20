@@ -2,6 +2,13 @@
 
 2026-11-20 / Asia/Seoul. 기본 호출어 지원 검증을 먼저 진행하라는 사용자의 최신 선택에 따른다. 기존 “조수” 도구와 자료는 보존하며, 현재 작업 우선순위는 **Hi StackChan → 로봇 자체 GPT 대화** 경로다.
 
+Windows 후속: [인수 검증](validation/2026-11-20-windows-handoff.md)에서 Mock timing
+진단과 휴면 NativeVoiceLoop를 연결했다. 모델 pack은 같은 SHA로 로컬 재생성했고,
+검증한 과거 OTA metadata의 선택 후보는ota_1이다. 현재 실행/안전한 spare 판정은
+아니다. [자산·동적 메모리·설치/복구 준비](K151_NATIVE_INSTALL_PREP.ko.md)를 우선한다.
+아래의 "아직 구현되지 않았다"는 이전 단계 이력이며, 현재 남은 것은 실제 장치
+자산 SHA 공급·메모리 측정 provider·하드웨어 activation/STOP/drain과 실물 검증이다.
+
 ## 지금 확인한 결과
 
 공식 StackChan 고정 소스는 ESP-IDF6.1 및 ESP-SR2.4.7의 `wn9l_histackchan_tts3`를 선택한다. 같은 버전으로 기존 K151 HOLD 앱의 임시 사본에 WakeNet API 참조와 모델 묶음을 추가해 **실제 ESP32-S3 컴파일/링크/모델 패킹 PASS**를 확인했다.

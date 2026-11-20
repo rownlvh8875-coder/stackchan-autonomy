@@ -3,6 +3,7 @@
 #include "native_wake_controller.hpp"
 #include "voice_turn_coordinator.hpp"
 #include "guarded_voice_speaker.hpp"
+#include "native_voice_loop.hpp"
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -115,6 +116,46 @@ struct Fixture {
 int main(int argc,char** argv) {
   assert(argc==2);const std::string_view test=argv[1];
   Fixture x;
+  if(test.starts_with("loop_")) {
+    bool measured_ready=true;
+    NativeVoiceLoop loop{x.session,x.ledger,*x.native,x.turn,x.audio,x.model,
+                         x.stop,x.consent,x.busy,[&]{return measured_ready;}};
+    if(test=="loop_no_memory")measured_ready=false;
+    if(test=="loop_no_model")x.model.available=false;
+    if(test=="loop_no_memory" || test=="loop_no_model") {
+      assert(loop.poll(1000,1800000000,x.models)==NativeVoiceStep::stopped);
+      assert(x.wake_mic.calls==0 && x.hardware.on==0 && x.api.calls==0);
+      measured_ready=true;x.model.available=true;
+      assert(loop.poll(1010,1800000000,x.models)==NativeVoiceStep::stopped);
+    } else {
+      if(test!="loop_cloud_off")x.session.cloud_enable(true);
+      assert(loop.poll(1000,1800000000,x.models)==NativeVoiceStep::listening);
+      if(test=="loop_stop" || test=="loop_revoke" || test=="loop_memory_lost") {
+        if(test=="loop_stop")x.stop=true;
+        if(test=="loop_revoke")x.consent=false;
+        if(test=="loop_memory_lost")measured_ready=false;
+        assert(loop.poll(1010,1800000000,x.models)==NativeVoiceStep::stopped);
+        assert(!x.hardware.mic && x.api.calls==0);
+      } else {
+        assert(loop.poll(1010,1800000000,x.models)==NativeVoiceStep::listening);
+        assert(loop.poll(1020,1800000000,x.models)==NativeVoiceStep::questioning);
+        assert(!x.native->active() && x.turn.active());
+        NativeVoiceStep result{};
+        for(int i=0;i<=28;++i)result=loop.poll(1040+uint64_t(i)*20,1800000000,x.models);
+        if(test=="loop_cloud_off") {
+          assert(result==NativeVoiceStep::stopped && x.api.calls==0);
+        } else {
+          assert(result==NativeVoiceStep::answered && x.api.calls==3 && x.sink.calls==1);
+          assert(loop.poll(1700,1800000000,x.models)==NativeVoiceStep::cooldown);
+          assert(!x.hardware.mic && !x.hardware.amp);
+          assert(loop.poll(2200,1800000000,x.models)==NativeVoiceStep::listening);
+          assert(x.hardware.mic && !x.hardware.amp && !x.turn.active());
+        }
+      }
+    }
+    assert(!x.ledger.has_profile());
+    std::cout<<"PASS "<<test<<'\n';return 0;
+  }
   if(test=="turn" || test=="cloud_off") {
     if(test=="turn")x.session.cloud_enable(true); // Fake requests only.
     const auto event=x.wake();

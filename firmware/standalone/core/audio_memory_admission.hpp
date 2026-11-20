@@ -72,4 +72,39 @@ inline MemoryPreflight check_audio_memory_preflight(
 // readings may override the hard K151 output/flash HOLD.
 inline constexpr bool kAudioMemoryReadinessCanAuthorizeInstall = false;
 
+// Observations must come from the local owner while the *actual model remains
+// allocated*. Its memory has already been subtracted from after_model free
+// bytes; do not substitute app size or subtract model flash bytes as RAM.
+// The combined watermark includes question, TLS/JSON and TTS allocations with
+// their actual allocator capabilities, not just the nominal raw PCM sizes.
+struct NativeAudioMemorySnapshot {
+  AudioMemorySnapshot after_model;
+  bool model_resident_during_measurement = false;
+  bool question_tls_tts_peak_measured = false;
+  size_t concurrent_internal_peak = 0;
+  size_t concurrent_psram_peak = 0;
+};
+enum class NativeMemoryPreflight {
+  model_unmeasured, combined_peak_unmeasured, invalid_peak, audio_budget_rejected,
+  internal_peak_insufficient, psram_peak_insufficient, diagnostic_ready,
+};
+inline NativeMemoryPreflight check_native_audio_memory_preflight(
+    const NativeAudioMemorySnapshot& e) {
+  if (!e.model_resident_during_measurement)
+    return NativeMemoryPreflight::model_unmeasured;
+  if (!e.question_tls_tts_peak_measured)
+    return NativeMemoryPreflight::combined_peak_unmeasured;
+  if (e.concurrent_internal_peak == 0 || e.concurrent_psram_peak < kRawConcurrentPcmBytes)
+    return NativeMemoryPreflight::invalid_peak;
+  if (check_audio_memory_preflight(e.after_model) !=
+      MemoryPreflight::diagnostic_budget_satisfied_not_install_approval)
+    return NativeMemoryPreflight::audio_budget_rejected;
+  // Subtraction after the baseline check avoids overflow with corrupt metrics.
+  if (e.concurrent_internal_peak > e.after_model.internal_free - 32 * 1024)
+    return NativeMemoryPreflight::internal_peak_insufficient;
+  if (e.concurrent_psram_peak > e.after_model.psram_free - 128 * 1024)
+    return NativeMemoryPreflight::psram_peak_insufficient;
+  return NativeMemoryPreflight::diagnostic_ready;
+}
+
 } // namespace stackchan::standalone

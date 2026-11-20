@@ -1010,3 +1010,16 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
 - 2026-11-20 (Asia/Seoul): User requested next builtin-wake integration. Added stateful24k→16k FIR, bounded NativeWakeController, shared VoiceDialogEntry, preserved legacy SWK1 wrapper. Local native hits admit one RAM-only exact Session epoch; durable budgets/read-back, cloud/owner/time/ordered paid-step guards stay closed by default. Added dormant ESP-SR2.4.7 K151 adapter with exact Hi StackChan model/shape/lifecycle validation; full public ABI doubles and real S3 compile/link, no SDK startup. Core RED31 then admission RED8→41PASS including legacy; SDK RED25→25PASS. Full root487PASS2SKIP, standalone338PASS43SKIP, selected NumPy PC105PASS3SKIP; pinned actual targetapp325792/staticDIRAM59030bytes. Link proof caught virtual-pointer GC; retained qualified thunk verified detect symbol. No device/actual audio/API/flash/NVS/OTA/motor/environment publish. [Evidence and remaining preparation](validation/2026-11-20-native-wake-voice-bridge.md). Prior1412660 Windows3.12 soak failed check_timeout and unchanged rerun failed renew_timeout; no relaxation or hidden substitution.
 
 - Same native bridge task: sole fresh review found4Important issues (epoch crossing, shared SDK ownership, terminal-context retention, optimized PCM wipe). Promoted partial-read provider mutation to Important by effect. Reproduced9FAIL, corrected callback clock fixtures against pre-fix source, then70focusedPASS. Added listening-epoch checks, immediate provider checks, atomic single SDK owner/refusal of external cache, immediate error release and volatile PCM wipes with actual -O2 destructor store proof. Final whole standalone381PASS7Windows-onlySKIP with optional NumPy/crypto, root487PASS2SKIP, Ruff326files and actual S3/symbol recheck PASS. Finalapp325792bytes/staticDIRAM59030. Upstream SDK whitespace preserved as deferred minor with exact project diff scope. Physical/runtime/network/install exclusions remain HOLD; no re-review.
+# 2026-11-20 Windows K151 handoff
+
+Same feat/wakeword-josu/PR#3, clean checkout fast-forwarded to696460c. Added bounded
+queue/SQLite/loop diagnostic evidence without changing safety limits; historical
+Windows check_timeout remains unexplained. Local160/500/final600 finite Mock runs
+passed, cloud0; root495PASS2SKIP and standalone402PASS5SKIP on Windows. Reverified
+existing A/B16MB SHA, sanitized historical OTA candidateota_1, regenerated pinned
+292607byte model pack. Added dormant single-owner loop and after-model/TLS memory
+admission. Single independent review's delivery-cancellation label corrected via
+RED→GREEN. PnP has no present Espressif; no port/reset/write/API/voice recording.
+Target build is separate CI evidence; app_main remains HOLD. Details and remaining
+installation/restore constraints: [handoff](validation/2026-11-20-windows-handoff.md),
+[preparation](K151_NATIVE_INSTALL_PREP.ko.md). New head CI is reported on PR#3.

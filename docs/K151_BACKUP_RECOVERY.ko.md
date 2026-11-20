@@ -1,5 +1,10 @@
 # K151 원본 백업·복구 준비 순서
 
+2026-11-20 Windows 후속에서 기존 A/B 길이·SHA·표 MD5를 로컬 재검증했다.
+과거 OTA 기록은seq1/seq2 VALID로ota_1 선택 후보이며 현재 실행 슬롯/빈 여분을
+입증하지 않는다. 최신 독립 경로의 [설치 전 offset·자산·복구 명령 초안](K151_NATIVE_INSTALL_PREP.ko.md)을
+함께 따른다. 기존 백업을 장치에서 다시 읽거나 쓰지 않았다.
+
 대상: 현재 출고 펌웨어와 StackChan World 앱으로 GPT 음성 대화를 사용 중인 K151,
 Windows cmd, 기존 폴더 `%USERPROFILE%\stackchan-soak-24h`.
 공식 자료 확인: 2026-11-17 UTC, USB 연결 후속 확인:2026-11-18(한국 시간).

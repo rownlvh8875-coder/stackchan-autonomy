@@ -69,7 +69,7 @@ jobs:
         run: |
           uv run --frozen --with cryptography==46.0.4 python -m pytest -q firmware/standalone/tests/test_scps_reference.py firmware/standalone/tests/test_scps_usb_serial.py
       - name: Accelerated virtual 24-hour stability scenario
-        run: uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --report .local/ci/soak.json
+        run: uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --diagnostics --report .local/ci/soak.json
       - name: Build distributions
         run: uv build --no-sources --out-dir .local/ci/dist
       - name: Verify independent wheel installation (Linux, including Opus)
