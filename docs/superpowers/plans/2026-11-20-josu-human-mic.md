@@ -44,8 +44,8 @@ Interfaces: 명시 장치 선택·기대 identity, 3/5/10 고정 보정 후 5/10
 
 ### Task 4: 통합 검증과 PR #3
 
-- [ ] Ruff check/format, 전체 Python, C++20 standalone, PC NumPy, wheel 검증.
-- [ ] CI에 Linux/Windows PC tests 추가; 기존 ESP32-S3 compile-only 유지.
-- [ ] 작업/검증 문서에 실제 결과·미검증·설치 HOLD·사용자 다음 명령 기록.
-- [ ] 단일 fresh whole-branch review; Important/Critical만 회귀 RED→GREEN 한 번 수정.
+- [x] Ruff check/format, 전체 Python, C++20 standalone, PC NumPy, wheel 검증.
+- [x] CI에 Linux/Windows PC tests 추가; 기존 ESP32-S3 compile-only 유지.
+- [x] 작업/검증 문서에 실제 결과·미검증·설치 HOLD·사용자 다음 명령 기록.
+- [x] 단일 fresh whole-branch review; Important/Critical만 회귀 RED→GREEN 한 번 수정.
 - [ ] `feat/wakeword-josu`에 커밋/일반 push, PR #3 내용 갱신, 정확한 head CI 확인.

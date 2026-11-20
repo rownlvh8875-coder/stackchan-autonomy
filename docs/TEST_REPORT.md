@@ -290,4 +290,4 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 
 ## 2026-11-20 “조수” PC 실제 목소리 진단·등록 경로
 
-[이번 검증 상세](validation/2026-11-20-josu-human-mic-diagnostics.md): 기존 Python487PASS2SKIP, standalone261PASS7SKIP, PC진단/등록57PASS3Windows-onlySKIP, Ruff 및 독립 wheel 설치 검증 PASS. 새 Windows/Linux/ESP32 CI는 정확한 head로 후속 기록한다. 실제 사용자 발화와 K151 마이크는 미검증이고, synth재생 시험을 독립 사람 인식률로 계산하지 않았다. raw음성 저장/실제API/기기쓰기/환경게시는 수행하지 않았다.
+[이번 검증 상세](validation/2026-11-20-josu-human-mic-diagnostics.md): 기존 Python487PASS2SKIP, standalone271PASS7SKIP, PC진단/등록65PASS3Windows-onlySKIP, Ruff 및 독립 wheel 설치 검증 PASS. 새 Windows/Linux/ESP32 CI는 정확한 head로 후속 기록한다. 실제 사용자 발화와 K151 마이크는 미검증이고, synth재생 시험을 독립 사람 인식률로 계산하지 않았다. raw음성 저장/실제API/기기쓰기/환경게시는 수행하지 않았다.

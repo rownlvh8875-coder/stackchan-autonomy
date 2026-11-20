@@ -124,3 +124,68 @@ def test_device_listing_failure_is_private_and_does_not_start_recording(audio, m
     monkeypatch.setitem(sys.modules, "sounddevice", Devices())
     with pytest.raises(audio.AudioError, match="^input_device_unavailable$"):
         audio.select_microphone(choose=True)
+
+
+def test_device_changed_while_selection_prompt_is_open_is_rejected(audio, monkeypatch):
+    import sys
+
+    class Devices:
+        name = "Displayed Microphone"
+
+        def query_devices(self, index=None, kind=None):
+            desc = {
+                "name": self.name,
+                "hostapi": 0,
+                "max_input_channels": 1,
+                "default_samplerate": 48000.0,
+            }
+            return [desc] if index is None else desc
+
+        def query_hostapis(self, index):
+            return {"name": "WASAPI"}
+
+    sd = Devices()
+    monkeypatch.setitem(sys.modules, "sounddevice", sd)
+
+    def selected(_):
+        sd.name = "Replacement Microphone"
+        return "0"
+
+    monkeypatch.setattr("builtins.input", selected)
+    with pytest.raises(audio.AudioError, match="^input_device_changed$"):
+        audio.select_microphone(choose=True)
+
+
+def test_default_alias_and_ambiguous_descriptors_are_not_silently_selected(audio, monkeypatch):
+    import sys
+
+    class Devices:
+        def query_devices(self, index=None, kind=None):
+            desc = {
+                "name": "Default audio device",
+                "hostapi": 0,
+                "max_input_channels": 1,
+                "default_samplerate": 48000.0,
+            }
+            return [desc, desc.copy()] if index is None else desc
+
+        def query_hostapis(self, index):
+            return {"name": "Windows MME"}
+
+    monkeypatch.setitem(sys.modules, "sounddevice", Devices())
+    monkeypatch.setattr("builtins.input", lambda _: "0")
+    with pytest.raises(audio.AudioError):
+        audio.select_microphone(choose=True)
+
+
+def test_partial_final_block_activity_is_not_silently_discarded(audio, np):
+    signal = np.zeros(120720, dtype=np.int16)  # 2.515s, not a whole20ms block.
+    signal[24000:48000] = np.rint(4000 * np.sin(2 * np.pi * 800 * np.arange(24000) / 48000)).astype(
+        np.int16
+    )
+    signal[-700:] = np.rint(4000 * np.sin(2 * np.pi * 800 * np.arange(700) / 48000)).astype(
+        np.int16
+    )
+    _, d = audio.analyze_48k(signal, np)
+    assert d["capture_edge_activity"] and "CAPTURE_EDGE_ACTIVITY" in d["quality_issues"]
+    assert d["activity_end_ms"] == 2515

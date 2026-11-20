@@ -47,3 +47,26 @@
 - 품질 문제가 있으면 세션 종료: 묵시적 재시도/평가 골라내기를 피하나 전체 새 세션이 필요하다.
 
 현재 상태는 **PC에서 실제 사용자가 검증할 수 있는 진단·등록 코드 준비**, **실제 인식 성공/기기 적용 승인 아님**이다. `main` 병합·기기 설치·환경 게시를 하지 않는다.
+
+## 최종 독립 검토와 수정
+
+별도 fresh reviewer(`josu_human_final_review`, gpt-6.2-astra)가 e8ee330..ea582cb를 읽고 Critical0/Important4/Minor2를 보고했다. Important4를 모두 수락했다.
+
+1. 목록과 입력 사이 장치 교체: 표시 descriptor snapshot 후 선택/녹음 전후 재확인. 별칭·구분 불가 중복 항목 거부. 원래 코드에서 선택 창 중 A→B 교체 회귀 FAIL 후 수정 PASS. 동일 속성의 물리 기기 자체는 이 API로 완전 식별할 수 없어 실제 hot-plug 검증은 남는다.
+2. 마지막 불완전20ms 활동 누락: 2.515초+끝700샘플 톤 회귀 FAIL 후 actual sample RMS/끝시점 계산 PASS. 기존 aligned 합성 판정 유지.
+3. 무발화 중복 평가: 같은 quiet 결과3개를 신선한 평가로 집계하던 회귀 FAIL 후 모든 원본의 private in-memory digest 중복 거부 PASS. 조용한 실제 캡처도 digest를 내며 콘솔에 출력하지 않는 CLI 경계 테스트를 추가했다.
+4. 취소/경로 경쟁 중 프로필 파일: 동기화 KeyboardInterrupt 및 create 직전 부모 교체 회귀 FAIL 후 bound directory/동기화된 임시 profile/배타적 hard-link 게시·중단 정리 PASS. Windows 핸들 동작은 새 Windows CI에서 확인한다. 원본 오디오 파일은 생성하지 않는다.
+
+수정 후 PC검사 **65PASS3Windows-onlySKIP**, Ruff313filesPASS. Critical/Important는 단일 수정 패스로 처리하고 두 번째 검토를 요청하지 않았다. 전체 suite/새 head CI는 아래 최종 증거에 기록한다.
+
+유보한 Minor2건: trial prompt의 EOF가 traceback(설치 경로)을 출력할 수 있음; 내부 `--features/--calibrate`를 수동 터미널에 직접 실행하면 바이너리를 출력할 수 있음. 제공한 Python pipe/일반 실행기에서는 내부 바이트를 터미널에 내보내지 않는다. 이 두 항목은 이번 수정 패스에 포함하지 않았다.
+
+검토자가 판단하지 않은 실제 노트북 인식·물리 hot-plug·음향 보정·K151 행동은 미검증으로 유지한다(현장 확인 전 배포/설치 주장 불가). Native Windows와 ESP CI는 정확한 새 head 실행을 직접 확인한다(실패하면 추가 호환 수정 필요).
+
+## 수정 후 최종 로컬 증거
+
+- `uv run --frozen pytest -q -ra`: **487PASS2SKIP**,68.27초.
+- `uv run --frozen --with numpy==2.3.5 pytest -q -ra firmware/standalone/tests`: **271PASS7SKIP**,123.25초. SKIP 사유는 위와 같다.
+- PC3파일: **65PASS3SKIP**,6.05초. Linux에서는 실제 Windows CMD를 실행하지 않았다.
+- Ruff check PASS / format313filesPASS / git diff check PASS.
+- 수정 후 wheel/sdist 재빌드 및 독립 wheel Opus/Mock MCP·GPT·재연결·observer PASS.

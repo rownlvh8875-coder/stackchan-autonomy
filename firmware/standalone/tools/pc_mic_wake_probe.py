@@ -6,6 +6,7 @@ Run with an explicit --listen; otherwise only process an existing WAV fixture.
 """
 
 import argparse
+import hashlib
 import io
 import json
 import subprocess
@@ -61,7 +62,7 @@ def resample_and_trim_48k(samples, np):
 
 
 def record_laptop_mic(
-    device: int, seconds: float, *, expected_identity=None, diagnostics=None
+    device: int, seconds: float, *, expected_identity=None, diagnostics=None, fingerprint_out=None
 ) -> tuple[bytes | None, int]:
     try:
         import numpy as np
@@ -101,6 +102,10 @@ def record_laptop_mic(
 
     try:
         require_device(sd, device, identity)
+        if fingerprint_out is not None:
+            fingerprint_out["digest"] = hashlib.sha256(
+                samples.astype("<i2", copy=False).tobytes()
+            ).digest()
         trimmed, details = analyze_48k(samples, np)
         if diagnostics is not None:
             diagnostics.update(details)

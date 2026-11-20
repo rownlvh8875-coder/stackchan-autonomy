@@ -8,14 +8,13 @@ import argparse
 import hashlib
 import json
 import math
-import os
-import stat
 import time
 import tracemalloc
 from pathlib import Path
 
 from pc_mic_audio import AudioError, select_microphone
 from pc_mic_profile import EnrollmentError, helper, score_wav, validate_profile
+from pc_mic_storage import output_target, save_private_profile
 from pc_mic_wake_probe import ProbeError, record_laptop_mic, safe_file
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -39,13 +38,13 @@ class PrivateParser(argparse.ArgumentParser):
 
 
 def run_session(probe, baseline, capture):
-    """capture(stage,label,index,prompt) supplies one newly captured WAV and quality.
+    """capture(stage,label,index,prompt) supplies one newly captured WAV, quality, and private raw digest.
 
     Labels are operator supplied. Hash/feature duplicates are rejected, but no
     algorithm here proves which words were spoken or that voices are independent.
     """
     validate_profile(baseline)
-    seen_audio, seen_features, training, durations = set(), set(), [], []
+    seen_captures, seen_audio, seen_features, training, durations = set(), set(), set(), [], []
     personal = None
 
     def counts():
@@ -78,11 +77,16 @@ def run_session(probe, baseline, capture):
                 prompt = f"조수 ({style})"
             else:
                 prompt = NEGATIVES[index] if label == "nonwake" else "말하지 않고 생활 소음만"
-            wav, diagnostic = capture(stage, label, index, prompt)
+            wav, diagnostic, capture_digest = capture(stage, label, index, prompt)
             issues = diagnostic.get("quality_issues", [])
             quiet = label == "quiet" and wav is None and issues == ["NO_SPEECH_ACTIVITY"]
             if not quiet and (wav is None or issues):
                 raise EnrollmentError("capture_quality_rejected")
+            if not isinstance(capture_digest, bytes) or len(capture_digest) != 32:
+                raise EnrollmentError("missing_private_capture_digest")
+            if capture_digest in seen_captures:
+                raise EnrollmentError("duplicate_capture")
+            seen_captures.add(capture_digest)
             started = time.perf_counter()
             if wav is not None:
                 digest = hashlib.sha256(wav).digest()
@@ -135,45 +139,6 @@ def run_session(probe, baseline, capture):
     return (personal if passed else None), report
 
 
-def output_target(path, root=ROOT):
-    path = Path(path).absolute()
-    private = Path(root).resolve() / ".local"
-    # Reject symlinks/junctions, including parents, and avoid existing file overwrite.
-    for part in [path, *path.parents]:
-        if part.exists() or part.is_symlink():
-            metadata = part.lstat()
-            if part.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x400:
-                raise EnrollmentError("private_output_required")
-    if not path.resolve().is_relative_to(private) or path.suffix != ".swk1" or path.exists():
-        raise EnrollmentError("new_private_output_required")
-    return path
-
-
-def save_private_profile(path, profile, root=ROOT):
-    validate_profile(profile)
-    path = output_target(path, root)
-    created = False
-    try:
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        output_target(path, root)
-        descriptor = os.open(
-            path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR
-        )
-        created = True
-        with os.fdopen(descriptor, "wb") as target:
-            if target.write(profile) != len(profile):
-                raise OSError("short_write")
-            target.flush()
-            os.fsync(target.fileno())
-    except OSError as exc:
-        if created:
-            try:
-                path.unlink()
-            except OSError:
-                raise EnrollmentError("private_profile_cleanup_failed_do_not_use_file") from None
-        raise EnrollmentError("private_profile_write_failed") from exc
-
-
 def main(argv=None):
     parser = PrivateParser(description=__doc__)
     parser.add_argument(
@@ -209,16 +174,20 @@ def main(argv=None):
 
         def capture(stage, label, index, prompt):
             input(f"{stage} {label} {index + 1}: {prompt} — Enter: ")
-            diagnostics = {}
+            diagnostics, private = {}, {}
             wav, _ = record_laptop_mic(
-                device, args.seconds, expected_identity=identity, diagnostics=diagnostics
+                device,
+                args.seconds,
+                expected_identity=identity,
+                diagnostics=diagnostics,
+                fingerprint_out=private,
             )
             print(
                 json.dumps(
                     {"stage": stage, "trial": index + 1, "quality": diagnostics}, ensure_ascii=False
                 )
             )
-            return wav, diagnostics
+            return wav, diagnostics, private["digest"]
 
         tracemalloc.start()
         try:

@@ -3,6 +3,7 @@
 Transforms are regression inputs, never counted as independent human evidence.
 """
 
+import hashlib
 import importlib
 import io
 import json
@@ -40,7 +41,10 @@ def synthetic_capture(enroll):
         nonlocal counter
         counter += 1
         if label == "quiet":
-            return None, {"quality_issues": ["NO_SPEECH_ACTIVITY"], "capture_seconds": 2.5}
+            raw = np.random.default_rng(counter).integers(-2, 3, 120000, dtype=np.int16)
+            trimmed, diagnostic = analyze_48k(raw, np)
+            assert trimmed is None
+            return None, diagnostic, hashlib.sha256(raw.astype("<i2").tobytes()).digest()
         name = (
             "evaluation_wake_01.wav"
             if label == "wake"
@@ -64,7 +68,7 @@ def synthetic_capture(enroll):
             target.setsampwidth(2)
             target.setframerate(24000)
             target.writeframes(trimmed.astype("<i2").tobytes())
-        return out.getvalue(), diag
+        return out.getvalue(), diag, hashlib.sha256(mic.astype("<i2").tobytes()).digest()
 
     return capture
 
@@ -100,7 +104,7 @@ def test_registration_freezes_before_separate_evaluation_and_baseline_comparison
 def test_duplicate_recording_is_not_an_independent_sample(enroll, probe_exe):
     capture = synthetic_capture(enroll)
     sample = capture("enrollment", "wake", 0, "")
-    with pytest.raises(enroll.EnrollmentError, match="duplicate_recording"):
+    with pytest.raises(enroll.EnrollmentError, match="duplicate_capture"):
         enroll.run_session(
             probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), lambda *args: sample
         )
@@ -112,7 +116,7 @@ def test_registration_rejects_bad_quality_before_feature_extraction(enroll, prob
         enroll.run_session(
             probe_exe,
             (FIXTURE / "josu-20261120.swk1").read_bytes(),
-            lambda *args: (b"PRIVATE_AUDIO", {"quality_issues": [issue]}),
+            lambda *args: (b"PRIVATE_AUDIO", {"quality_issues": [issue]}, bytes(32)),
         )
 
 
@@ -212,7 +216,165 @@ def test_failed_profile_sync_removes_the_new_file(enroll, tmp_path, monkeypatch)
     def failed_sync(_):
         raise OSError("PRIVATE_DISK_DETAILS")
 
-    monkeypatch.setattr(enroll.os, "fsync", failed_sync)
+    monkeypatch.setattr("os.fsync", failed_sync)
     with pytest.raises(enroll.EnrollmentError, match="^private_profile_write_failed$"):
         enroll.save_private_profile(target, (FIXTURE / "josu-20261120.swk1").read_bytes(), root)
+    assert not target.exists()
+
+
+def test_interrupted_profile_sync_leaves_no_final_or_staging_file(enroll, tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = root / ".local" / "owner.swk1"
+
+    def interrupted(_):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("os.fsync", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        enroll.save_private_profile(target, (FIXTURE / "josu-20261120.swk1").read_bytes(), root)
+    assert not target.exists()
+    assert list((root / ".local").iterdir()) == []
+
+
+def test_parent_replacement_cannot_redirect_profile_publication(enroll, tmp_path, monkeypatch):
+    import os
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = root / ".local" / "josu" / "owner.swk1"
+    original_sync = os.fsync
+
+    def swap_parent(fd):
+        original_sync(fd)
+        parent = target.parent
+        try:
+            parent.rename(parent.with_name("original"))
+            parent.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            return  # Windows directory handle must block rename.
+
+    monkeypatch.setattr("os.fsync", swap_parent)
+    try:
+        enroll.save_private_profile(target, (FIXTURE / "josu-20261120.swk1").read_bytes(), root)
+    except enroll.EnrollmentError:
+        pass  # Fail closed is also acceptable.
+    assert list(outside.iterdir()) == []
+
+
+def test_parent_replacement_before_create_does_not_write_outside(enroll, tmp_path, monkeypatch):
+    import os
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = root / ".local" / "josu" / "owner.swk1"
+    original_open = os.open
+    swapped = False
+
+    def intercepted(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if flags & os.O_CREAT and not swapped:
+            swapped = True
+            try:
+                target.parent.rename(target.parent.with_name("original"))
+                target.parent.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                pass  # Windows verified parent handles prohibit rename.
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr("os.open", intercepted)
+    try:
+        enroll.save_private_profile(target, (FIXTURE / "josu-20261120.swk1").read_bytes(), root)
+    except enroll.EnrollmentError:
+        pass
+    assert swapped and list(outside.iterdir()) == []
+
+
+def test_duplicate_quiet_capture_cannot_count_as_fresh_windows(enroll, probe_exe):
+    source = synthetic_capture(enroll)
+    first_quiet = None
+
+    def capture(stage, label, index, prompt):
+        nonlocal first_quiet
+        trial = source(stage, label, index, prompt)
+        if label == "quiet":
+            if first_quiet is None:
+                first_quiet = trial
+            return first_quiet
+        return trial
+
+    with pytest.raises(enroll.EnrollmentError, match="^duplicate_capture$"):
+        enroll.run_session(probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), capture)
+
+
+def test_frontend_passes_private_raw_digest_without_logging_it(
+    enroll, probe_exe, monkeypatch, capsys
+):
+    import sys
+
+    np = pytest.importorskip("numpy")
+
+    class AudioDevice:
+        descriptor = {
+            "name": "Specific notebook microphone",
+            "hostapi": 0,
+            "max_input_channels": 1,
+            "max_output_channels": 0,
+            "default_low_input_latency": 0.01,
+            "default_high_input_latency": 0.1,
+            "default_low_output_latency": 0.0,
+            "default_high_output_latency": 0.0,
+            "default_samplerate": 48000.0,
+        }
+
+        def query_devices(self, index=None, kind=None):
+            return [self.descriptor] if index is None else self.descriptor
+
+        def query_hostapis(self, index):
+            return {
+                "name": "Windows WASAPI",
+                "devices": [0],
+                "default_input_device": 0,
+                "default_output_device": -1,
+            }
+
+        def check_input_settings(self, **kwargs):
+            assert kwargs == {"device": 0, "channels": 1, "samplerate": 48000, "dtype": "int16"}
+
+        def rec(self, frames, **kwargs):
+            assert frames == 120000 and kwargs == {
+                "samplerate": 48000,
+                "channels": 1,
+                "device": 0,
+                "dtype": "int16",
+                "blocking": True,
+            }
+            return np.zeros((frames, 1), dtype=np.int16)
+
+        def get_status(self):
+            return False
+
+    monkeypatch.setitem(sys.modules, "sounddevice", AudioDevice())
+    monkeypatch.setattr("builtins.input", lambda _: "")
+
+    def inspect_capture(probe, baseline, capture):
+        wav, diagnostic, digest = capture("evaluation", "quiet", 0, "quiet")
+        assert wav is None and diagnostic["quality_issues"] == ["NO_SPEECH_ACTIVITY"]
+        assert digest == hashlib.sha256(bytes(240000)).digest()
+        return None, {"status": "CAPTURE_BOUNDARY_EXERCISED"}
+
+    monkeypatch.setattr(enroll, "run_session", inspect_capture)
+    target = enroll.ROOT / ".local" / "capture-boundary-profile.swk1"
+    assert (
+        enroll.main(
+            ["--enroll", "--probe-exe", str(probe_exe), "--device", "0", "--output", str(target)]
+        )
+        == 3
+    )
+    output = capsys.readouterr().out
+    assert hashlib.sha256(bytes(240000)).hexdigest() not in output
     assert not target.exists()
