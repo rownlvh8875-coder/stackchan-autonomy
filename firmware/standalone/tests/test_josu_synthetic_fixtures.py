@@ -19,6 +19,9 @@ def test_josu_fixture_integrity_and_structural_screen(monkeypatch):
     from scfg_offline import validate_profile
     from wake_corpus_audit import inspect_corpus
 
+    # Hashed JSON must remain raw-LF on every OS, including Windows checkout.
+    manifest_bytes = (FIXTURE / "synthetic-sapi.wake-corpus.json").read_bytes()
+    assert b"\r\n" not in manifest_bytes
     lines = (FIXTURE / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 26
     listed = set()
