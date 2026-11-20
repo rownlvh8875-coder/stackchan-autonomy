@@ -21,7 +21,14 @@ def calibration_error(result):
     if result.returncode != 2 or result.stdout or not 0 < len(result.stderr) <= 1024:
         return None
     try:
-        report = json.loads(result.stderr)
+
+        def distinct_fields(pairs):
+            report = dict(pairs)
+            if len(report) != len(pairs):
+                raise ValueError
+            return report
+
+        report = json.loads(result.stderr, object_pairs_hook=distinct_fields)
         if set(report) != {
             "reason",
             "worst_wake_trial",

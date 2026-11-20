@@ -118,6 +118,41 @@ def test_untrusted_helper_diagnostics_remain_private(enroll, probe_exe, monkeypa
         enroll.helper(probe_exe, mode, bytes(832 * 18))
 
 
+@pytest.mark.parametrize(
+    ("field", "earlier"),
+    [
+        ("reason", "PRIVATE_UNTRUSTED"),
+        ("worst_wake_trial", 0),
+        ("nearest_nonwake_trial", 11),
+        ("worst_wake_distance_q8", float("nan")),
+        ("nearest_nonwake_distance_q8", -1),
+    ],
+)
+def test_repeated_diagnostic_fields_cannot_promote_ambiguous_failure(
+    enroll, probe_exe, monkeypatch, field, earlier
+):
+    import subprocess
+
+    report = {
+        "reason": "calibration_not_separable",
+        "worst_wake_trial": 5,
+        "nearest_nonwake_trial": 1,
+        "worst_wake_distance_q8": 1280,
+        "nearest_nonwake_distance_q8": 256,
+    }
+    # A later valid value must not erase an earlier invalid/private one.
+    stderr = (
+        "{" + json.dumps(field) + ":" + json.dumps(earlier) + "," + json.dumps(report)[1:]
+    ).encode()
+
+    def response(args, **kwargs):
+        return subprocess.CompletedProcess(args, 2, b"", stderr)
+
+    monkeypatch.setattr(subprocess, "run", response)
+    with pytest.raises(enroll.EnrollmentError, match="^local_helper_rejected$"):
+        enroll.helper(probe_exe, "--calibrate", bytes(832 * 18))
+
+
 def test_cli_exposes_validated_calibration_failure_without_evaluation_or_profile(
     enroll, probe_exe, monkeypatch, capsys
 ):

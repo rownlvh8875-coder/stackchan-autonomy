@@ -29,5 +29,5 @@ Interfaces: 기존 --calibrate 성공 bytes 보존. 실패 stderr JSON 고정 re
 - [x] Run: uv run --frozen --with numpy==2.3.5 pytest -q firmware/standalone/tests/test_pc_mic_wake_probe.py firmware/standalone/tests/test_pc_mic_enroll.py; Expected: 새 진단 assertions FAIL, 기존 회귀 PASS.
 - [x] 최소 구현 후 같은 명령 GREEN. 거부 조건/음향 모델은 변경하지 않음.
 - [x] Ruff/전체 Python/standalone+NumPy 검증 및 docs 기록. Expected: 실패0; platform 의존 SKIP 구분.
-- [ ] 단일 fresh whole-change reviewer, Important/Critical만 RED->GREEN 단일 수정 패스. 새 Minor는 ledger/final에 기록.
+- [x] 단일 fresh whole-change reviewer, Important/Critical만 RED->GREEN 단일 수정 패스. 새 Minor는 ledger/final에 기록.
 - [ ] 커밋/일반 push/기존PR3 갱신, 정확한 head의 Linux/Windows/ESP compile-only CI 검증. 원격 결과는 PR에 기록.

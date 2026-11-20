@@ -299,3 +299,5 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 ## 2026-11-20 조수 보정 거부 진단
 
 [검증 상세](validation/2026-11-20-josu-calibration-diagnostics.md): root487PASS2SKIP / standalone306PASS7SKIP / PC100PASS3Windows-onlySKIP / Ruff318files PASS. 실제 C++의 호출·비호출 분리 거부와 문턱 표현 범위 거부를 구분하고 검증한 항목 번호/거리만 CLI로 전달한다. 원본/특징/과거 실행 원인은 복구하지 못하며 이 결과가 실제 목소리 인식 성공을 뜻하지 않는다. 정확한 새 head의 nativeWindows/Linux/ESP compile-only CI는 [PR#3](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3)에 기록한다.
+
+단일 독립 검토 뒤 중복 JSON key 거부5개 RED→GREEN 및 실패 연산/향후 확정 진단 문구를 수정했다. 최종 로컬 root487PASS2SKIP / standalone311PASS7SKIP / PC105PASS3Windows-onlySKIP / Ruff318files PASS. 검토 Minor2건과 판단/비용은 해당 검증 기록에 보존했다.
