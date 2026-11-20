@@ -10,7 +10,7 @@ bool K151WakeNetPort::prepare(bool owner,bool verified) {
   return prepare_verified(owner,verified);
 }
 bool K151WakeNetPort::prepare_verified(bool owner,bool verified,
-    const std::atomic_bool* live_owner,const std::atomic_bool* stop) {
+    const std::atomic_bool* live_owner,const std::atomic_bool* stop,const void* embedded) {
   const auto allowed=[&] {
     return owner && verified && (!live_owner || live_owner->load()) &&
            (!stop || !stop->load());
@@ -22,7 +22,8 @@ bool K151WakeNetPort::prepare_verified(bool owner,bool verified,
   // The SDK returns one process-global cached list, not a per-init allocation.
   // Refuse a list initialized by another SDK consumer rather than freeing it.
   if(get_static_srmodels() || !allowed()) {close();return false;}
-  models_=esp_srmodel_init("model");
+  embedded_=embedded!=nullptr;
+  models_=embedded_?srmodel_load(embedded):esp_srmodel_init("model");
   if(!allowed() || !models_ || models_->num!=1) {close();return false;}
   const char* name=esp_srmodel_filter(models_,ESP_WN_PREFIX,"histackchan_tts3");
   if(!allowed() || !name || std::strcmp(name,"wn9l_histackchan_tts3")!=0) {close();return false;}
@@ -62,8 +63,12 @@ bool K151WakeNetPort::reset() {
 void K151WakeNetPort::close() {
   if(data_)iface_->destroy(data_);
   data_=nullptr;iface_=nullptr;
-  if(models_)esp_srmodel_deinit(models_);
+  if(models_) {
+    if(embedded_)srmodel_host_deinit(models_);
+    else esp_srmodel_deinit(models_);
+  }
   models_=nullptr;format_={};
+  embedded_=false;
   if(owns_loader_)loader_owner.clear(std::memory_order_release);
   owns_loader_=false;
 }

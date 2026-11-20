@@ -1,5 +1,13 @@
 # Next steps
 
+## 2026-11-21 후속: 무음 model 자원 진단 준비
+
+출고 얼굴/메뉴 복귀를 사용자가 확인했다. 다음 준비물은 기존 모델 어댑터와
+검증된 embedded pack을 재사용하는 [별도 무음 자원 진단 앱](K151_RESOURCE_BENCH.ko.md)이다.
+파티션 표/NVS/별도 model 영역을 바꾸지 않는 앱 단독 교체 후보이며 설치는 미승인이다.
+실제 model·동시 PCM 배치·합성 detect만 측정하고 TLS/운영 admission은false로 남긴다.
+기존 HOLD 앱은 여전히 모델/마이크/대화를 시작하지 않는다.
+
 ## Windows 인수 (2026-11-20, PR #3 후속)
 
 기존 clean `feat/wakeword-josu`를696460c로 fast-forward한 뒤 Windows Mock

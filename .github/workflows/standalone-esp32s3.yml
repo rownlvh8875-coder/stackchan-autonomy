@@ -42,6 +42,22 @@ jobs:
             --bin firmware/standalone/esp_app/build/stackchan_standalone_hold.bin \
             --idf-head "$IDF_SHA" \
             --out firmware/standalone/esp_app/validation-manifest.json
+      - name: Build separate silent resource bench (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          python3 firmware/standalone/tools/prepare_wakenet_assets.py \
+            --source firmware/standalone/esp_app/managed_components/espressif__esp-sr/model/wakenet_model/wn9l_histackchan_tts3 \
+            --out firmware/standalone/resource_bench/main/srmodels.bin
+          idf.py -C firmware/standalone/resource_bench set-target esp32s3
+          idf.py -C firmware/standalone/resource_bench build
+          python3 firmware/standalone/tools/check_resource_bench.py \
+            --elf firmware/standalone/resource_bench/build/k151_resource_bench.elf \
+            --bin firmware/standalone/resource_bench/build/k151_resource_bench.bin \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" \
+            --source-head "$(git rev-parse HEAD)" \
+            --out firmware/standalone/resource_bench/validation-manifest.json
       - name: Publish SHA/size proof only (NO firmware binary)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -50,3 +66,14 @@ jobs:
           path: firmware/standalone/esp_app/validation-manifest.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Publish generic bench image for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-silent-resource-bench-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/resource_bench/build/k151_resource_bench.bin
+            firmware/standalone/resource_bench/build/k151_resource_bench.elf
+            firmware/standalone/resource_bench/validation-manifest.json
+            firmware/standalone/tests/sdk_esp_sr_2_4_7/LICENSE
+          if-no-files-found: error
+          retention-days: 14

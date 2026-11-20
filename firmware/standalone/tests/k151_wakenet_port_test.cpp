@@ -27,11 +27,13 @@ int detects=0,cleans=0,ret=0;
 srmodel_list_t* shared=nullptr;
 std::atomic_bool owner{true},stop{false};
 int finds=0,hashes=0;
+std::array<uint8_t,292607> embedded{};
 esp_partition_t partition{};
 model_iface_data_t* create(const void* n,det_mode_t mode) {
   events+='c';assert(std::strcmp(static_cast<const char*>(n),name)==0);
   assert(mode==DET_MODE_90);
   if(scenario=="local_revoke_create")owner=false;
+  if(scenario=="embedded_stop_create")stop=true;
   return scenario=="create_failure"?nullptr:&data;
 }
 extern "C" const esp_partition_t* esp_partition_find_first(
@@ -68,6 +70,26 @@ wakenet_state_t detect(model_iface_data_t* d,int16_t* p) {
 void clean(model_iface_data_t* d){assert(d==&data);++cleans;}
 void destroy(model_iface_data_t* d){assert(d==&data);events+='d';}
 }
+extern "C" bool esp_ptr_external_ram(const void*) {return scenario=="embedded_psram";}
+extern "C" bool esp_ptr_in_drom(const void*) {return scenario!="embedded_mutable";}
+extern "C" int mbedtls_sha256(const unsigned char* p,size_t n,unsigned char* hash,int small) {
+  assert(p==embedded.data() && n==embedded.size() && small==0);++hashes;
+  constexpr std::array<uint8_t,32> expected{
+    0x02,0x55,0x85,0x5e,0x56,0xbf,0x72,0xd1,0xe0,0x72,0xd2,0xe0,0xcb,0xee,0x4f,0xb3,
+    0xce,0x1a,0xc2,0xc4,0x8f,0x7f,0xee,0x6c,0x8c,0xd5,0x91,0xf8,0x3e,0x59,0xed,0x95};
+  std::copy(expected.begin(),expected.end(),hash);
+  if(scenario=="embedded_bad_hash")hash[31]^=1;
+  if(scenario=="embedded_revoke_hash")owner=false;
+  return scenario=="embedded_hash_error"?-1:0;
+}
+extern "C" srmodel_list_t* srmodel_load(const void* p) {
+  assert(p==embedded.data());events+='e';shared=&list;
+  if(scenario=="embedded_revoke_load")owner=false;
+  return shared;
+}
+extern "C" void srmodel_host_deinit(srmodel_list_t* l) {
+  assert(l==&list);events+='b';shared=nullptr;
+}
 extern "C" srmodel_list_t* esp_srmodel_init(const char* partition) {
   assert(std::strcmp(partition,"model")==0);events+='i';
   if(scenario=="local_revoke_init")owner=false;
@@ -98,6 +120,34 @@ int main(int argc,char** argv) {
   if(scenario=="no_detect")iface.detect=nullptr;
   if(scenario=="no_clean")iface.clean=nullptr;
   if(scenario=="no_destroy")iface.destroy=nullptr;
+  if(scenario.starts_with("embedded_")) {
+    if(scenario=="embedded_no_owner")owner=false;
+    if(scenario=="embedded_stopped")stop=true;
+    K151WakeNetPort p;
+    const auto input=scenario=="embedded_bad_size"?std::span(embedded).first(10):std::span(embedded);
+    const bool accepted=p.prepare_embedded(owner,stop,input);
+    if(scenario=="embedded_valid" || scenario=="embedded_overlap") {
+      assert(accepted && p.ready() && events=="efhc");
+      if(scenario=="embedded_overlap") {
+        K151WakeNetPort other;
+        assert(!other.prepare_embedded(owner,stop,embedded) && finds==0);
+        assert(!other.prepare(true,true));
+      }
+      p.close();assert(events=="efhcdb" && shared==nullptr);
+    } else {
+      assert(!accepted && !p.ready());
+      if(scenario=="embedded_revoke_load")assert(events=="eb");
+      else if(scenario=="embedded_stop_create")assert(events=="efhcdb");
+      else assert(events.empty());
+    }
+    if(scenario!="embedded_no_owner" && scenario!="embedded_stopped") {
+      owner=true;stop=false;
+      p.close();const auto before=events;
+      assert(!p.prepare_embedded(owner,stop,embedded));
+      assert(!p.prepare(true,true) && events==before);
+    }
+    assert(finds==0);return 0;
+  }
   if(scenario.starts_with("local_")) {
     partition.flash_chip=&chip;partition.type=ESP_PARTITION_TYPE_DATA;
     partition.address=0xf00000;partition.size=1048576;

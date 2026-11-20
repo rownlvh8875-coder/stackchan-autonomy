@@ -21,6 +21,10 @@ class K151WakeNetPort final: public NativeWakePort {
   // No remote wire handler calls this; app_main remains dormant.
   bool prepare_local(const std::atomic_bool& local_owner,
                      const std::atomic_bool& physical_stop);
+  // Static read-only ELF data only. Exact length + SHA before SDK parsing.
+  bool prepare_embedded(const std::atomic_bool& local_owner,
+                        const std::atomic_bool& physical_stop,
+                        std::span<const uint8_t> pack);
   bool ready() const override;
   NativeWakeFormat format() const override {return ready()?format_:NativeWakeFormat{};}
   NativeWakeResult detect(std::span<int16_t> pcm) override;
@@ -30,11 +34,13 @@ class K151WakeNetPort final: public NativeWakePort {
  private:
   bool prepare_verified(bool local_owner,bool assets_verified,
                         const std::atomic_bool* live_owner=nullptr,
-                        const std::atomic_bool* physical_stop=nullptr);
+                        const std::atomic_bool* physical_stop=nullptr,
+                        const void* embedded=nullptr);
   srmodel_list_t* models_=nullptr;
   const esp_wn_iface_t* iface_=nullptr;
   model_iface_data_t* data_=nullptr;
   NativeWakeFormat format_{};
   bool attempted_=false,faulted_=false,owns_loader_=false,local_assets_attempted_=false;
+  bool embedded_=false;
 };
 } // namespace stackchan::standalone
