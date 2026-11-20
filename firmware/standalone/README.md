@@ -339,6 +339,22 @@ This was a same-voice synthetic smoke test, not real-human recognition.
 K151 ESP32-S3 HOLD, factory firmware, STOP, I2S, PMIC, NVS and OTA remain
 untouched; local Vosk model memory needs have not been verified for K151.
 
+## 2026-11-20 pinned offline Whisper tiny as second-stage Korean wake verifier
+
+The PC-only `tools/whisper_wake_second_stage.py` uses the existing frozen
+MFCC/DTW SWK1 detector as a first-stage gate; ONLY when DTW accepts,
+a locally cached, SHA-256-pinned multilingual `Systran/faster-whisper-tiny`
+model runs CPU INT8 ASR with forced Korean and **exact phrase-only**
+`조수야` acceptance. No fallback to stage1 on ASR failure, no prompt,
+cloud, microphone or device installation is permitted. Preliminary
+smoke on 4 previously public same-Heami synthetic wake clips: stage1
+4/4 accepted, Vosk-stage2 0/4 accepted, Whisper-stage2 2/4 accepted.
+Both strict-ASR cascades rejected the single stage1 false wake. These
+are already-seen smoke clips, not independent validation. Model weights
+(~75.5MB) are kept OUTSIDE Git and no K151 runtime feasibility is claimed.
+See `docs/2026-11-20-offline-whisper-tiny-wake-stage2.md`. ESP32-S3
+`app_main` remains in HOLD.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
