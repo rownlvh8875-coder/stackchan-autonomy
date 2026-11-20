@@ -9,3 +9,5 @@
 /firmware/standalone/fixtures/korean_heami_hardneg_20261120/hard-negative-calibration.json -text
 # Frozen contrastive post-evaluation WAV manifest must preserve raw SHA bytes.
 /firmware/standalone/fixtures/korean_heami_contrastive_postfreeze_20261120/post-freeze.wake-corpus.json -text
+# Frozen linear MFCC post-evaluation synthetic manifest; hash raw bytes cross-OS.
+/firmware/standalone/fixtures/korean_heami_linear_postfreeze_20261120/linear-postfreeze.wake-corpus.json -text

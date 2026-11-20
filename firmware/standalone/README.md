@@ -276,6 +276,20 @@ correlated TRAINING examples, not independent performance. See
 `docs/2026-11-20-tiny-linear-mfcc-kws-development.md`. The real robot,
 firmware wake path, physical audio hardware, and HOLD remain unchanged.
 
+## 2026-11-20 linear MFCC classifier: NEW frozen-model holdout — REJECTED
+
+After commit `80e280c` froze the 847-byte linear model, 4 new same-Heami
+synthetic wake and 12 previously unused Korean nonwake TTS clips were generated
+under `fixtures/korean_heami_linear_postfreeze_20261120/`. The linear model
+detected 4/4 wake clips across the artificial gain/noise/echo conditions, but
+**falsely accepted 2/12 nonwake clips on EVERY condition including clean**.
+The original DTW baseline accepted 0/12 nonwake clips on this particular
+set but missed wakes in noise/echo. This result rejects the linear model for
+autonomous K151 use. The one TTS speaker and repeated perturbations do not
+establish real-human accuracy, false-wakes/hour, latency, RAM or safety.
+See `docs/2026-11-20-linear-kws-postfreeze-rejected.md`. No live firmware
+or PMIC, I2S, microphone, STOP, NVS, OTA, and factory image was modified.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
