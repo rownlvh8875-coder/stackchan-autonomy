@@ -77,3 +77,16 @@ D5 CI completed9/9 (push44767547014, PR44767560777, S3 target44767560757),
 but its review manifest is rejected for empty source despite successful compile.
 Recorded this distinction; no failed CI rerun and no device writes. Final source
 binding correction goes to the same branch/PR with a fresh changed-source build.
+
+Approved physical execution (2026-11-21 KST): user said “진행해 승인”. Exact
+ebed42c image SHA465cf701... installed once at0x510000,625968bytes (153sector
+erase), independent verify PASS. One fresh USB nonce START,64synthetic chunks,
+chunk512/max7615us/over100ms0, q384000/t960000 vectors bothPSRAM. No real audio,
+Wi-Fi/cloud/output. Resident free internal354283/PSRAM8047576; concurrent free
+internal354283/PSRAM6694860; TLS/operating admission false. Returned to ROM and
+restored original fullslot5177344bytes at0x510000, independent verify PASS;
+table/OTA identical prewrite/postbench/postrestore. Requested normal flash boot,
+COM3OK; fresh user face/menu observation pending. No repeat bench, no full16MB
+restore, no NVS/eFuse/table writes/stub. Wrapper falsely rejected native
+successful original-slot verification text; corrected from saved log, no rerun.
+Physical evidence: docs/validation/2026-11-21-k151-silent-resource-bench.{md,json}.

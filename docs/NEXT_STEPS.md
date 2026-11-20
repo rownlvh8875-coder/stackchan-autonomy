@@ -1,12 +1,15 @@
 # Next steps
 
-## 2026-11-21 후속: 무음 model 자원 진단 준비
+## 2026-11-21 실물 후속: 모델 진단1회·원본 슬롯 복구
 
-출고 얼굴/메뉴 복귀를 사용자가 확인했다. 다음 준비물은 기존 모델 어댑터와
-검증된 embedded pack을 재사용하는 [별도 무음 자원 진단 앱](K151_RESOURCE_BENCH.ko.md)이다.
-파티션 표/NVS/별도 model 영역을 바꾸지 않는 앱 단독 교체 후보이며 설치는 미승인이다.
-실제 model·동시 PCM 배치·합성 detect만 측정하고 TLS/운영 admission은false로 남긴다.
-기존 HOLD 앱은 여전히 모델/마이크/대화를 시작하지 않는다.
+사용자 승인 뒤 기존 어댑터와 embedded pack의 [별도 무음 진단](K151_RESOURCE_BENCH.ko.md)을
+실제ota_1에 한 번 설치했다. 512sample×64 합성 chunk, 최대7.615ms 추론,
+질문384000/TTS960000bytes 동시 PSRAM 배치를 관측했다. 같은 슬롯 원본5177344bytes를
+복구하고 독립 verify/표·OTA 전후 일치를 확인했다. 새 출고 얼굴/메뉴 관찰은 대기 중이다.
+[실물 수치·범위](validation/2026-11-21-k151-silent-resource-bench.md)를 우선한다.
+다음은 기존 운영 bootstrap의 실제 mic/출력 STOP·DMA drain과 TLS 동시 peak 증거다.
+과거 실측으로 현재 readiness를 만들지 않는다. cloud 기본 OFF/운영 HOLD를 유지하며,
+실제 호출어 인식·독립 GPT 성공은 아직 없다. 아래는 이 단계 전의 이력이다.
 
 ## Windows 인수 (2026-11-20, PR #3 후속)
 

@@ -1,4 +1,10 @@
-# K151 무음 자원 진단 앱 — 설치 미승인
+# K151 무음 자원 진단 앱 — 실물1회·원본 슬롯 복구
+
+2026-11-21 사용자의 “진행해 승인” 뒤 검토한 앱을 한 번 임시 설치했다.
+실제 모델 준비/64 합성 chunk(최대7.615ms)/질문·TTS 동시 PSRAM 배치를 확인하고,
+원본slot1을 복구·독립 verify했다. 표/OTA도 전후 동일하다. 이번 복구 뒤의
+출고 얼굴/메뉴 관찰은 대기 중이다. [실물 기록](validation/2026-11-21-k151-silent-resource-bench.md)을
+현재 판정으로 사용한다. 실제 호출어·TLS·독립 GPT·운영 admission은 미검증이다.
 
 이 별도 앱은 **기본 호출어의 자원 측정 준비물**이다. 기본 HOLD 앱과 운영 대화
 경로를 바꾸지 않는다. 마이크·스피커·모터·디스플레이·Wi-Fi·NVS·실제 API를
@@ -10,7 +16,7 @@
 별도 model 영역을 설치할 필요가 없다. 이 경로의 성공은 partition 경로의 성공
 증거가 아니며, 기존 partition 검증 경로도 유지한다.
 
-향후 설치를 별도 승인받은 경우에만, USB Serial/JTAG가 부팅 nonce를 표시한다.
+설치 승인 범위에서 USB Serial/JTAG가 부팅 nonce를 표시한다.
 60초 내 `START <표시된 8자리 대문자 nonce>` 한 줄을 보내야 동의가 열린다.
 한 번만 실행하며 `STOP`/잘못된 입력/시간 역행/기한 경과는 취소 latch다.
 시작 뒤10초 제한과 최대64개 chunk를 적용한다. 별도 reader task가 동의를
@@ -35,10 +41,11 @@ descriptor와 DROM 내 모델 SHA, 슬롯 크기와 sector 반올림 범위를 �
 Git 소유권 오류/빈 커밋을 성공으로 발행하지 않으며 ELF SHA도 bin descriptor와
 일치해야 한다. 빌드 성공과 설치 검토 자료의 완전성을 따로 검증한다.
 
-**아직 쓰기 승인은 없다.** 제안 대상은 `ota_1@0x510000`이며 이미 출고 앱이
-들어 있다. 원본 메타데이터는 이 슬롯을 선택 후보로 가리키지만 현재 실행 슬롯과
-안전한 spare를 확정하지 않는다. 설치는 해당 출고 앱 일부를 파괴하는 교체다.
-정확한 bin 길이와 SHA/sector 범위는 실제 빌드 manifest로 확정해야 한다.
+승인한 `ota_1@0x510000`은 출고 앱이 들어 있는 슬롯이었다. 전체 원본 slice와
+장치 digest가 일치한 뒤625968bytes 진단 앱을 썼고, erase 영향은626688bytes였다.
+진단 한 번 후 같은 슬롯5177344bytes를 원본으로 되돌리고 별도 verify했다.
+메타데이터 선택 후보와 안전한 spare를 동일시하지 않았다. 진단/복구의 정확한
+SHA와 범위는 [실물 manifest](validation/2026-11-21-k151-silent-resource-bench.json)에 있다.
 bootloader/partition/NVS/otadata/assets/coredump에는 쓰지 않는다. 생성된
 IDF bootloader/table/flash_args는 실물에 적용하지 않는다.
 
@@ -47,12 +54,13 @@ IDF bootloader/table/flash_args는 실물에 적용하지 않는다.
 2026-11-21에 C: disk0과 D: disk1이 서로 다른512GB 내장 NVMe/NTFS임을 확인했다.
 D:의 새 접근 제한 폴더에 전체 원본16MiB 사본을 만들고 SHA 일치를 확인했다.
 폴더와 파일은 현재 사용자/SYSTEM만 허용하며 원본 내용은 업로드하지 않았다.
-현재 실행 슬롯·factory bootloader 호환·실제 복구 쓰기는 미검증이다.
+이번 이미지의 factory bootloader 부팅과 같은 슬롯 복구 쓰기는 관측했다.
+다른 이미지/전체flash 복구나 일반적인 spare 안전성으로 확대하지 않는다.
 슬롯 단독 복구 slice는 전체 원본 백업에서 추출한 정확한 slot1 범위이며, 다른
-영역이 바뀐 경우의 전체 flash 복구를 대신하지 않는다. 제안하는 임시 실험 범위는
+영역이 바뀐 경우의 전체 flash 복구를 대신하지 않는다. 승인받은 임시 실험 범위는
 진단 앱 쓰기/검증→합성 진단1회→같은 슬롯 원본 복구/검증→출고 복귀 관찰이다.
-이 쓰기·복구 전체가 아직 미승인이다.
-승인 이후에도 포트/칩/보호 상태/원본 표·OTA가 달라지면
+이 범위의 쓰기2회와 재부팅 요청을 마쳤고, 새 화면 관찰을 기다린다.
+각 쓰기 전에 포트/칩/보호 상태/원본 표·OTA를 재검증했다. 이 값이 달라지면
 중단한다. write/verify 실패나 brownout 시 자동 재시도·다른 슬롯 쓰기는 하지 않는다.
 
 근거: [고정 SDK loader](https://github.com/espressif/esp-sr/blob/2f8c4b0459db5bbb39abd77adae27962d6d94bcb/src/model_path.c),
