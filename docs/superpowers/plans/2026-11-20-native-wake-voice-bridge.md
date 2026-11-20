@@ -26,16 +26,16 @@ Interfaces StreamingPcm24To16::process(span<constint16_t>240,span<int16_t>160)->
 
 - [x] Write tests: DC/output counts/batch reference/10k alias<0.018of1k/reset/invalid/clipping; actual Native controller chunk480/512/2048, fake wake→actual question/coordinator→3Mock APIs and guarded playback/cooldown; no SWK1 profile provision. Cases STOP/consent/busy during read/detect, bad format/revoke/change, model/IO/close failure, gaps/time rollback, cloud off/no profile and inactive destruction.
 - [x] Run uv run --frozen pytest -q firmware/standalone/tests/test_native_wake_build.py. Expected initial FAIL for missing implementation; record compiler messages then implement minimum and rerun PASS. Existing voice/Session regressions must PASS.
-- [ ] Verify and commit core+tests/spec/plan with task verification result.
+- [x] Verify and commit core+tests/spec/plan with task verification result.
 
 ### Task2: real SDK binding
 
 Files create esp_app/main/k151_wakenet_port.hpp/.cpp, host tests k151_wakenet_port_test.cpp + publicSDK headers under tests/sdk_esp_sr_2_4_7 with license + tests/test_k151_wakenet_port_build.py; modify esp_app/main/{CMakeLists.txt,idf_component.yml,app_main.cpp}. No partition/sdkconfig change.
 Interface concrete NativeWakePort; prepare(bool owner,bool assets_verified), close(), compiled_link_marker(); pins native component2.4.7; no SDK initialization from marker.
 
-- [ ] RED real policy against full SDK C ABI doubles: false gates zeroSDKcalls, missing/multiple/wrongmodel/nullinterface/function/create, invalidrate/channel/chunk/wordnum; validbuffer0/-1/1/other; cleanup data/list once in correct order; failed prepare/repeatedprepare/closed lifecycle refused. Actual SDK compile verifies ABI and linkage.
-- [ ] Implement after RED; rerun new/legacy host tests then entire Python/standalone+NumPy suites, Ruff/diff, actual pinnedIDF S3 build+symbol/size proof. Expected0fail; platform SKIP explicit; no model inference/hardware/API.
-- [ ] Docs/WORK_LOG/TEST_REPORT/NEXT_STEPS describe exact implementation and remaining bootstrap/assets/physical limitations; preserve prior Windows check_timeout failure and its one rerun result.
+- [x] RED real policy against full SDK C ABI doubles: false gates zeroSDKcalls, missing/multiple/wrongmodel/nullinterface/function/create, invalidrate/channel/chunk/wordnum; validbuffer0/-1/1/other; cleanup data/list once in correct order; failed prepare/repeatedprepare/closed lifecycle refused. Actual SDK compile verifies ABI and linkage.
+- [x] Implement after RED; rerun new/legacy host tests then entire Python/standalone+NumPy suites, Ruff/diff, actual pinnedIDF S3 build+symbol/size proof. Expected0fail; platform SKIP explicit; no model inference/hardware/API.
+- [x] Docs/WORK_LOG/TEST_REPORT/NEXT_STEPS describe exact implementation and remaining bootstrap/assets/physical limitations; preserve prior Windows check_timeout failure and its one rerun result.
 - [ ] Single fresh whole-change review; Important/Critical one RED→GREEN pass, Minor ledger/final. Commit/push/PR3; exact head Linux/Windows/ESP CI directly verify and record in PR. Preserve worktree.
 
 Task1 scope correction: 기존 PersistentGuard도 profile을 요구한다. 검증된 로컬 builtin hit의 RAM epoch admission을 추가하며 duplicate/mismatch/cancel/reboot/fatal/default-closed tests RED→GREEN으로 검사한다. 기존3인자 reserve 회계 동작과 SWK1 권한은 보존한다.

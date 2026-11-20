@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Compile-only K151 standalone probe. NO motor, Wi-Fi, I2S or USB requests.
 #include "k151_contract.hpp"
+#include "k151_wakenet_port.hpp"
+#include "native_wake_controller.hpp" // Compile only; no controller/model constructed.
 #include "k151_codec_port.hpp"
 #include "k151_readonly_probe.hpp"
 #include "k151_usb_scfg.hpp"
@@ -61,6 +63,8 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151ScpsUsbPort::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151InstallHold::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151VoiceDecoder::compiled_link_marker());
+
+  ESP_LOGI(kTag, "%s", K151WakeNetPort::compiled_link_marker());
 
   IsolatedNvs nvs;
   if (!nvs.init_without_erase()) {

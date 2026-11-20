@@ -305,3 +305,7 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 ## 2026-11-20 K151 기본 호출어 지원 검증
 
 [기술 기록](validation/2026-11-20-k151-builtin-wakenet-preflight.md) 및 [JSON 증거](validation/2026-11-20-k151-builtin-wakenet-preflight.json): 고정 IDF6.1/ESP-SR2.4.7/Hi StackChan의 실제 ESP32-S3 빌드·링크·모델 패킹 PASS. 임시 HOLD app334688bytes, model292607bytes, 실제pack 모델1/파일3 및 SHA 검증. 정적 DIRAM65482bytes이며 runtime heap/PSRAM/인식/독립 GPT 대화는 미검증이다. 제품 코드·기기·API는 변경/실행하지 않았다. 이 작업은 문서/증거 변경이며 기존 code base330946a의 CI9/9와 새 문서 head 검증을 구분한다.
+
+## 2026-11-20 기본 호출어 → 공통 음성 대화 연결
+
+[검증 기록](validation/2026-11-20-native-wake-voice-bridge.md): 새로운 core38/SDK25 cases PASS, root487PASS2SKIP / standalone338PASS43SKIP / PC선택 NumPy105PASS3SKIP. 실제 pinned IDF6.1/ESP-SR2.4.7 ESP32-S3 compile/link PASS, HOLDapp325632bytes/staticDIRAM59030bytes. Stream DSP·bounded chunk·local hit epoch admission·질문/Mock STT/GPT/TTS·cooldown을 검증하며 기존 개인 SWK1 경로를 보존한다. app_main은 marker만 추가했고 실제 모델/기기/API/설치를 실행하지 않았다. 실제 추론/동적 자원/복구/독립 대화는 미검증이다. 이전1412660 Windows3.12 soak의 check_timeout 및 재실행 renew_timeout 실패를 보존하며 새 head CI와 구분한다.
