@@ -236,6 +236,21 @@ See `docs/2026-11-20-frozen-robust-wake-fresh-holdout.md` and the frozen
 fixture hash. Future tuning must not treat these exposed clips as independent
 validation data; the K151 HOLD and all factory hardware settings are untouched.
 
+## 2026-11-20 experimental nonwake contrastive veto — HOST ONLY
+
+`core/offline_contrastive_wake.hpp` and `tools/wake_contrastive_eval.cpp`
+add a separate host-only negative-bank nearest-DTW veto. It uses the existing
+three-template SWK1 unchanged and a fixed development-only nonwake distance
+ratio **2.0**. Synthetic calibration negatives in
+`fixtures/korean_heami_hardneg_20261120/` were created from the same Heami
+TTS voice; some expressions already appeared in past evaluation sets and are
+explicitly reclassified as development data. The filter was tested on 5 old
+calibration wake and 8 new held-out-from-bank development nonwake clips. It
+reduced false accepts on clean speech from 1/8 to 0/8, but only from 4/8 to
+3/8 under nominal 20dB noise, and it lost one of five wake accepts at 10dB.
+**Not admissible for K151 hardware; do not deploy.** See
+`docs/2026-11-20-offline-contrastive-hardnegative-calibration.md`.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`

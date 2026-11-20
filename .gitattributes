@@ -5,3 +5,5 @@
 /firmware/standalone/fixtures/korean_heami_sapi_20261120/synthetic-sapi.wake-corpus.json -text
 # New Heami same-speaker holdout manifest is hashed as raw bytes.
 /firmware/standalone/fixtures/korean_heami_fresh_holdout_20261120/fresh-evaluation.wake-corpus.json -text
+# Raw synthetic contrastive calibration manifest stays byte-identical across OSes.
+/firmware/standalone/fixtures/korean_heami_hardneg_20261120/hard-negative-calibration.json -text
