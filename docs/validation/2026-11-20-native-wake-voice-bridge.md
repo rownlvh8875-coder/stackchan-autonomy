@@ -14,9 +14,9 @@ HOLD startup에는 compile/link marker만 추가했다. model/assets 준비나 c
 
 - Core 최초 RED31, admission 확장 RED8/30PASS → core38+기존 회귀3 =41PASS.
 - SDK port 부재 RED25 → public ABI/lifecycle25PASS.
-- 최종 root pytest487PASS2SKIP; standalone 전체338PASS43SKIP; 선택 의존성을 공급한 PC/NumPy105PASS3Windows-onlySKIP. standalone43SKIP 중36개는 선택 NumPy 의존성으로 PC 별도 실행에서 검사되며7개는 Windows-only다.
-- Ruff check/format326files PASS (target 빌드가 다운로드한 third-party managed_components 제외); diff check PASS.
-- 실제 IDF6.1/S3 build PASS. 최종 HOLD app325632bytes, 정적 DIRAM59030bytes. ELF에서 prepare/detect와 SDK esp_srmodel_init/esp_wn_handle_from_name 참조를 확인했다. virtual member pointer만으로는 detect가 GC되어 qualified nonvirtual thunk anchor로 고쳤고 marker는 실행을 시작하지 않는다. [기계 판독 artifact 증거](2026-11-20-native-wake-voice-bridge.json)를 따른다. 정적 size는 runtime 메모리나 인식 성능의 증거가 아니다.
+- 최종 수정 후 root pytest487PASS2SKIP; NumPy2.3.5/cryptography46.0.4를 공급한 standalone 전체381PASS7Windows-onlySKIP. 신규 focused70PASS, 별도 PC/NumPy105PASS3Windows-onlySKIP, SCPS19PASS.
+- 생성 third-party/build 산출물을 정리한 뒤 Ruff check/format326projectfiles 전체 PASS. Project diff 검사는 `git diff --check 1412660..HEAD -- . ":!firmware/standalone/tests/sdk_esp_sr_2_4_7"`로 수행한다. 복사한 upstream SDK header/license의 기존 trailing whitespace는 보존하며 전체 upstream 포함 diff는 공백 경고를 낸다.
+- 실제 IDF6.1/S3 build PASS. 최종 HOLD app325792bytes, 정적 DIRAM59030bytes. ELF에서 prepare/detect와 SDK esp_srmodel_init/esp_wn_handle_from_name 참조를 확인했다. virtual member pointer만으로는 detect가 GC되어 qualified nonvirtual thunk anchor로 고쳤고 marker는 실행을 시작하지 않는다. [기계 판독 artifact 증거](2026-11-20-native-wake-voice-bridge.json)를 따른다. 정적 size는 runtime 메모리나 인식 성능의 증거가 아니다.
 
 ## 기존 CI 실패 관측
 
@@ -29,3 +29,17 @@ HOLD startup에는 compile/link marker만 추가했다. model/assets 준비나 c
 - NativeWakePort를 별도 header로 분리했다. PersistentGuard의 기존 profile 필수 결합은 검증된 로컬 builtin hit의 RAM epoch 권한으로 분리했다. 원격 wire 권한은 추가하지 않는다. 향후 bootstrap에서 이벤트의 신뢰 경계를 지켜야 한다.
 
 모델 저장 위치/실제 assets 무결성/전원·오디오 routing/동적 heap·PSRAM/추론 지연·인식률/오탐/STOP/복구/실제 GPT 대화는 미검증이다. 현재 app은 model data나 운영 bootstrap을 제공하지 않는다. app 크기는 factory bootloader·파티션·설치/복구 호환의 증거가 아니다. 실제 device/COM3·mic·camera·motor·API·flash/NVS/OTA 실행 및 환경 게시 없음.
+
+## 단일 독립 검토 후 보완
+
+검토 Important4건과 입력 중 공급자 변경 경계1건을 한 번의 수정 묶음으로 처리했다. 회귀9FAIL을 먼저 확인했고 신규 focused70PASS로 전환했다. read/detect callback 재개 시험은 단조 시각을 사용해 수정 전 실제 소스에서도 거부 실패를 다시 확인했다.
+
+1. capture 시작 epoch를 기록하고 poll·외부 callback 뒤 동일 세션인지 확인한다. STOP/resume 사이의 이전 부분 음성으로 새 호출을 만들지 않는다.
+2. SDK의 process-global cached model list에는 atomic 단일 소유권을 적용한다. 다른 SDK 사용자가 이미 만든 list는 거부하고 건드리지 않는다. 실패한 두 번째 준비·다음 새 객체 획득을 검사한다. 이 이미지의 bootstrap은 다른 직접 SDK 사용자와 동시에 loader를 호출해서는 안 된다.
+3. terminal detect 오류는 opaque model data와 list를 즉시 해제한다. 이후 파괴가 다시 해제하지 않는다.
+4. owned PCM/FIR history/부분 chunk/임시 frame은 volatile-store 지움을 사용한다. GCC -O2 실제 destructor 출력의 zero store를 검사했다. register copy나 vendor opaque allocation 전체의 보안 삭제를 증명하는 시험은 아니다.
+5. 첫 partial read 뒤에도 provider ready/format을 즉시 재확인한다. 원래 검토 Minor였으나 오래된 입력이 감지에 섞이는 영향 때문에 Important로 올려 검사했다.
+
+보류 Minor: upstream SDK 원문의 공백을 재포맷하지 않는다. 프로젝트 소스 검사 범위는 위 명령으로 명시한다. 물리 인식/오탐·오디오/STOP 타이밍·자산 provisioning/무결성·동적 heap/PSRAM·설치/복구·실제 network/API는 검토 대상 코드의 완료 증거로 계산하지 않는다. 이는 HOLD 단계를 유지하는 판단이며 실제 실행 결함은 후속 실물 검증까지 남을 수 있다.
+
+최종 수정 뒤 full standalone381PASS7SKIP, root487PASS2SKIP, 실제 S3 재빌드/심벌 검증 PASS. Linux 가상24시간2880cycles·재시작/복원11회·cloud0 PASS(실제24시간 경과 아님). 새 정확한 GitHub head 결과는 PR#3에 후속 기록한다.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Fixed-memory causal24k PCM16 ->16k PCM16. No audio IO or recognition.
 #pragma once
+#include "audio_wipe.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -27,7 +28,7 @@ class StreamingPcm24To16 final {
   ~StreamingPcm24To16() {reset();}
   bool process(std::span<const int16_t> input,std::span<int16_t> output) {
     if (input.size()!=240 || output.size()!=160) {
-      std::fill(output.begin(),output.end(),0);reset();return false;
+      wipe_pcm(output);reset();return false;
     }
     size_t written=0;
     for (const int16_t sample:input) {
@@ -43,7 +44,7 @@ class StreamingPcm24To16 final {
     }
     return written==160;
   }
-  void reset() {history_.fill(0);position_=0;phase_=0;}
+  void reset() {wipe_pcm(history_);position_=0;phase_=0;}
  private:
   std::array<std::array<float,33>,2> kernel_{};
   std::array<int16_t,33> history_{};

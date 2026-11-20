@@ -12,6 +12,7 @@ class K151WakeNetPort final: public NativeWakePort {
   K151WakeNetPort& operator=(const K151WakeNetPort&)=delete;
   ~K151WakeNetPort() override {close();}
   // Local bootstrap must verify asset integrity/memory and obtain owner consent.
+  // One live port owns the SDK global loader; other SDK users must be absent.
   // These gates never accept SCFG, remote or user-provided network booleans.
   bool prepare(bool local_owner,bool model_assets_verified);
   bool ready() const override;
@@ -25,6 +26,6 @@ class K151WakeNetPort final: public NativeWakePort {
   const esp_wn_iface_t* iface_=nullptr;
   model_iface_data_t* data_=nullptr;
   NativeWakeFormat format_{};
-  bool attempted_=false,faulted_=false;
+  bool attempted_=false,faulted_=false,owns_loader_=false;
 };
 } // namespace stackchan::standalone

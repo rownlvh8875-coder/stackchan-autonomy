@@ -210,6 +210,26 @@ int main(int argc,char** argv) {
     auto e=x.native->poll(test=="gap"?1101:999);
     assert(e.step==NativeWakeStep::rejected && !e.epoch);
     assert(x.wake_mic.calls==0 && x.model.calls==0 && x.native->faulted());
+  } else if(test=="resume_between_polls" || test=="resume_in_read" ||
+            test=="resume_in_detect" || test=="first_read_format") {
+    assert(x.native->begin(1000));
+    if(test=="first_read_format") {
+      x.wake_mic.hook=[&]{x.model.fmt.channels=2;};
+      assert(x.native->poll(1010).step==NativeWakeStep::rejected);
+      assert(x.model.calls==0);
+    } else {
+      assert(x.native->poll(1010).step==NativeWakeStep::listening);
+      assert(x.native->poll(1020).step==NativeWakeStep::listening);
+      auto resume=[&]{x.session.stop();assert(x.session.resume(1030));};
+      if(test=="resume_between_polls")resume();
+      if(test=="resume_in_read")x.wake_mic.hook=resume;
+      if(test=="resume_in_detect")x.model.hook=resume;
+      const auto e=x.native->poll(1030);
+      assert(e.step==NativeWakeStep::rejected && !e.epoch);
+      assert(x.model.calls==(test=="resume_in_detect"?1:0));
+    }
+    assert(!x.hardware.mic && x.native->faulted() && x.api.calls==0);
+    assert(x.session.state()==State::stopped);
   } else if(test=="inactive_lifetime") {
     auto e=x.wake();assert(e.epoch);
     assert(x.native->cancel().step==NativeWakeStep::inactive);

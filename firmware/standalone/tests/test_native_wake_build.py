@@ -79,6 +79,10 @@ def built(tmp_path_factory):
         "format_change",
         "gap",
         "clock_rollback",
+        "resume_between_polls",
+        "resume_in_read",
+        "resume_in_detect",
+        "first_read_format",
         "inactive_lifetime",
         "active_destruction",
     ],
@@ -101,3 +105,49 @@ def test_native_wake_case(built, case):
     assert result.returncode == 0, result.stderr
     completed = subprocess.run([str(binary), case], capture_output=True, text=True, timeout=30)
     assert completed.returncode == 0, completed.stderr
+
+
+def test_optimized_fir_discard_emits_zero_stores(tmp_path):
+    """The real destructor must erase PCM even when no caller reads it again."""
+    import platform
+    import re
+
+    compiler = shutil.which("g++")
+    if not compiler or platform.machine().lower() not in {"x86_64", "amd64"}:
+        pytest.skip("GCC x86-64 assembly check; functional DSP cases remain portable")
+    source = tmp_path / "discard.cpp"
+    assembly = tmp_path / "discard.s"
+    source.write_text(
+        '#include "stream_resampler.hpp"\n'
+        'extern "C" void discard_fir(stackchan::standalone::StreamingPcm24To16* p) {'
+        "p->~StreamingPcm24To16();}\n"
+    )
+    subprocess.run(
+        [
+            compiler,
+            "-std=c++20",
+            "-O2",
+            "-S",
+            "-I",
+            str(BASE / "core"),
+            str(source),
+            "-o",
+            str(assembly),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    text = assembly.read_text()
+    body = text.split("discard_fir:", 1)[1].split(".size", 1)[0]
+    # Inspect emitted code, not source text. Old ordinary fill compiles to ret.
+    immediate_zero = re.search(r"mov[bw]\s+\$0,\s*(?:\d+)?\(", body)
+    zero_registers = re.findall(r"xor[lq]\s+%(e[a-z]+),\s*%\1", body)
+    word_alias = {"eax": "ax", "ebx": "bx", "ecx": "cx", "edx": "dx", "esi": "si", "edi": "di"}
+    register_zero = any(
+        re.search(r"movw\s+%" + word_alias[r] + r",\s*(?:\d+)?\(", body)
+        for r in zero_registers
+        if r in word_alias
+    )
+    assert immediate_zero or register_zero, body

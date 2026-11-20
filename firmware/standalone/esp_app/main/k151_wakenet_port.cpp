@@ -2,10 +2,17 @@
 #include "k151_wakenet_port.hpp"
 #include <esp_wn_models.h>
 #include <cstring>
+#include <atomic>
 namespace stackchan::standalone {
+namespace { std::atomic_flag loader_owner=ATOMIC_FLAG_INIT; }
 bool K151WakeNetPort::prepare(bool owner,bool verified) {
   if(!owner || !verified || attempted_)return false;
   attempted_=true;
+  if(loader_owner.test_and_set(std::memory_order_acquire))return false;
+  owns_loader_=true;
+  // The SDK returns one process-global cached list, not a per-init allocation.
+  // Refuse a list initialized by another SDK consumer rather than freeing it.
+  if(get_static_srmodels()) {close();return false;}
   models_=esp_srmodel_init("model");
   if(!models_ || models_->num!=1) {close();return false;}
   const char* name=esp_srmodel_filter(models_,ESP_WN_PREFIX,"histackchan_tts3");
@@ -31,11 +38,13 @@ bool K151WakeNetPort::ready() const {
 }
 NativeWakeResult K151WakeNetPort::detect(std::span<int16_t> pcm) {
   if(!ready())return NativeWakeResult::error;
-  if(pcm.size()!=format_.chunk_samples) {faulted_=true;return NativeWakeResult::error;}
+  if(pcm.size()!=format_.chunk_samples) {
+    faulted_=true;close();return NativeWakeResult::error;
+  }
   const auto r=iface_->detect(data_,pcm.data());
   if(r==WAKENET_NO_DETECT || r==WAKENET_CHANNEL_VERIFIED)return NativeWakeResult::none;
   if(r==WAKENET_DETECTED)return NativeWakeResult::detected;
-  faulted_=true;return NativeWakeResult::error;
+  faulted_=true;close();return NativeWakeResult::error;
 }
 bool K151WakeNetPort::reset() {
   if(!ready())return false;
@@ -46,6 +55,8 @@ void K151WakeNetPort::close() {
   data_=nullptr;iface_=nullptr;
   if(models_)esp_srmodel_deinit(models_);
   models_=nullptr;format_={};
+  if(owns_loader_)loader_owner.clear(std::memory_order_release);
+  owns_loader_=false;
 }
 const char* K151WakeNetPort::compiled_link_marker() {
   // Retain SDK bindings under linker GC without executing/constructing them.

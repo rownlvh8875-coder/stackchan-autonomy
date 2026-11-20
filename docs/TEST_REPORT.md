@@ -308,4 +308,4 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 
 ## 2026-11-20 기본 호출어 → 공통 음성 대화 연결
 
-[검증 기록](validation/2026-11-20-native-wake-voice-bridge.md): 새로운 core38/SDK25 cases PASS, root487PASS2SKIP / standalone338PASS43SKIP / PC선택 NumPy105PASS3SKIP. 실제 pinned IDF6.1/ESP-SR2.4.7 ESP32-S3 compile/link PASS, HOLDapp325632bytes/staticDIRAM59030bytes. Stream DSP·bounded chunk·local hit epoch admission·질문/Mock STT/GPT/TTS·cooldown을 검증하며 기존 개인 SWK1 경로를 보존한다. app_main은 marker만 추가했고 실제 모델/기기/API/설치를 실행하지 않았다. 실제 추론/동적 자원/복구/독립 대화는 미검증이다. 이전1412660 Windows3.12 soak의 check_timeout 및 재실행 renew_timeout 실패를 보존하며 새 head CI와 구분한다.
+[검증 기록](validation/2026-11-20-native-wake-voice-bridge.md): 검토 수정 후 신규 focused70PASS, root487PASS2SKIP / 선택 의존성을 포함한 standalone381PASS7Windows-onlySKIP / PC선택 NumPy105PASS3SKIP. 실제 pinned IDF6.1/ESP-SR2.4.7 ESP32-S3 compile/link PASS, HOLDapp325792bytes/staticDIRAM59030bytes. Stream DSP·bounded chunk·local hit epoch admission·질문/Mock STT/GPT/TTS·cooldown을 검증하며 기존 개인 SWK1 경로를 보존한다. app_main은 marker만 추가했고 실제 모델/기기/API/설치를 실행하지 않았다. 실제 추론/동적 자원/복구/독립 대화는 미검증이다. 이전1412660 Windows3.12 soak의 check_timeout 및 재실행 renew_timeout 실패를 보존하며 새 head CI와 구분한다.

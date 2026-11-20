@@ -39,3 +39,5 @@ Interface concrete NativeWakePort; prepare(bool owner,bool assets_verified), clo
 - [ ] Single fresh whole-change review; Important/Critical one RED→GREEN pass, Minor ledger/final. Commit/push/PR3; exact head Linux/Windows/ESP CI directly verify and record in PR. Preserve worktree.
 
 Task1 scope correction: 기존 PersistentGuard도 profile을 요구한다. 검증된 로컬 builtin hit의 RAM epoch admission을 추가하며 duplicate/mismatch/cancel/reboot/fatal/default-closed tests RED→GREEN으로 검사한다. 기존3인자 reserve 회계 동작과 SWK1 권한은 보존한다.
+
+Single fresh whole-change review completed; one RED9→GREEN70 fix pass and final standalone381PASS7SKIP/root487PASS2SKIP/S3 build verified. Publish/CI results are post-commit evidence in PR#3; no extra review cycle.

@@ -19,6 +19,7 @@ char wrong[]="wn9_wrong";
 char* names[]={name};
 esp_wn_iface_t iface{};
 int detects=0,cleans=0,ret=0;
+srmodel_list_t* shared=nullptr;
 model_iface_data_t* create(const void* n,det_mode_t mode) {
   events+='c';assert(std::strcmp(static_cast<const char*>(n),name)==0);
   assert(mode==DET_MODE_90);return scenario=="create_failure"?nullptr:&data;
@@ -41,9 +42,10 @@ void destroy(model_iface_data_t* d){assert(d==&data);events+='d';}
 }
 extern "C" srmodel_list_t* esp_srmodel_init(const char* partition) {
   assert(std::strcmp(partition,"model")==0);events+='i';
-  return scenario=="missing_list"?nullptr:&list;
+  shared=scenario=="missing_list"?nullptr:&list;return shared;
 }
-extern "C" void esp_srmodel_deinit(srmodel_list_t* l) {assert(l==&list);events+='l';}
+extern "C" void esp_srmodel_deinit(srmodel_list_t* l) {assert(l==&list);events+='l';shared=nullptr;}
+extern "C" srmodel_list_t* get_static_srmodels() {return shared;}
 extern "C" char* esp_srmodel_filter(srmodel_list_t* l,const char* a,const char* b) {
   assert(l==&list && std::strcmp(a,"wn")==0 && std::strcmp(b,"histackchan_tts3")==0);
   events+='f';if(scenario=="missing_name")return nullptr;
@@ -66,6 +68,23 @@ int main(int argc,char** argv) {
   if(scenario=="no_detect")iface.detect=nullptr;
   if(scenario=="no_clean")iface.clean=nullptr;
   if(scenario=="no_destroy")iface.destroy=nullptr;
+  if(scenario=="overlap" || scenario=="preexisting_sdk") {
+    if(scenario=="preexisting_sdk") {
+      shared=&list;
+      K151WakeNetPort denied;assert(!denied.prepare(true,true) && events.empty());
+      shared=nullptr;
+    }
+    K151WakeNetPort first,second;
+    assert(first.prepare(true,true));
+    const auto before=events;
+    assert(!second.prepare(true,true));second.close();
+    assert(events==before && first.ready());
+    first.close();assert(events=="ifhcdl");
+    assert(!second.prepare(true,true)); // Failed lifecycle cannot silently retry.
+    {K151WakeNetPort fresh;assert(fresh.prepare(true,true));}
+    assert(events=="ifhcdlifhcdl");
+    std::cout<<"single SDK owner PASS; no device/inference/API\n";return 0;
+  }
   {
     (void)K151WakeNetPort::compiled_link_marker();assert(events.empty());
     K151WakeNetPort p;
@@ -91,6 +110,8 @@ int main(int argc,char** argv) {
         assert(p.detect(input)==NativeWakeResult::error && !p.ready());
         assert(p.detect(samples)==NativeWakeResult::error);
         assert(detects==(scenario=="unknown"?1:0));
+        assert(events=="ifhcdl"); // Fault releases speech context before scope ends.
+        p.close();assert(events=="ifhcdl");
       } else {
         assert(p.reset() && cleans==1);
         ret=0;assert(p.detect(samples)==NativeWakeResult::none);

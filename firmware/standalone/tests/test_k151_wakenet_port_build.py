@@ -45,6 +45,8 @@ def compiled(tmp_path_factory):
 @pytest.mark.parametrize(
     "case",
     [
+        "overlap",
+        "preexisting_sdk",
         "gate",
         "valid",
         "closed",
