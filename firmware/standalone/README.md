@@ -290,6 +290,22 @@ establish real-human accuracy, false-wakes/hour, latency, RAM or safety.
 See `docs/2026-11-20-linear-kws-postfreeze-rejected.md`. No live firmware
 or PMIC, I2S, microphone, STOP, NVS, OTA, and factory image was modified.
 
+## 2026-11-20 tiny 1D CNN MFCC experiment — HOST ONLY
+
+A separate trainable temporal-convolution keyword **research** model has
+been added in `core/offline_conv_kws.hpp` with eight 3-frame filters
+over 13 MFCC coefficients, ReLU and 4-region pooling, 353 float32
+parameters and a 1,423-byte `SKWC1` binary file. This is not a
+phoneme ASR model. Development data: 6 known Heami synthetic wake and
+26 known nonwake calibration utterances, with five deterministic
+augmentations each. Training-only results were 30/30 wake accepts
+and 5/130 wrong nonwake accepts, **not real accuracy**.
+The model and all fixed settings were committed before fresh TTS
+evaluation, in `fixtures/korean_heami_conv_kws_20261120/`.
+See `docs/2026-11-20-tiny-conv-mfcc-kws-development.md`.
+This code is compiled **only for host tests**, not into ESP-IDF.
+No hardware activation or K151 HOLD change is allowed.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
