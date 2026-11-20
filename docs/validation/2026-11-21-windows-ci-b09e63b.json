@@ -1,0 +1,189 @@
+{
+  "source_head": "b09e63bb3c14ab7e8bf170a8a58e387073bc1d6e",
+  "success": 7,
+  "failure": 2,
+  "rerun": false,
+  "push_run": 44765607062,
+  "pr_run": 44765623555,
+  "target_run": 44765623545,
+  "failed_windows_job": 136389277461,
+  "target_compile_error": "Mbed TLS4.1 removed legacy mbedtls/sha256.h",
+  "windows_soak": {
+    "timing_diagnostics": {
+      "stages": {
+        "sqlite_begin": {
+          "count": 2295,
+          "total_s": 0.15106480000082456,
+          "max_s": 0.0024792999999476706
+        },
+        "sqlite_body": {
+          "count": 2295,
+          "total_s": 8.418306900000687,
+          "max_s": 0.5117577999999412
+        },
+        "sqlite_close": {
+          "count": 2295,
+          "total_s": 0.1565257000011684,
+          "max_s": 0.00045550000004368485
+        },
+        "sqlite_commit": {
+          "count": 2295,
+          "total_s": 64.28601270000036,
+          "max_s": 2.675010800000109
+        },
+        "sqlite_connect": {
+          "count": 2295,
+          "total_s": 1.2594581000004723,
+          "max_s": 0.005542800000000625
+        },
+        "sqlite_schema": {
+          "count": 11475,
+          "total_s": 0.2434340999967617,
+          "max_s": 0.0005426000000170461
+        },
+        "storage_delivery": {
+          "count": 9488,
+          "total_s": 3.3386794000076634,
+          "max_s": 0.001072900000053778
+        },
+        "storage_executor_wait": {
+          "count": 9489,
+          "total_s": 2.000478600000065,
+          "max_s": 0.004379699999958575
+        },
+        "storage_operation": {
+          "count": 9489,
+          "total_s": 200.7331761999946,
+          "max_s": 3.4928072000000157
+        },
+        "storage_serial_wait": {
+          "count": 9489,
+          "total_s": 4.69398050000035,
+          "max_s": 2.4739128999999593
+        }
+      },
+      "operations": {
+        "other": 7202,
+        "lease_acquire": 8,
+        "lease_check": 2227,
+        "lease_renew": 52
+      },
+      "interruption_count": 1,
+      "interruptions": [
+        {
+          "operation": "lease_check",
+          "stage": "sqlite_commit",
+          "elapsed_s": 3.1134722000000465
+        }
+      ],
+      "loop_lag_max_s": 0.06946469999996907,
+      "loop_samples": 9133
+    },
+    "passed": false,
+    "cycles": 1941,
+    "measured_cycles": 1841,
+    "wall_elapsed_s": 205.031,
+    "virtual_elapsed_s": 58230,
+    "requested_duration_s": null,
+    "python_traced_growth_bytes": 81208,
+    "python_traced_peak_bytes": 1154626,
+    "max_live_tasks": 2,
+    "task_growth": 0,
+    "remaining_tasks": 0,
+    "history_peak": 100,
+    "transition_peak": 100,
+    "robot_history_peak": 64,
+    "restarts": 7,
+    "restoration_checks": 7,
+    "cloud_requests": 0,
+    "results": {
+      "executed": 486,
+      "idle": 388,
+      "unchanged": 194,
+      "speech_cooldown": 872
+    },
+    "violations": [
+      "engine_failure"
+    ],
+    "failure": {
+      "cycle": 1941,
+      "event": "TIMER_OBSERVE",
+      "result_code": "stopped",
+      "engine_state": "ERROR",
+      "engine_stopped": true,
+      "action_stopped": true,
+      "action_faulted": true,
+      "lease_lost": true,
+      "control_loss_reason": "check_timeout"
+    },
+    "max_cycle_duration_s": 6.2029999999999745,
+    "max_cycle_gap_s": 3.5,
+    "max_wall_clock_drift_s": 0.016020778655956747
+  },
+  "jobs": [
+    {
+      "id": 136389277022,
+      "run_id": 44765607062,
+      "name": "ubuntu-24.04 / Python 3.12",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 136389277408,
+      "run_id": 44765607062,
+      "name": "windows-latest / Python 3.12",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 136389277461,
+      "run_id": 44765607062,
+      "name": "windows-latest / Python 3.11",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 136389277539,
+      "run_id": 44765607062,
+      "name": "ubuntu-24.04 / Python 3.11",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 136389334024,
+      "run_id": 44765623555,
+      "name": "ubuntu-24.04 / Python 3.11",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 136389334701,
+      "run_id": 44765623555,
+      "name": "windows-latest / Python 3.11",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 136389334772,
+      "run_id": 44765623555,
+      "name": "windows-latest / Python 3.12",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 136389334852,
+      "run_id": 44765623555,
+      "name": "ubuntu-24.04 / Python 3.12",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 136389332490,
+      "run_id": 44765623545,
+      "name": "ESP-IDF v6.1 / ESP32-S3 (never install)",
+      "status": "completed",
+      "conclusion": "failure"
+    }
+  ]
+}
+

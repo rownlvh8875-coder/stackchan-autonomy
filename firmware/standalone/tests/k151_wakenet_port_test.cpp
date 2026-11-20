@@ -3,6 +3,7 @@
 #include "k151_wakenet_port.hpp"
 #include "k151_model_assets.hpp"
 #include <esp_partition.h>
+#include <psa/crypto.h>
 #include <array>
 #include <cassert>
 #include <cstring>
@@ -72,8 +73,14 @@ void destroy(model_iface_data_t* d){assert(d==&data);events+='d';}
 }
 extern "C" bool esp_ptr_external_ram(const void*) {return scenario=="embedded_psram";}
 extern "C" bool esp_ptr_in_drom(const void*) {return scenario!="embedded_mutable";}
-extern "C" int mbedtls_sha256(const unsigned char* p,size_t n,unsigned char* hash,int small) {
-  assert(p==embedded.data() && n==embedded.size() && small==0);++hashes;
+extern "C" psa_status_t psa_crypto_init() {
+  if(scenario=="embedded_crypto_revoke_init")owner=false;
+  return scenario=="embedded_crypto_init_error"?-1:PSA_SUCCESS;
+}
+extern "C" psa_status_t psa_hash_compute(psa_algorithm_t alg,const uint8_t* p,size_t n,
+                                        uint8_t* hash,size_t capacity,size_t* used) {
+  assert(p==embedded.data() && n==embedded.size() && alg==PSA_ALG_SHA_256 && capacity==32);
+  ++hashes;*used=scenario=="embedded_bad_digest_length"?31:32;
   constexpr std::array<uint8_t,32> expected{
     0x02,0x55,0x85,0x5e,0x56,0xbf,0x72,0xd1,0xe0,0x72,0xd2,0xe0,0xcb,0xee,0x4f,0xb3,
     0xce,0x1a,0xc2,0xc4,0x8f,0x7f,0xee,0x6c,0x8c,0xd5,0x91,0xf8,0x3e,0x59,0xed,0x95};

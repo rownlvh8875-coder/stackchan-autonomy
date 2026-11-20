@@ -39,3 +39,21 @@ Wrong ELF/bin pairing regression RED (absent binding); added descriptor SHA
 comparison; verification follows. No second review. Target build/CI pending.
 No device actions this turn; A/B original hashes rechecked and private full
 slot1 restore slice created. No backup bytes are published.
+
+Target b09e63b: HOLD compile/link passed; separate bench compile FAILED because
+IDF6.1 pins Mbed TLS4.1 and has no legacy mbedtls/sha256.h. Reproduced locally
+by making the obsolete-header double reject. Replaced with pinned PSA Crypto
+init/hash API, exact32-byte output, live owner recheck and no key/storage calls.
+Added init-error/init-revocation/digest-length cases; focused71PASS, Ruff PASS.
+Keep b09 target failure in history; a changed-source build is not a rerun.
+Public review artifact also carries IDF/MbedTLS/SR license notices.
+
+Post-target-API correction full standalone448PASS5SKIP (94.12s). Build graph
+rejects NVS/Wi-Fi/HTTP/I2S components; prior target graph confirmed absence.
+
+Exact b09 CI finished7/9: push3/4 (Windows3.11 check_timeout), PR4/4,
+target0/1. New failed lease_check was interrupted inside SQLite COMMIT3.1134722s,
+loop lag69.4647ms, executor wait4.3797ms; disk I/O vs worker descheduling remains
+unresolved. Each check durably advances the anti-rollback coordination clock;
+do not remove/relax that write or timeout just to obtain green. Numeric evidence
+in docs/validation/2026-11-21-windows-ci-b09e63b.json. No failed run rerun.

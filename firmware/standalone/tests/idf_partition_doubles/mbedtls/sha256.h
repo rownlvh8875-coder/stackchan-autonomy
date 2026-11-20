@@ -1,3 +1,1 @@
-#pragma once
-#include <stddef.h>
-extern "C" int mbedtls_sha256(const unsigned char*,size_t,unsigned char*,int);
+#error "mbedtls/sha256.h is unavailable in pinned ESP-IDF 6.1 (Mbed TLS 4); use PSA crypto"

@@ -58,6 +58,21 @@ jobs:
             --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" \
             --source-head "$(git rev-parse HEAD)" \
             --out firmware/standalone/resource_bench/validation-manifest.json
+          mkdir -p firmware/standalone/resource_bench/review-notices
+          cp "$IDF_PATH/LICENSE" firmware/standalone/resource_bench/review-notices/ESP-IDF-LICENSE
+          cp "$IDF_PATH/components/mbedtls/mbedtls/LICENSE" firmware/standalone/resource_bench/review-notices/Mbed-TLS-LICENSE
+          cp firmware/standalone/tests/sdk_esp_sr_2_4_7/LICENSE firmware/standalone/resource_bench/review-notices/ESP-SR-LICENSE
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          source = Path("firmware/standalone/resource_bench/managed_components")
+          dest = Path("firmware/standalone/resource_bench/review-notices/components")
+          for notice in source.rglob("*"):
+              if notice.is_file() and notice.name.startswith(("LICENSE", "NOTICE")):
+                  target = dest / notice.relative_to(source)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(notice, target)
+          PY
       - name: Publish SHA/size proof only (NO firmware binary)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -74,6 +89,6 @@ jobs:
             firmware/standalone/resource_bench/build/k151_resource_bench.bin
             firmware/standalone/resource_bench/build/k151_resource_bench.elf
             firmware/standalone/resource_bench/validation-manifest.json
-            firmware/standalone/tests/sdk_esp_sr_2_4_7/LICENSE
+            firmware/standalone/resource_bench/review-notices/
           if-no-files-found: error
           retention-days: 14
