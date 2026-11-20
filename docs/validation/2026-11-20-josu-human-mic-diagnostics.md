@@ -70,3 +70,7 @@
 - PC3파일: **65PASS3SKIP**,6.05초. Linux에서는 실제 Windows CMD를 실행하지 않았다.
 - Ruff check PASS / format313filesPASS / git diff check PASS.
 - 수정 후 wheel/sdist 재빌드 및 독립 wheel Opus/Mock MCP·GPT·재연결·observer PASS.
+
+## 첫 새 CI의 Windows 실패 (숨김 없이 기록)
+
+f932d5a에서 Linux Python3.11/3.12 및 ESP32-S3 compile-only는 PASS였다. Windows3.11/3.12의 PC시험은 **67PASS1FAIL**: `test_parent_replacement_before_create_does_not_write_outside`. `FILE_READ_ATTRIBUTES`만 요청한 디렉터리 핸들은 data-access sharing 검사를 강제하지 않아 부모 교체를 막지 못했다. 새 수정은 `GENERIC_READ`(FILE_LIST_DIRECTORY 포함)로 핸들을 열어 WRITE/DELETE 공유 거부를 적용한다. 동일한 Windows 회귀를 완화하거나 건너뛰지 않고 새 head CI에서 다시 확인한다.

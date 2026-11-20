@@ -60,7 +60,10 @@ def _windows_directories(root, parts):
             if index:
                 current = current / part
                 current.mkdir(mode=0o700, exist_ok=True)
-            handle = create(str(current), 0x80, 1, None, 3, 0x02000000 | 0x00200000, None)
+            # FILE_READ_ATTRIBUTES alone is exempt from data-access sharing checks.
+            # GENERIC_READ includes FILE_LIST_DIRECTORY, so denial of DELETE/WRITE
+            # sharing actually prevents rename/reparse of the opened directory.
+            handle = create(str(current), 0x80000000, 1, None, 3, 0x02000000 | 0x00200000, None)
             if handle == wintypes.HANDLE(-1).value:
                 raise ctypes.WinError(ctypes.get_last_error())
             handles.append(handle)
