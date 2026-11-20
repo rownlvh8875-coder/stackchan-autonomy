@@ -95,6 +95,7 @@ def test_registration_freezes_before_separate_evaluation_and_baseline_comparison
         "quiet_windows": 3,
     }
     assert report["baseline"]["wake_total"] == 5 and report["baseline"]["nonwake_total"] == 10
+    assert report["quiet_quality_warning_windows"] == 0
     assert [s for s, _, _ in calls] == ["enrollment"] * 3 + ["calibration"] * 15 + [
         "evaluation"
     ] * 18
@@ -371,10 +372,87 @@ def test_frontend_passes_private_raw_digest_without_logging_it(
     target = enroll.ROOT / ".local" / "capture-boundary-profile.swk1"
     assert (
         enroll.main(
-            ["--enroll", "--probe-exe", str(probe_exe), "--device", "0", "--output", str(target)]
+            [
+                "--enroll",
+                "--probe-exe",
+                str(probe_exe),
+                "--device",
+                "0",
+                "--seconds",
+                "2.5",
+                "--output",
+                str(target),
+            ]
         )
         == 3
     )
     output = capsys.readouterr().out
     assert hashlib.sha256(bytes(240000)).hexdigest() not in output
     assert not target.exists()
+
+
+@pytest.mark.parametrize("issue", ["CAPTURE_EDGE_ACTIVITY", "CLIPPING"])
+@pytest.mark.parametrize("false_wake", [False, True])
+def test_quiet_background_edge_is_scored_not_discarded(enroll, probe_exe, false_wake, issue):
+    source = synthetic_capture(enroll)
+
+    def capture(stage, label, index, prompt):
+        if label != "quiet":
+            return source(stage, label, index, prompt)
+        wav, diagnostic, digest = source(stage, "wake" if false_wake else "nonwake", index, prompt)
+        diagnostic["quality_issues"] = [issue]
+        return wav, diagnostic, digest
+
+    model, report = enroll.run_session(
+        probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), capture
+    )
+    assert report["personal"]["quiet_windows"] == 3
+    assert report["quiet_quality_warning_windows"] == 3
+    if false_wake:
+        assert model is None and report["personal"]["quiet_accepted"] > 0
+        assert report["status"] == "PC_SESSION_FAILED_NEW_EVALUATION_REQUIRED"
+    else:
+        assert model is not None and report["personal"]["quiet_accepted"] == 0
+
+
+def test_quiet_malformed_audio_is_not_silently_counted_as_correct_rejection(enroll, probe_exe):
+    source = synthetic_capture(enroll)
+
+    def capture(stage, label, index, prompt):
+        if label != "quiet":
+            return source(stage, label, index, prompt)
+        return (
+            b"PRIVATE_MALFORMED_AUDIO",
+            {"quality_issues": ["CAPTURE_EDGE_ACTIVITY"]},
+            hashlib.sha256(b"fresh").digest(),
+        )
+
+    with pytest.raises(enroll.EnrollmentError, match="^invalid_wave$"):
+        enroll.run_session(probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), capture)
+
+
+def test_quiet_valid_pcm_below_feature_floor_counts_as_rejection_not_io_failure(enroll, probe_exe):
+    np = pytest.importorskip("numpy")
+    source = synthetic_capture(enroll)
+
+    def capture(stage, label, index, prompt):
+        if label != "quiet":
+            return source(stage, label, index, prompt)
+        raw = np.random.default_rng(900 + index).integers(-2, 3, 24000, dtype=np.int16)
+        out = io.BytesIO()
+        with wave.open(out, "wb") as stream:
+            stream.setnchannels(1)
+            stream.setsampwidth(2)
+            stream.setframerate(24000)
+            stream.writeframes(raw.astype("<i2").tobytes())
+        return (
+            out.getvalue(),
+            {"quality_issues": ["CAPTURE_EDGE_ACTIVITY"]},
+            hashlib.sha256(raw.tobytes()).digest(),
+        )
+
+    model, report = enroll.run_session(
+        probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), capture
+    )
+    assert model is not None and report["personal"]["quiet_accepted"] == 0
+    assert report["personal"]["quiet_windows"] == 3

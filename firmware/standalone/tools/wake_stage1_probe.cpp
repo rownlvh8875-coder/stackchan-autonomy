@@ -122,9 +122,18 @@ int private_pipe(std::string_view mode) {
     return refuse();
   auto all = std::span<const uint8_t>(*bytes);
   auto profile = decode_wake_profile(all.subspan(2,profile_size));
-  auto feature = feature_from_wav(all.subspan(2+profile_size));
+  auto pcm = parse_wake_pcm24k_wav(all.subspan(2+profile_size));
   std::fill(bytes->begin(), bytes->end(), uint8_t{0});
-  if (!profile || !feature) return refuse();
+  if (!profile || !pcm) return refuse();
+  auto feature = offline_wake_extract(*pcm);
+  std::fill(pcm->begin(), pcm->end(), int16_t{0});
+  if (!feature) {
+    // Valid PCM may naturally have no usable acoustic feature. This is a
+    // non-trigger, not malformed input or an unavailable helper process.
+    std::cout << "{\"accepted\":false,\"distance_q8\":null,\"limit_q8\":"
+              << profile->limit_q8 << "}\n";
+    return std::cout.good() ? 0 : refuse();
+  }
   float best = std::numeric_limits<float>::infinity();
   for (const auto &sample : profile->templates)
     best = std::min(best, wake_dtw_distance(sample,*feature)*256.f);

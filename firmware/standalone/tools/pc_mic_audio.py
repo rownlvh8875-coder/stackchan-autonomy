@@ -35,7 +35,7 @@ def require_device(sd, device, expected):
 
 
 def analyze_48k(samples, np):
-    """Keep the legacy FIR/400ms trim, expose why a sample is unsuitable to enroll.
+    """Keep the FIR/400ms context, distinguish dominant from weaker energy activity.
 
     Activity touching a capture edge is a *risk*, not evidence of missing phonemes.
     Neither energy nor acoustic matching proves which word was actually spoken.
@@ -71,8 +71,15 @@ def analyze_48k(samples, np):
         energy = np.append(energy, np.sqrt(np.mean(tail * tail)) / 32768.0)
         tail.fill(0)
     floor = float(np.percentile(energy, 20))
-    threshold = max(0.002, floor * 3.0)
+    base_threshold = max(0.002, floor * 3.0)
+    base_active = np.flatnonzero(energy > base_threshold)
+    peak_block = float(np.max(energy))
+    # Energy only, not a speech/language model. Do not bridge a strong interior
+    # utterance to much weaker, remote background activity at the capture edge.
+    threshold = max(base_threshold, peak_block * 0.10)
     active = np.flatnonzero(energy > threshold)
+    lower = np.setdiff1d(base_active, active, assume_unique=True)
+    lower_edge = bool(len(lower) and (lower[0] == 0 or lower[-1] == len(energy) - 1))
     issues = []
     if clipped >= 0.001:
         issues.append("CLIPPING")
@@ -88,6 +95,10 @@ def analyze_48k(samples, np):
         "clipped_fraction": round(clipped, 8),
         "noise_floor_rms": round(floor, 8),
         "vad_threshold_rms": round(threshold, 8),
+        "base_vad_threshold_rms": round(base_threshold, 8),
+        "peak_block_rms": round(peak_block, 8),
+        "lower_energy_activity_blocks": len(lower),
+        "lower_energy_capture_edge_activity": lower_edge,
         "active_blocks_20ms": len(active),
         "capture_edge_activity": False,
         "quality_issues": issues,
@@ -98,10 +109,15 @@ def analyze_48k(samples, np):
         return None, diagnostics
     first = int(active[0]) * block
     last = min(len(sample24), (int(active[-1]) + 1) * block)
-    edge = first == 0 or last == len(sample24)
+    begin, end = max(0, first - 9600), min(len(sample24), last + 9600)
+    # Weak ending phonemes within retained context still count as boundary risk.
+    # Ignore only weaker activity outside that context, never a strong edge.
+    edge = bool(
+        (begin == 0 and base_active[0] == 0)
+        or (end == len(sample24) and base_active[-1] == len(energy) - 1)
+    )
     if edge:
         issues.append("CAPTURE_EDGE_ACTIVITY")
-    begin, end = max(0, first - 9600), min(len(sample24), last + 9600)
     diagnostics.update(
         activity_start_ms=first / 24,
         activity_end_ms=last / 24,

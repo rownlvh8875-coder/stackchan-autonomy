@@ -95,6 +95,9 @@ def record_laptop_mic(
             dtype="int16",
             blocking=True,
         )[:, 0].copy()
+        print(
+            json.dumps({"stage": "NOTEBOOK_MIC_RECORDING_FINISHED", "seconds": seconds}), flush=True
+        )
     except AudioError:
         raise
     except Exception as exc:
@@ -151,7 +154,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--diagnostics", action="store_true", help="numeric quality, distance and timing only"
     )
-    parser.add_argument("--seconds", type=float, default=2.5)
+    parser.add_argument("--seconds", type=float, default=3.0)
     args = parser.parse_args(argv)
     try:
         details = {}
@@ -172,12 +175,14 @@ def main(argv=None) -> int:
         tracemalloc.start()
         started = time.perf_counter()
         try:
-            status = "NO_SPEECH_ACTIVITY" if wav is None else classify_wav(probe, profile, wav)
-            match = (
-                score_wav(probe, profile.read_bytes(), wav)
-                if wav is not None and args.diagnostics
-                else None
-            )
+            match = None
+            if wav is None:
+                status = "NO_SPEECH_ACTIVITY"
+            elif args.diagnostics:
+                match = score_wav(probe, profile.read_bytes(), wav)
+                status = "UNVERIFIED_MATCH" if match["accepted"] else "UNVERIFIED_NO_MATCH"
+            else:
+                status = classify_wav(probe, profile, wav)
             _, peak_bytes = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
@@ -199,7 +204,11 @@ def main(argv=None) -> int:
                 python_traced_peak_bytes=peak_bytes,
             )
             if match is not None:
-                result["distance_margin_q8"] = round(match["limit_q8"] - match["distance_q8"], 3)
+                result["distance_margin_q8"] = (
+                    round(match["limit_q8"] - match["distance_q8"], 3)
+                    if match["distance_q8"] is not None
+                    else None
+                )
         if frames is not None:
             result["trimmed_frames_24khz"] = frames
         print(json.dumps(result, ensure_ascii=False))

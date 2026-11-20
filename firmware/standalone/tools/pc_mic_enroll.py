@@ -46,6 +46,7 @@ def run_session(probe, baseline, capture):
     validate_profile(baseline)
     seen_captures, seen_audio, seen_features, training, durations = set(), set(), set(), [], []
     personal = None
+    quiet_warning_windows = 0
 
     def counts():
         return dict(
@@ -79,8 +80,16 @@ def run_session(probe, baseline, capture):
                 prompt = NEGATIVES[index] if label == "nonwake" else "말하지 않고 생활 소음만"
             wav, diagnostic, capture_digest = capture(stage, label, index, prompt)
             issues = diagnostic.get("quality_issues", [])
-            quiet = label == "quiet" and wav is None and issues == ["NO_SPEECH_ACTIVITY"]
-            if not quiet and (wav is None or issues):
+            if label == "quiet":
+                # This is an independently labelled noise test, not a speech
+                # template. Edge/clipping noise must reach the false-wake test.
+                known = {"NO_SPEECH_ACTIVITY", "CAPTURE_EDGE_ACTIVITY", "CLIPPING"}
+                if any(issue not in known for issue in issues) or (
+                    wav is None and "NO_SPEECH_ACTIVITY" not in issues
+                ):
+                    raise EnrollmentError("capture_quality_rejected")
+                quiet_warning_windows += any(issue != "NO_SPEECH_ACTIVITY" for issue in issues)
+            elif wav is None or issues:
                 raise EnrollmentError("capture_quality_rejected")
             if not isinstance(capture_digest, bytes) or len(capture_digest) != 32:
                 raise EnrollmentError("missing_private_capture_digest")
@@ -93,17 +102,18 @@ def run_session(probe, baseline, capture):
                 if digest in seen_audio:
                     raise EnrollmentError("duplicate_recording")
                 seen_audio.add(digest)
-                feature = helper(probe, "--features", wav)
-                if len(feature) != 832:
-                    raise EnrollmentError("invalid_feature")
-                fingerprint = hashlib.sha256(feature).digest()
-                if fingerprint in seen_features:
-                    raise EnrollmentError("duplicate_feature")
-                seen_features.add(fingerprint)
-                if stage != "evaluation":
-                    training.append(feature)
-                    durations.append((time.perf_counter() - started) * 1000)
-                    continue
+                if label != "quiet":
+                    feature = helper(probe, "--features", wav)
+                    if len(feature) != 832:
+                        raise EnrollmentError("invalid_feature")
+                    fingerprint = hashlib.sha256(feature).digest()
+                    if fingerprint in seen_features:
+                        raise EnrollmentError("duplicate_feature")
+                    seen_features.add(fingerprint)
+                    if stage != "evaluation":
+                        training.append(feature)
+                        durations.append((time.perf_counter() - started) * 1000)
+                        continue
             for model, stats in [(personal, personal_counts), (baseline, baseline_counts)]:
                 accepted = bool(wav is not None and score_wav(probe, model, wav)["accepted"])
                 if label == "quiet":
@@ -125,6 +135,7 @@ def run_session(probe, baseline, capture):
         "wake_phrase": "조수",
         "personal": personal_counts,
         "baseline": baseline_counts,
+        "quiet_quality_warning_windows": quiet_warning_windows,
         "threshold_frozen_before_evaluation": True,
         "evaluation_reused_for_training": False,
         "processing_ms_max": round(max(durations), 3),
@@ -154,7 +165,7 @@ def main(argv=None):
     device = parser.add_mutually_exclusive_group()
     device.add_argument("--device", type=int)
     device.add_argument("--choose-device", action="store_true")
-    parser.add_argument("--seconds", type=float, default=2.5)
+    parser.add_argument("--seconds", type=float, default=3.0)
     try:
         args = parser.parse_args(argv)
         if not args.enroll or args.probe_exe is None or args.output is None:

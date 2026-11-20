@@ -47,11 +47,17 @@ def score_wav(probe, profile, wav):
         distance, limit = score["distance_q8"], score["limit_q8"]
         if (
             type(score["accepted"]) is not bool
-            or type(distance) not in (int, float)
-            or not math.isfinite(distance)
-            or distance < 0
             or type(limit) is not int
             or limit != int.from_bytes(profile[5:7], "little")
+        ):
+            raise ValueError
+        if distance is None:
+            if score["accepted"]:
+                raise ValueError
+        elif (
+            type(distance) not in (int, float)
+            or not math.isfinite(distance)
+            or distance < 0
             or score["accepted"] != (distance < limit)
         ):
             raise ValueError

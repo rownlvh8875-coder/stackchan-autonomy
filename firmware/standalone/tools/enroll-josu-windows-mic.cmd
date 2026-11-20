@@ -8,9 +8,10 @@ if exist "%USERPROFILE%\.local\bin\uv.exe" set "SC_UV=%USERPROFILE%\.local\bin\u
 pushd "%~dp0..\..\.."
 if errorlevel 1 exit /b 2
 echo Explicit PC-only private JOSU enrollment. Ctrl+C cancels.
+echo Each recording is 3 seconds. Wait for the next prompt before pressing Enter again.
 echo 3 enrollment, 5+10 calibration, 5+10 fresh evaluation, 3 quiet windows.
 echo No WAV/features saved. Only a passing SWK1 is saved to .local\josu\owner.swk1
-"%SC_UV%" run --offline --no-project --with sounddevice==0.5.3 --with numpy==2.3.5 python firmware\standalone\tools\pc_mic_enroll.py --enroll --probe-exe .local\pc-wake\wake-stage1.exe --choose-device --output .local\josu\owner.swk1
+"%SC_UV%" run --offline --no-project --with sounddevice==0.5.3 --with numpy==2.3.5 python firmware\standalone\tools\pc_mic_enroll.py --enroll --probe-exe .local\pc-wake\wake-stage1.exe --choose-device --seconds 3 --output .local\josu\owner.swk1
 set "SC_RESULT=%ERRORLEVEL%"
 popd
 pause

@@ -189,3 +189,28 @@ def test_partial_final_block_activity_is_not_silently_discarded(audio, np):
     _, d = audio.analyze_48k(signal, np)
     assert d["capture_edge_activity"] and "CAPTURE_EDGE_ACTIVITY" in d["quality_issues"]
     assert d["activity_end_ms"] == 2515
+
+
+def test_weak_separate_tail_activity_does_not_extend_strong_utterance_to_capture_edge(audio, np):
+    signal = np.zeros(144000, dtype=np.int16)
+    strong = np.rint(10000 * np.sin(2 * np.pi * 800 * np.arange(24000) / 48000)).astype(np.int16)
+    weak = np.rint(160 * np.sin(2 * np.pi * 800 * np.arange(960) / 48000)).astype(np.int16)
+    signal[24000:48000] = strong
+    signal[-960:] = weak  # Weak > old0.002RMS, 2s after the primary activity.
+    trimmed, d = audio.analyze_48k(signal, np)
+    assert trimmed is not None and d["quality_issues"] == []
+    assert d["activity_start_ms"] == 500 and d["activity_end_ms"] == 1000
+    assert d["trailing_context_ms"] == 400
+    assert d["lower_energy_activity_blocks"] > 0
+    assert d["lower_energy_capture_edge_activity"] is True
+    assert not d["capture_edge_activity"]
+
+
+def test_weak_edge_inside_primary_context_remains_a_capture_risk(audio, np):
+    signal = np.zeros(144000, dtype=np.int16)
+    signal[120000:129600] = np.rint(
+        10000 * np.sin(2 * np.pi * 800 * np.arange(9600) / 48000)
+    ).astype(np.int16)
+    signal[-960:] = np.rint(160 * np.sin(2 * np.pi * 800 * np.arange(960) / 48000)).astype(np.int16)
+    _, d = audio.analyze_48k(signal, np)
+    assert d["capture_edge_activity"] and "CAPTURE_EDGE_ACTIVITY" in d["quality_issues"]

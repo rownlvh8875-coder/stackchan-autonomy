@@ -272,3 +272,24 @@ def test_fixture_diagnostics_expose_distance_but_not_biometric_feature(probe_exe
     assert data["match"]["distance_q8"] < data["match"]["limit_q8"]
     assert data["processing_ms"] >= 0 and data["python_traced_peak_bytes"] > 0
     assert "features" not in data and str(PROFILE) not in result.stdout
+
+
+def test_score_distinguishes_valid_no_feature_audio_from_malformed_wave(probe_exe):
+    profile = PROFILE.read_bytes()
+    out = io.BytesIO()
+    with wave.open(out, "wb") as stream:
+        stream.setnchannels(1)
+        stream.setsampwidth(2)
+        stream.setframerate(24000)
+        stream.writeframes(bytes(48000))
+    result = subprocess.run(
+        [str(probe_exe), "--score", "-"],
+        input=len(profile).to_bytes(2, "big") + profile + out.getvalue(),
+        capture_output=True,
+        timeout=20,
+    )
+    assert result.returncode == 0 and json.loads(result.stdout) == {
+        "accepted": False,
+        "distance_q8": None,
+        "limit_q8": 1003,
+    }
