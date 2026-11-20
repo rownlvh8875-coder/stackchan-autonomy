@@ -19,7 +19,7 @@ enum class VoiceTurnStep { inactive, waiting_for_speech, recording, answered, ab
 class VoiceTurnCoordinator final {
  public:
   VoiceTurnCoordinator(Session& session, PersistentGuard& ledger,
-                       WakeVoiceEntry& entry, MicFrameBridge& bridge,
+                       VoiceDialogEntry& entry, MicFrameBridge& bridge,
                        AudioGuard& audio, const std::atomic_bool& stop,
                        const std::atomic_bool& consent,
                        const std::atomic_bool& speaker_busy)
@@ -98,7 +98,7 @@ class VoiceTurnCoordinator final {
 
   Session& session_;
   PersistentGuard& ledger_;
-  WakeVoiceEntry& entry_;
+  VoiceDialogEntry& entry_;
   MicFrameBridge& bridge_;
   AudioGuard& audio_;
   const std::atomic_bool& stop_;
