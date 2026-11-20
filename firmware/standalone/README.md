@@ -12,6 +12,10 @@ branch without an explicit review/diff.
 
 New **development default** wake phrase is **조수**, replacing the previous 조수야 in freshly generated examples and PC-only exact-transcript research gates. The original frozen 조수야 datasets and experimental reports remain unchanged. New synthetic 조수 WAVs, SWK1 acoustic template, and regression tests are in fixtures/korean_josu_sapi_20261120/. See docs/2026-11-20-josu-wakeword-migration.md for methodology and limitations. Firmware HOLD remains active; neither real K151 wake recognition nor always-on speech has been enabled or validated.
 
+## 2026-11-20 PC microphone wake probe (host-only)
+
+The explicit single-use notebook-microphone prototype sends bounded 24kHz WAV **through stdin** to the original C++ SWK1 matcher; no raw audio is stored or uploaded. It does **not** access the K151 built-in microphone or activate GPT/speaker/servos. See [PC-only verification and limitations](docs/2026-11-20-pc-mic-josu-probe.md). Existing firmware HOLD remains unchanged.
+
 ## Included
 
 - `core/standalone_core.hpp`: bounded, versioned SCFG v1 framing, CRC integrity,

@@ -6,12 +6,19 @@
 #include "wake_wav_pcm.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <string_view>
 #include <vector>
+
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 using namespace stackchan::standalone;
 
@@ -33,6 +40,27 @@ std::optional<std::vector<uint8_t>> read_private_file(
     return std::nullopt;
   return out;
 }
+// Exactly one bounded WAV from stdin, for local microphones without a temp file.
+// The caller alone owns recording permission and buffering; no audio is logged.
+std::optional<std::vector<uint8_t>> read_stdin_wav(size_t bound) {
+#if defined(_WIN32)
+  if (_setmode(_fileno(stdin), _O_BINARY) == -1) return std::nullopt;
+#endif
+  std::vector<uint8_t> out;
+  std::array<char, 4096> buffer{};
+  for (;;) {
+    std::cin.read(buffer.data(), buffer.size());
+    const auto count = std::cin.gcount();
+    if (count < 0 || static_cast<size_t>(count) > bound - out.size())
+      return std::nullopt;
+    for (std::streamsize i = 0; i < count; ++i)
+      out.push_back(static_cast<uint8_t>(buffer[static_cast<size_t>(i)]));
+    if (std::cin.eof()) break;
+    if (std::cin.bad() || std::cin.fail()) return std::nullopt;
+  }
+  if (out.empty()) return std::nullopt;
+  return out;
+}
 int refuse() {
   std::cerr << "OFFLINE_WAKE_PROBE_REJECTED\n";
   return 2;
@@ -47,7 +75,9 @@ int main(int argc, char** argv) {
   std::fill(raw_profile->begin(), raw_profile->end(), uint8_t{0});
   if (!profile) return refuse();
 
-  auto wav = read_private_file(argv[2], kWakeWavMaxFileBytes);
+  auto wav = std::string_view(argv[2]) == "-" ?
+      read_stdin_wav(kWakeWavMaxFileBytes) :
+      read_private_file(argv[2], kWakeWavMaxFileBytes);
   if (!wav) return refuse();
   auto pcm = parse_wake_pcm24k_wav(*wav);
   std::fill(wav->begin(), wav->end(), uint8_t{0});
