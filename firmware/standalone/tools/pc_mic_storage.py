@@ -26,8 +26,8 @@ def output_target(path, root=ROOT):
 
 @contextlib.contextmanager
 def _windows_directories(root, parts):
-    # Hold each validated parent without WRITE/DELETE sharing. This prevents its
-    # replacement/reparse while path-based Win32 file/link calls run below it.
+    # Hold each validated, non-reparse parent without DELETE sharing. This
+    # prevents directory-entry replacement while permitting child-file publication.
     import ctypes
     from ctypes import wintypes
 
@@ -62,8 +62,9 @@ def _windows_directories(root, parts):
                 current.mkdir(mode=0o700, exist_ok=True)
             # FILE_READ_ATTRIBUTES alone is exempt from data-access sharing checks.
             # GENERIC_READ includes FILE_LIST_DIRECTORY, so denial of DELETE/WRITE
-            # sharing actually prevents rename/reparse of the opened directory.
-            handle = create(str(current), 0x80000000, 1, None, 3, 0x02000000 | 0x00200000, None)
+            # sharing actually prevents rename of the opened directory.
+            # CreateHardLinkW needs WRITE sharing on its parent; DELETE stays denied.
+            handle = create(str(current), 0x80000000, 3, None, 3, 0x02000000 | 0x00200000, None)
             if handle == wintypes.HANDLE(-1).value:
                 raise ctypes.WinError(ctypes.get_last_error())
             handles.append(handle)

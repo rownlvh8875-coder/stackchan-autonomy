@@ -74,3 +74,5 @@
 ## 첫 새 CI의 Windows 실패 (숨김 없이 기록)
 
 f932d5a에서 Linux Python3.11/3.12 및 ESP32-S3 compile-only는 PASS였다. Windows3.11/3.12의 PC시험은 **67PASS1FAIL**: `test_parent_replacement_before_create_does_not_write_outside`. `FILE_READ_ATTRIBUTES`만 요청한 디렉터리 핸들은 data-access sharing 검사를 강제하지 않아 부모 교체를 막지 못했다. 새 수정은 `GENERIC_READ`(FILE_LIST_DIRECTORY 포함)로 핸들을 열어 WRITE/DELETE 공유 거부를 적용한다. 동일한 Windows 회귀를 완화하거나 건너뛰지 않고 새 head CI에서 다시 확인한다.
+
+48f5aba의 후속 Windows CI는 부모 교체 회귀를 통과했으나, 정상 프로필 게시 시험에서 `CreateHardLinkW`의 부모 쓰기 접근과 공유 제한이 충돌해 **67PASS1FAIL**(WinError32)이었다. 디렉터리 `GENERIC_READ`와 삭제 공유 거부는 유지하고 쓰기 공유만 허용한다. 기존 junction은 핸들 열기/속성 검사에서 거부한다. 정상 게시·취소·기존 파일 보존·경로 교체 시험을 모두 유지하며 최종 판정은 [PR#3의 현재 head checks](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3/checks)에 남긴다. 이전 실패를 통과로 기록하지 않는다.

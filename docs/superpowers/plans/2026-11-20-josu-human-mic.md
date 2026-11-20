@@ -48,4 +48,6 @@ Interfaces: 명시 장치 선택·기대 identity, 3/5/10 고정 보정 후 5/10
 - [x] CI에 Linux/Windows PC tests 추가; 기존 ESP32-S3 compile-only 유지.
 - [x] 작업/검증 문서에 실제 결과·미검증·설치 HOLD·사용자 다음 명령 기록.
 - [x] 단일 fresh whole-branch review; Important/Critical만 회귀 RED→GREEN 한 번 수정.
-- [ ] `feat/wakeword-josu`에 커밋/일반 push, PR #3 내용 갱신, 정확한 head CI 확인.
+- [x] `feat/wakeword-josu`에 커밋/일반 push, PR #3 내용 갱신.
+
+최종 완료 판정은 [PR #3 현재 head의 CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3/checks)를 직접 확인한 뒤 내린다. Windows 경로 교체/정상 게시 회귀를 건너뛰지 않는다. 상세 실행 결과는 PR 설명과 검증 문서의 이력을 구분한다.
