@@ -321,6 +321,24 @@ were changed after the new holdout. See
 one synthetic Heami voice, not real human or in-room K151 measurements.
 Physical robot, firmware HOLD, GPIO, power, NVS and OTA remain unchanged.
 
+## 2026-11-20 local Korean Vosk second-stage wake confirmation — REJECTED
+
+The host-only `tools/wake_stage1_probe.cpp` and
+`tools/vosk_wake_second_stage.py` test a **two-stage gate**: the existing
+frozen augmented MFCC/DTW SWK1 must accept first, and a fully local Vosk
+Korean small ASR must transcribe **exactly "조수야"** second. The official
+`vosk-model-small-ko-0.22` language model is downloaded to a separate
+PC-only lab directory; it is not committed, bundled with firmware or called
+over a paid/cloud API. The 16 already published Heami TTS evaluation
+clips gave **stage1 wake 4/4, nonwake 1/12**; after local Vosk exact
+transcription **wake 0/4, nonwake 0/12**. The additional gate eliminated
+the observed false trigger but **rejected every true wake**, so it is NOT
+an acceptable autonomous wake detector. See
+`docs/2026-11-20-offline-korean-vosk-second-stage.md`.
+This was a same-voice synthetic smoke test, not real-human recognition.
+K151 ESP32-S3 HOLD, factory firmware, STOP, I2S, PMIC, NVS and OTA remain
+untouched; local Vosk model memory needs have not been verified for K151.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
