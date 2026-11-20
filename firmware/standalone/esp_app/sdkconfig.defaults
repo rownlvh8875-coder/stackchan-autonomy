@@ -1,0 +1,15 @@
+# Development target only. This generated partition layout is NOT K151 stock.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# No Wi-Fi credentials, API keys, OTA, or flashing options are baked in.
+
+# Keep SCFG USB Serial/JTAG separate from console and logs.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# HTTPS certificate-chain + hostname validation in dormant fixed-host transport.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
+
+# The Wi-Fi adapter additionally sets WIFI_STORAGE_RAM + init.nvs_enable=0.
+CONFIG_ESP_WIFI_NVS_ENABLED=n

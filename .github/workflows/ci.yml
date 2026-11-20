@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
         python: ["3.11", "3.12"]
     defaults:
       run:
@@ -42,7 +42,9 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Install Linux codec
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes libopus0
+        run: |
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install --yes libopus0 libcjson-dev
       - name: Install locked dependencies
         run: uv sync --frozen --python '${{ matrix.python }}'
       - name: Lint and formatting
@@ -51,6 +53,13 @@ jobs:
           uv run --frozen ruff format --check .
       - name: Offline test suite
         run: uv run --frozen pytest -q -ra --junitxml=.local/ci/junit.xml
+      - name: Offline standalone C++ safety, wake, and SCFG enrollment tests (host only)
+        if: runner.os == 'Linux'
+        run: uv run --frozen pytest -q firmware/standalone/tests
+      - name: Offline SCPS P-256 / AES-GCM authenticated pairing fixtures (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          uv run --frozen --with cryptography==46.0.4 python -m pytest -q firmware/standalone/tests/test_scps_reference.py firmware/standalone/tests/test_scps_usb_serial.py
       - name: Accelerated virtual 24-hour stability scenario
         run: uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --report .local/ci/soak.json
       - name: Build distributions

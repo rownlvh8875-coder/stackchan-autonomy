@@ -1,0 +1,117 @@
+{
+  "schema": "stackchan-private-wake-corpus-v1",
+  "samples": [
+    {
+      "id": "fresh-eval-01",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_01.wav"
+    },
+    {
+      "id": "fresh-eval-02",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_02.wav"
+    },
+    {
+      "id": "fresh-eval-03",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_03.wav"
+    },
+    {
+      "id": "fresh-eval-04",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_04.wav"
+    },
+    {
+      "id": "fresh-eval-05",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_05.wav"
+    },
+    {
+      "id": "fresh-eval-06",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_06.wav"
+    },
+    {
+      "id": "fresh-eval-07",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_07.wav"
+    },
+    {
+      "id": "fresh-eval-08",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_08.wav"
+    },
+    {
+      "id": "fresh-eval-09",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_09.wav"
+    },
+    {
+      "id": "fresh-eval-10",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_10.wav"
+    },
+    {
+      "id": "fresh-eval-11",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_11.wav"
+    },
+    {
+      "id": "fresh-eval-12",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_12.wav"
+    },
+    {
+      "id": "fresh-eval-13",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_13.wav"
+    },
+    {
+      "id": "fresh-eval-14",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_14.wav"
+    },
+    {
+      "id": "fresh-eval-15",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_15.wav"
+    },
+    {
+      "id": "fresh-eval-16",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_sapi_eval_after_recipe_freeze",
+      "file": "evaluation/fresh_16.wav"
+    }
+  ]
+}

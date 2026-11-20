@@ -1,0 +1,85 @@
+{
+  "kind": "synthetic_heami_nonwake_calibration_only_v1",
+  "labels": [
+    {
+      "file": "calibration/hard_negative_01.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_02.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_03.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_04.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_05.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_06.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_07.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_08.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_09.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_10.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_11.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_12.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_13.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_14.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_15.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    },
+    {
+      "file": "calibration/hard_negative_16.wav",
+      "label": "nonwake",
+      "role": "calibration"
+    }
+  ]
+}

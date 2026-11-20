@@ -16,3 +16,8 @@ build/
 .superpowers/
 .local/
 .worktrees/
+*.swk1
+*.scfgbundle
+# Private wake-phrase samples and local corpus manifests must not be committed.
+*.[wW][aA][vV]
+*.wake-corpus.json

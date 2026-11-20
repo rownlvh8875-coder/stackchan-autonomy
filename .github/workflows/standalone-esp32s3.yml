@@ -1,0 +1,52 @@
+name: K151 standalone ESP32-S3 compile only (NO FLASH)
+
+on:
+  push:
+    branches:
+      - feat/standalone-gpt-chat-reconstruction
+    paths:
+      - firmware/standalone/**
+      - .github/workflows/standalone-esp32s3.yml
+  pull_request:
+    paths:
+      - firmware/standalone/**
+      - .github/workflows/standalone-esp32s3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-only:
+    name: ESP-IDF v6.1 / ESP32-S3 (never install)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    container:
+      # Immutable multi-platform index of Espressif's tagged v6.1 build image.
+      image: espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify IDF toolchain and compile for ESP32-S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          IDF_SHA="$(git -C "$IDF_PATH" rev-parse HEAD)"
+          test "$IDF_SHA" = "fff9895c82d744c7237be8847347bdd1b07c6643"
+          idf.py -C firmware/standalone/esp_app set-target esp32s3
+          idf.py -C firmware/standalone/esp_app build
+          python3 firmware/standalone/tools/check_idf_build.py \
+            --elf firmware/standalone/esp_app/build/stackchan_standalone_hold.elf \
+            --bin firmware/standalone/esp_app/build/stackchan_standalone_hold.bin \
+            --idf-head "$IDF_SHA" \
+            --out firmware/standalone/esp_app/validation-manifest.json
+      - name: Publish SHA/size proof only (NO firmware binary)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: standalone-esp32s3-build-proof
+          path: firmware/standalone/esp_app/validation-manifest.json
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,117 @@
+{
+  "schema": "stackchan-private-wake-corpus-v1",
+  "samples": [
+    {
+      "id": "linear-eval-01",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_01.wav"
+    },
+    {
+      "id": "linear-eval-02",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_02.wav"
+    },
+    {
+      "id": "linear-eval-03",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_03.wav"
+    },
+    {
+      "id": "linear-eval-04",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_04.wav"
+    },
+    {
+      "id": "linear-eval-05",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_05.wav"
+    },
+    {
+      "id": "linear-eval-06",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_06.wav"
+    },
+    {
+      "id": "linear-eval-07",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_07.wav"
+    },
+    {
+      "id": "linear-eval-08",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_08.wav"
+    },
+    {
+      "id": "linear-eval-09",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_09.wav"
+    },
+    {
+      "id": "linear-eval-10",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_10.wav"
+    },
+    {
+      "id": "linear-eval-11",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_11.wav"
+    },
+    {
+      "id": "linear-eval-12",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_12.wav"
+    },
+    {
+      "id": "linear-eval-13",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_13.wav"
+    },
+    {
+      "id": "linear-eval-14",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_14.wav"
+    },
+    {
+      "id": "linear-eval-15",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_15.wav"
+    },
+    {
+      "id": "linear-eval-16",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_after_linear_model_commit",
+      "file": "evaluation/linear_eval_16.wav"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+NOT APPROVED FOR DEVICE INSTALLATION.
+This compile-only ESP32-S3 ELF does not include the K151 factory partition
+layout or active-slot/boot-selection proof. Do not flash any generated BIN,
+bootloader, partition table or OTA data. No flash or erase command is provided.
+No hardware peripherals, credential provisioning or paid API are enabled.

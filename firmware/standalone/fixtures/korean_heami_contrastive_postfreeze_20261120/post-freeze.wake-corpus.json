@@ -1,0 +1,117 @@
+{
+  "schema": "stackchan-private-wake-corpus-v1",
+  "samples": [
+    {
+      "id": "contrast-eval-01",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_01.wav"
+    },
+    {
+      "id": "contrast-eval-02",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_02.wav"
+    },
+    {
+      "id": "contrast-eval-03",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_03.wav"
+    },
+    {
+      "id": "contrast-eval-04",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_04.wav"
+    },
+    {
+      "id": "contrast-eval-05",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_05.wav"
+    },
+    {
+      "id": "contrast-eval-06",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_06.wav"
+    },
+    {
+      "id": "contrast-eval-07",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_07.wav"
+    },
+    {
+      "id": "contrast-eval-08",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_08.wav"
+    },
+    {
+      "id": "contrast-eval-09",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_09.wav"
+    },
+    {
+      "id": "contrast-eval-10",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_10.wav"
+    },
+    {
+      "id": "contrast-eval-11",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_11.wav"
+    },
+    {
+      "id": "contrast-eval-12",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_12.wav"
+    },
+    {
+      "id": "contrast-eval-13",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_13.wav"
+    },
+    {
+      "id": "contrast-eval-14",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_14.wav"
+    },
+    {
+      "id": "contrast-eval-15",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_15.wav"
+    },
+    {
+      "id": "contrast-eval-16",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "new_Heami_synth_after_a59e7be",
+      "file": "evaluation/contrast_eval_16.wav"
+    }
+  ]
+}
