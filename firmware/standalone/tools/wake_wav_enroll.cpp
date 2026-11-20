@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Offline private WAV -> calibrated SWK1 profile. Never contacts a device/API.
 // Labels and recording independence are operator-supplied, NOT proven here.
-#include "wake_features.hpp"
+#include "offline_wake_feature.hpp"
 #include "wake_wav_pcm.hpp"
 
 #include <algorithm>
@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
     if (!pcm) return refuse();
     for (const auto& prior : recorded.distinct)
       if (prior == *pcm) return refuse(); // metadata changes do not help.
-    const auto feature = wake_mfcc_from_24k(*pcm);
+    const auto feature = offline_wake_extract(*pcm);
     if (!feature) return refuse(); // includes silence or invalid energy.
     recorded.distinct.push_back(std::move(*pcm));
     target->push_back(*feature);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // PRIVATE WAV samples vs PRIVATE SWK1 profile, offline. NO networking or writes.
 // Labels are supplied by the user, NOT inferred from audio content.
-#include "wake_features.hpp"
+#include "offline_wake_feature.hpp"
 #include "wake_wav_pcm.hpp"
 
 #include <algorithm>
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
     for (const auto& prior : distinct_pcm)
       if (prior == *samples) return refuse();
 
-    const auto feature = wake_mfcc_from_24k(*samples);
+    const auto feature = offline_wake_extract(*samples);
     if (!feature) return refuse(); // Silence is not a valid ground-truth trial.
     const bool accepted = profile->accepts(*feature);
     if (positive) {
