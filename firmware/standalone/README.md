@@ -251,6 +251,15 @@ reduced false accepts on clean speech from 1/8 to 0/8, but only from 4/8 to
 **Not admissible for K151 hardware; do not deploy.** See
 `docs/2026-11-20-offline-contrastive-hardnegative-calibration.md`.
 
+After the filter was frozen in commit `a59e7be`, another same-Heami TTS
+holdout with **4 new wake and 12 new nonwake clips** was generated and
+compared in `fixtures/korean_heami_contrastive_postfreeze_20261120/`. It did
+not demonstrate any further reduction in false accepts (both variants were
+0/12 in the new test) but **increased wake misses**: clean 3/4->2/4,
+10dB 2/4->1/4, 80ms echo 2/4->0/4. **Candidate rejected; no K151 deploy.**
+See `docs/2026-11-20-contrastive-postfreeze-rejected.md` for the full
+record and limitations.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
