@@ -12,6 +12,8 @@ import subprocess
 import wave
 from pathlib import Path
 
+from pc_mic_audio import AudioError, analyze_48k, require_device
+
 MIN_SAMPLE_FRAMES_24K = 2400
 MAX_WAV_BYTES = 196608
 MAX_AUDIO_SECONDS = 3.0
@@ -51,48 +53,13 @@ def classify_wav(probe: Path, profile: Path, wav: bytes) -> str:
 
 
 def resample_and_trim_48k(samples, np):
-    """48kHz PCM16 -> 24kHz mono with low-pass FIR and simple energy trimming."""
-    if samples.ndim != 1 or not 4800 <= len(samples) <= 144000:
-        raise ProbeError("invalid_mic_audio_length")
-    if samples.dtype != np.dtype("int16"):
-        raise ProbeError("invalid_mic_audio_dtype")
-    n = np.arange(-40, 41, dtype=np.float64)
-    cut = 10500.0 / 48000.0
-    fir = 2.0 * cut * np.sinc(2.0 * cut * n) * np.hamming(81)
-    fir /= fir.sum()
-    signal = np.convolve(samples.astype(np.float64), fir, mode="same")[::2]
-    sample24 = np.rint(np.clip(signal, -32768, 32767)).astype(np.int16)
-    block = 480  # 20ms
-    complete = len(sample24) // block
-    energy = (
-        np.sqrt(
-            np.mean(
-                np.square(sample24[: complete * block].reshape(complete, block).astype(np.float64)),
-                axis=1,
-            )
-        )
-        / 32768.0
-    )
-    quiet_floor = float(np.percentile(energy, 20))
-    threshold = max(0.002, quiet_floor * 3.0)
-    active = np.flatnonzero(energy > threshold)
-    if len(active) < 3:
-        sample24.fill(0)
-        return None
-    # Preserve consonant onsets/trailing silence for the original MFCC model.
-    # This is a prototype choice checked on same-voice TTS, not human-calibrated.
-    context = 9600  # 400ms around activity; 100ms truncates the known wake clips.
-    begin = max(0, int(active[0]) * block - context)
-    end = min(len(sample24), (int(active[-1]) + 1) * block + context)
-    trimmed = sample24[begin:end].copy()
-    sample24.fill(0)
-    if not MIN_SAMPLE_FRAMES_24K <= len(trimmed) <= 72000:
-        trimmed.fill(0)
-        return None
-    return trimmed
+    """Compatibility wrapper; recording and enrollment share the same transform."""
+    return analyze_48k(samples, np)[0]
 
 
-def record_laptop_mic(device: int, seconds: float) -> tuple[bytes | None, int]:
+def record_laptop_mic(
+    device: int, seconds: float, *, expected_identity=None, diagnostics=None
+) -> tuple[bytes | None, int]:
     try:
         import numpy as np
         import sounddevice as sd
@@ -101,9 +68,7 @@ def record_laptop_mic(device: int, seconds: float) -> tuple[bytes | None, int]:
     if not (0.2 <= seconds <= MAX_AUDIO_SECONDS):
         raise ProbeError("invalid_record_duration")
     try:
-        desc = sd.query_devices(device, "input")
-        if not desc["max_input_channels"]:
-            raise ProbeError("input_device_not_a_microphone")
+        identity = require_device(sd, device, expected_identity)
         sd.check_input_settings(device=device, channels=1, samplerate=48000, dtype="int16")
         print(
             json.dumps(
@@ -126,11 +91,18 @@ def record_laptop_mic(device: int, seconds: float) -> tuple[bytes | None, int]:
             dtype="int16",
             blocking=True,
         )[:, 0].copy()
-    except (OSError, ValueError, RuntimeError) as exc:
+    except AudioError:
+        raise
+    except Exception as exc:
         raise ProbeError("mic_unavailable_or_permission_denied") from exc
 
     try:
-        trimmed = resample_and_trim_48k(samples, np)
+        require_device(sd, device, identity)
+        trimmed, details = analyze_48k(samples, np)
+        if diagnostics is not None:
+            diagnostics.update(details)
+        if sd.get_status():
+            raise ProbeError("input_overflow_or_underflow")
     finally:
         samples.fill(0)
     if trimmed is None:
@@ -183,8 +155,8 @@ def main(argv=None) -> int:
             result["trimmed_frames_24khz"] = frames
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (ProbeError, OSError, ValueError) as exc:
-        reason = str(exc) if isinstance(exc, ProbeError) else "local_io_unavailable"
+    except (ProbeError, AudioError, OSError, ValueError) as exc:
+        reason = str(exc) if isinstance(exc, (ProbeError, AudioError)) else "local_io_unavailable"
         print(
             json.dumps(
                 {
