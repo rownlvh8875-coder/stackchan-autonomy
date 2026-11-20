@@ -13,7 +13,7 @@ import tracemalloc
 from pathlib import Path
 
 from pc_mic_audio import AudioError, select_microphone
-from pc_mic_profile import EnrollmentError, helper, score_wav, validate_profile
+from pc_mic_profile import CalibrationError, EnrollmentError, helper, score_wav, validate_profile
 from pc_mic_storage import output_target, save_private_profile
 from pc_mic_wake_probe import ProbeError, record_laptop_mic, safe_file
 
@@ -224,17 +224,16 @@ def main(argv=None):
             if isinstance(exc, (EnrollmentError, AudioError, ProbeError))
             else "local_io_unavailable"
         )
-        print(
-            json.dumps(
-                {
-                    "status": "PC_ENROLLMENT_REJECTED",
-                    "reason": reason,
-                    "raw_audio_saved": False,
-                    "network_or_paid_api_used": False,
-                    "k151_hardware_accessed": False,
-                }
-            )
-        )
+        report = {
+            "status": "PC_ENROLLMENT_REJECTED",
+            "reason": reason,
+            "raw_audio_saved": False,
+            "network_or_paid_api_used": False,
+            "k151_hardware_accessed": False,
+        }
+        if isinstance(exc, CalibrationError):
+            report["calibration"] = exc.diagnostics
+        print(json.dumps(report))
         return 2
 
 

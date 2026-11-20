@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -75,6 +76,34 @@ std::optional<WakeFeature> feature_from_wav(std::span<const uint8_t> wav) {
   std::fill(pcm->begin(), pcm->end(), int16_t{0});
   return feature;
 }
+int calibration_failure(const std::array<WakeFeature,18>& features) {
+  auto best = [&](const WakeFeature& sample) {
+    float distance = std::numeric_limits<float>::infinity();
+    for (size_t i=0; i<3; ++i)
+      distance = std::min(distance,wake_dtw_distance(features[i],sample));
+    return distance;
+  };
+  float worst_pos = -1, best_neg = std::numeric_limits<float>::infinity();
+  size_t positive_trial = 0, negative_trial = 0;
+  for (size_t i=0; i<5; ++i) {
+    const float distance = best(features[3+i]);
+    if (distance > worst_pos) { worst_pos = distance; positive_trial = i+1; }
+  }
+  for (size_t i=0; i<10; ++i) {
+    const float distance = best(features[8+i]);
+    if (distance < best_neg) { best_neg = distance; negative_trial = i+1; }
+  }
+  if (!std::isfinite(worst_pos) || !std::isfinite(best_neg)) return refuse();
+  const bool overlap = worst_pos >= best_neg || best_neg <= 0;
+  const float threshold = (worst_pos+best_neg)*0.5f*256.f;
+  if (!overlap && threshold >= 1.f && threshold <= 65535.f) return refuse();
+  std::cerr << "{\"reason\":\"" << (overlap ? "calibration_not_separable" :
+      "calibration_threshold_out_of_range") << "\",\"worst_wake_trial\":" << positive_trial
+      << ",\"nearest_nonwake_trial\":" << negative_trial
+      << ",\"worst_wake_distance_q8\":" << std::setprecision(9) << worst_pos*256.f
+      << ",\"nearest_nonwake_distance_q8\":" << best_neg*256.f << "}\n";
+  return 2;
+}
 int private_pipe(std::string_view mode) {
   constexpr size_t calibration_bytes = 18 * kWakeBytes;
   auto bytes = read_stdin_wav(mode == "--calibrate" ? calibration_bytes :
@@ -105,8 +134,12 @@ int private_pipe(std::string_view mode) {
     std::fill(bytes->begin(), bytes->end(), uint8_t{0});
     auto profile = calibrate_wake(std::span(features).first(3),
         std::span(features).subspan(3,5), std::span(features).subspan(8,10));
+    if (!profile) {
+      const int result = calibration_failure(features);
+      for (auto &feature : features) feature.quantized.fill(0);
+      return result;
+    }
     for (auto &feature : features) feature.quantized.fill(0);
-    if (!profile) return refuse();
     auto wire = encode_wake_profile(*profile);
     if (!wire) return refuse();
 #if defined(_WIN32)

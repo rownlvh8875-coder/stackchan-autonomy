@@ -97,6 +97,16 @@ firmware\standalone\tools\enroll-josu-windows-mic.cmd
 - 통과: `PC_SESSION_PASSED_NOT_K151_VALIDATION`, `profile_saved=true`. 개인 특징이 든 `.local\josu\owner.swk1`만 새로 생성한다.
 - 평가 실패: `PC_SESSION_FAILED_NEW_EVALUATION_REQUIRED`, `profile_saved=false`, 종료코드3. 평가 실패를 숨기거나 그 자료로 한계를 조정하지 않는다.
 - 품질/중복/보정 분리/프로토콜 오류: `PC_ENROLLMENT_REJECTED`, 종료코드2. 프로필 생성 없음.
+
+보정까지18개 녹음이 품질 검사를 통과해도 호출어와 비호출어를 구분하는 문턱을 만들 수 있어야 다음 평가로 진행한다. 새 보정 실패 진단은 다음과 같다.
+
+- `calibration_not_separable`: 보정 호출5개 중 가장 먼 거리보다 비호출10개 중 가장 가까운 거리가 작거나 같아 분리할 수 없음. 인식 문턱을 올려서 통과시키지 않는다.
+- `calibration_threshold_out_of_range`: 분리 간격이 있더라도 현재 SWK1 정수 문턱으로 표현할 수 없음.
+- `local_helper_unavailable` / `local_helper_rejected`: 실행/형식/알 수 없는 helper 오류. 이를 위 두 원인으로 추측하지 않는다.
+
+보정 실패의 `calibration.worst_wake_trial`은 **보정 호출5회** 중 번호(등록3회 번호가 아님), `nearest_nonwake_trial`은 보정 비호출10회 중 번호다. 두 `*_distance_q8`는 같은 등록3개 템플릿까지의 최소거리이며 큰 호출 거리와 작은 비호출 거리를 표시한다. 원본/특징/프로필을 출력하는 정보가 아니고, 실제 단어/화자를 판별한 결과도 아니다. 원인과 번호/거리만 포함한 마지막 JSON을 확인한다.
+
+실패하면 독립 평가/프로필 저장 없이 끝나며 자동 재시도하지 않는다. 원본/특징을 저장하지 않으므로 이전 실행을 소급 분석하거나 재개할 수 없다. 추가 진단 실행은 새 자료가 필요하다. 새 코드의 진단을 확인하기 전 같은 등록을 반복하거나 기본 프로필 문턱을 임의로 변경하지 않는다.
 - 취소: `PC_ENROLLMENT_CANCELLED`, 종료코드130.
 
 기존 프로필은 덮어쓰지 않는다. 다른 세션을 저장하려면 직접 Python CLI의 `--output .local\josu\다른새이름.swk1`을 지정한다. 저장 위치는 저장소 안 `.local/`의 새 파일로 제한하며 symlink/junction·기존 파일을 거부한다. 프로필 임시 파일의 쓰기·동기화를 마친 뒤 같은 폴더의 최종 이름으로 덮어쓰기 없는 hard-link를 생성한다. POSIX는 디렉터리 FD, Windows는 부모 디렉터리 핸들을 유지해 검사 후 경로 교체로 저장이 우회되지 않게 한다. hard-link를 지원하는 로컬 파일시스템이 필요하며 지원하지 않으면 거부한다. 저장 중 취소/오류에는 생성물을 정리하고, 정리 실패 문구가 나오면 해당 파일을 사용하지 않는다. 개인 프로필·오디오·특징을 Git에 강제로 추가하지 않는다. Windows ACL은 부모 폴더 정책을 따르므로 공유 폴더에 두지 않는다.

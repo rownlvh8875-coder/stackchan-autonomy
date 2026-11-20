@@ -224,11 +224,67 @@ def test_feature_pipe_uses_original_mfcc_and_calibrates_in_memory(probe_exe):
     )
     assert result.returncode == 0 and result.stdout.startswith(b"SWK1\x03")
     assert len(result.stdout) == 2507
+    assert int.from_bytes(result.stdout[5:7], "little") == 9344  # midpoint of5 and68, *256.
     duplicated = bytes(832 * 18)
     result = subprocess.run(
         [str(probe_exe), "--calibrate", "-"], input=duplicated, capture_output=True, timeout=20
     )
     assert result.returncode == 2 and not result.stdout
+    assert result.stderr.strip() == b"OFFLINE_WAKE_PROBE_REJECTED"
+
+
+def test_calibration_overlap_reports_extreme_trials_without_private_features(probe_exe):
+    # Constant vectors: nearest templates end at2; worst positive7 is5 away,
+    # nearest negative-1 is1 away. Distances are normalized L1*256.
+    features = b"".join(
+        bytes([n & 255]) * 832 for n in [0, 1, 2, 3, 4, 5, 6, 7, *range(-1, -11, -1)]
+    )
+    result = subprocess.run(
+        [str(probe_exe), "--calibrate", "-"], input=features, capture_output=True, timeout=20
+    )
+    assert result.returncode == 2 and result.stdout == b""
+    assert result.stderr.startswith(b"{"), result.stderr
+    assert json.loads(result.stderr) == {
+        "reason": "calibration_not_separable",
+        "worst_wake_trial": 5,
+        "nearest_nonwake_trial": 1,
+        "worst_wake_distance_q8": 1280,
+        "nearest_nonwake_distance_q8": 256,
+    }
+
+
+def test_calibration_separable_but_unrepresentable_threshold_is_distinguished(
+    probe_exe, python_probe
+):
+    from pc_mic_profile import CalibrationError, helper
+
+    def sparse(*indices):
+        feature = bytearray(832)
+        for index in indices:
+            feature[index] = 1
+        return bytes(feature)
+
+    # Positive distance1/832 vs negative2/832: separated, midpoint*256 <1.
+    features = [sparse(), sparse(0), sparse(1)]
+    features += [sparse(n) for n in range(2, 7)]
+    features += [sparse(2, n) for n in range(3, 13)]
+    result = subprocess.run(
+        [str(probe_exe), "--calibrate", "-"],
+        input=b"".join(features),
+        capture_output=True,
+        timeout=20,
+    )
+    assert result.returncode == 2 and result.stdout == b""
+    assert result.stderr.startswith(b"{"), result.stderr
+    report = json.loads(result.stderr)
+    assert report["reason"] == "calibration_threshold_out_of_range"
+    assert report["worst_wake_distance_q8"] == pytest.approx(256 / 832)
+    assert report["nearest_nonwake_distance_q8"] == pytest.approx(512 / 832)
+    assert 1 <= report["worst_wake_trial"] <= 5
+    assert 1 <= report["nearest_nonwake_trial"] <= 10
+    with pytest.raises(CalibrationError, match="^calibration_threshold_out_of_range$") as failure:
+        helper(probe_exe, "--calibrate", b"".join(features))
+    assert failure.value.diagnostics["nearest_nonwake_distance_q8"] == pytest.approx(512 / 832)
 
 
 @pytest.mark.parametrize(

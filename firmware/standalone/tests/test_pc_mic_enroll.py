@@ -31,6 +31,120 @@ def test_memory_profile_score_matches_real_cpp(enroll, probe_exe):
         enroll.score_wav(probe_exe, profile[:-1], wav)
 
 
+def test_calibration_reason_survives_real_cpp_boundary(enroll, probe_exe):
+    features = b"".join(
+        bytes([n & 255]) * 832 for n in [0, 1, 2, 3, 4, 5, 6, 7, *range(-1, -11, -1)]
+    )
+    with pytest.raises(enroll.EnrollmentError) as failure:
+        enroll.helper(probe_exe, "--calibrate", features)
+    assert str(failure.value) == "calibration_not_separable"
+    assert failure.value.diagnostics == {
+        "worst_wake_trial": 5,
+        "nearest_nonwake_trial": 1,
+        "worst_wake_distance_q8": 1280,
+        "nearest_nonwake_distance_q8": 256,
+    }
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "unknown_reason",
+        "extra",
+        "bool_index",
+        "float_index",
+        "zero_index",
+        "large_index",
+        "nan",
+        "inf",
+        "negative",
+        "bool_distance",
+        "large_distance",
+        "string",
+        "nonwake_index",
+        "contradictory",
+        "oversize",
+        "stdout",
+        "exit",
+        "mode",
+    ],
+)
+def test_untrusted_helper_diagnostics_remain_private(enroll, probe_exe, monkeypatch, corruption):
+    import subprocess
+
+    report = {
+        "reason": "calibration_not_separable",
+        "worst_wake_trial": 5,
+        "nearest_nonwake_trial": 1,
+        "worst_wake_distance_q8": 1280,
+        "nearest_nonwake_distance_q8": 256,
+    }
+    if corruption == "unknown_reason":
+        report["reason"] = "PRIVATE_UNTRUSTED"
+    elif corruption == "extra":
+        report["audio"] = "PRIVATE_UNTRUSTED"
+    elif corruption in {"bool_index", "float_index", "zero_index", "large_index"}:
+        report["worst_wake_trial"] = {
+            "bool_index": True,
+            "float_index": 1.0,
+            "zero_index": 0,
+            "large_index": 6,
+        }[corruption]
+    elif corruption == "nonwake_index":
+        report["nearest_nonwake_trial"] = 11
+    elif corruption == "contradictory":
+        report["worst_wake_distance_q8"] = 1
+    elif corruption in {"nan", "inf", "negative", "bool_distance", "large_distance", "string"}:
+        report["worst_wake_distance_q8"] = {
+            "nan": float("nan"),
+            "inf": float("inf"),
+            "negative": -1,
+            "bool_distance": True,
+            "large_distance": 10**500,
+            "string": "PRIVATE_UNTRUSTED",
+        }[corruption]
+    stderr = json.dumps(report).encode()
+    if corruption == "oversize":
+        stderr += b" " * 1025
+    stdout = b"PRIVATE_UNTRUSTED" if corruption == "stdout" else b""
+    code = 1 if corruption == "exit" else 2
+    mode = "--features" if corruption == "mode" else "--calibrate"
+
+    def response(args, **kwargs):
+        return subprocess.CompletedProcess(args, code, stdout, stderr)
+
+    monkeypatch.setattr(subprocess, "run", response)
+    with pytest.raises(enroll.EnrollmentError, match="^local_helper_rejected$"):
+        enroll.helper(probe_exe, mode, bytes(832 * 18))
+
+
+def test_cli_exposes_validated_calibration_failure_without_evaluation_or_profile(
+    enroll, probe_exe, monkeypatch, capsys
+):
+    features = b"".join(
+        bytes([n & 255]) * 832 for n in [0, 1, 2, 3, 4, 5, 6, 7, *range(-1, -11, -1)]
+    )
+    with pytest.raises(enroll.EnrollmentError) as failure:
+        enroll.helper(probe_exe, "--calibrate", features)
+
+    def rejected(*args):
+        raise failure.value
+
+    monkeypatch.setattr(enroll, "select_microphone", lambda *args: (9, "no-device-opened"))
+    monkeypatch.setattr(enroll, "run_session", rejected)
+    target = enroll.ROOT / ".local" / "calibration-failure-must-not-save.swk1"
+    assert not target.exists()
+    rc = enroll.main(
+        ["--enroll", "--probe-exe", str(probe_exe), "--device", "9", "--output", str(target)]
+    )
+    report = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert rc == 2 and not target.exists()
+    assert report["reason"] == "calibration_not_separable"
+    assert report["calibration"]["worst_wake_trial"] == 5
+    assert report["calibration"]["nearest_nonwake_trial"] == 1
+    assert not report["raw_audio_saved"] and not report["network_or_paid_api_used"]
+
+
 def synthetic_capture(enroll):
     np = pytest.importorskip("numpy")
     from pc_mic_audio import analyze_48k

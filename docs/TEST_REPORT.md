@@ -295,3 +295,7 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 ## 2026-11-20 무발화 배경 활동 경계 거부 후속 수정
 
 [이번 검증 상세](validation/2026-11-20-josu-background-activity.md): Python **487PASS2SKIP**, standalone **284PASS7SKIP**, PC 진단·등록 **78PASS3Windows-onlySKIP**, Ruff check/format315files PASS. 분리된 약한 활동을 진단하고 연속된 약한 끝음은 보존한다. quiet의 실제 오탐을 평가하고 helper의 일관성 오류를 실패시킨다. 단일 독립 검토 Important3건은 회귀 RED→GREEN으로 수정했다. 새 정확한 head의 Windows/Linux/ESP compile-only CI 결과는 [PR#3](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3)에 기록한다. 실제 사용자 인식/마이크의 물리적 원인/K151 적용은 미검증이며 장치용 core/esp_app 변경과 기기 설치·유료 API·환경 게시는 없다.
+
+## 2026-11-20 조수 보정 거부 진단
+
+[검증 상세](validation/2026-11-20-josu-calibration-diagnostics.md): root487PASS2SKIP / standalone306PASS7SKIP / PC100PASS3Windows-onlySKIP / Ruff318files PASS. 실제 C++의 호출·비호출 분리 거부와 문턱 표현 범위 거부를 구분하고 검증한 항목 번호/거리만 CLI로 전달한다. 원본/특징/과거 실행 원인은 복구하지 못하며 이 결과가 실제 목소리 인식 성공을 뜻하지 않는다. 정확한 새 head의 nativeWindows/Linux/ESP compile-only CI는 [PR#3](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3)에 기록한다.
