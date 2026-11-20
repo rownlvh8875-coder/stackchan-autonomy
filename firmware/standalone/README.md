@@ -207,6 +207,22 @@ A local Windows Heami (ko-KR) synthesized Korean '조수야' smoke test, still
 `docs/2026-11-20-korean-heami-tts-smoke.md`. See
 `docs/2026-11-20-wake-corpus-offline-pipeline.md`.
 
+## 2026-11-20 explicitly shared synthetic Korean TTS fixtures and robustness
+
+The owner explicitly authorized uploading only the local **synthetic** Heami
+TTS corpus: `fixtures/korean_heami_sapi_20261120/` tracks 24 WAVs, a single
+SWK1 profile, the corpus roles and SHA-256 integrity manifest. Human recordings,
+private profiles and executable build outputs were not uploaded. The audio is
+third-party synthesized content: the repository's code license is not an
+independent grant of audio redistribution rights. See the fixture's README.
+
+`tools/evaluate_synthetic_robustness.py` runs the unchanged C++ MFCC/DTW
+matcher over deterministic noise, echo and gain perturbations of the 8 TTS
+evaluation clips. The clean profile accepted 2/2 wake clips and 0/6 nonwake;
+for nominal 20dB noise and either synthetic echo scenario it missed both wake
+clips. The only sound tested was one TTS voice, **not a human speaker**. See
+`docs/2026-11-20-heami-noise-echo-robustness.md` for detailed observations.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
