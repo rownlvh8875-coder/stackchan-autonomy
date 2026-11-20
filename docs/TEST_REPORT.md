@@ -301,3 +301,7 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 [검증 상세](validation/2026-11-20-josu-calibration-diagnostics.md): root487PASS2SKIP / standalone306PASS7SKIP / PC100PASS3Windows-onlySKIP / Ruff318files PASS. 실제 C++의 호출·비호출 분리 거부와 문턱 표현 범위 거부를 구분하고 검증한 항목 번호/거리만 CLI로 전달한다. 원본/특징/과거 실행 원인은 복구하지 못하며 이 결과가 실제 목소리 인식 성공을 뜻하지 않는다. 정확한 새 head의 nativeWindows/Linux/ESP compile-only CI는 [PR#3](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3)에 기록한다.
 
 단일 독립 검토 뒤 중복 JSON key 거부5개 RED→GREEN 및 실패 연산/향후 확정 진단 문구를 수정했다. 최종 로컬 root487PASS2SKIP / standalone311PASS7SKIP / PC105PASS3Windows-onlySKIP / Ruff318files PASS. 검토 Minor2건과 판단/비용은 해당 검증 기록에 보존했다.
+
+## 2026-11-20 K151 기본 호출어 지원 검증
+
+[기술 기록](validation/2026-11-20-k151-builtin-wakenet-preflight.md) 및 [JSON 증거](validation/2026-11-20-k151-builtin-wakenet-preflight.json): 고정 IDF6.1/ESP-SR2.4.7/Hi StackChan의 실제 ESP32-S3 빌드·링크·모델 패킹 PASS. 임시 HOLD app334688bytes, model292607bytes, 실제pack 모델1/파일3 및 SHA 검증. 정적 DIRAM65482bytes이며 runtime heap/PSRAM/인식/독립 GPT 대화는 미검증이다. 제품 코드·기기·API는 변경/실행하지 않았다. 이 작업은 문서/증거 변경이며 기존 code base330946a의 CI9/9와 새 문서 head 검증을 구분한다.
