@@ -2,6 +2,11 @@
 
 2026-11-20 / Asia/Seoul. 기본 호출어 지원 검증을 먼저 진행하라는 사용자의 최신 선택에 따른다. 기존 “조수” 도구와 자료는 보존하며, 현재 작업 우선순위는 **Hi StackChan → 로봇 자체 GPT 대화** 경로다.
 
+USB 재연결 후 현재COM3/S3/16MB·표/OTA 원본 일치를 직접 조회했고 실제 IDF
+partition SHA를 검증하는 휴면 진입점을 추가했다.
+[최신 장치·자산 연결 기록](validation/2026-11-20-k151-current-usb-and-assets.md)을 우선한다.
+기기에는 새 펌웨어/모델을 설치하지 않았으며 현재 app_main도 HOLD다.
+
 Windows 후속: [인수 검증](validation/2026-11-20-windows-handoff.md)에서 Mock timing
 진단과 휴면 NativeVoiceLoop를 연결했다. 모델 pack은 같은 SHA로 로컬 재생성했고,
 검증한 과거 OTA metadata의 선택 후보는ota_1이다. 현재 실행/안전한 spare 판정은

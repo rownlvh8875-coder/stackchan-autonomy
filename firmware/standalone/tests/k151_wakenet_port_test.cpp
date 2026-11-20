@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Complete vendor interface with host C ABI doubles, not neural inference.
 #include "k151_wakenet_port.hpp"
+#include "k151_model_assets.hpp"
+#include <esp_partition.h>
 #include <array>
 #include <cassert>
 #include <cstring>
@@ -8,6 +10,9 @@
 #include <string>
 #include <string_view>
 using namespace stackchan::standalone;
+struct esp_flash_t {int unused;};
+esp_flash_t chip{},external_chip{};
+extern "C" { esp_flash_t* esp_flash_default_chip=&chip; }
 struct model_iface_data_t {int unused;};
 namespace {
 std::string_view scenario;
@@ -20,9 +25,32 @@ char* names[]={name};
 esp_wn_iface_t iface{};
 int detects=0,cleans=0,ret=0;
 srmodel_list_t* shared=nullptr;
+std::atomic_bool owner{true},stop{false};
+int finds=0,hashes=0;
+esp_partition_t partition{};
 model_iface_data_t* create(const void* n,det_mode_t mode) {
   events+='c';assert(std::strcmp(static_cast<const char*>(n),name)==0);
-  assert(mode==DET_MODE_90);return scenario=="create_failure"?nullptr:&data;
+  assert(mode==DET_MODE_90);
+  if(scenario=="local_revoke_create")owner=false;
+  return scenario=="create_failure"?nullptr:&data;
+}
+extern "C" const esp_partition_t* esp_partition_find_first(
+    esp_partition_type_t type,esp_partition_subtype_t subtype,const char* label) {
+  ++finds;assert(type==ESP_PARTITION_TYPE_DATA && subtype==ESP_PARTITION_SUBTYPE_ANY);
+  assert(std::strcmp(label,"model")==0);
+  if(scenario=="local_revoke_find")owner=false;
+  return scenario=="local_missing"?nullptr:&partition;
+}
+extern "C" esp_err_t esp_partition_get_sha256(const esp_partition_t* p,uint8_t* hash) {
+  ++hashes;assert(p==&partition && p->size==1048576);
+  constexpr std::array<uint8_t,32> expected{
+    0x1d,0x04,0xbf,0x6a,0x1f,0x67,0x75,0xd4,0x3a,0xb4,0x39,0x8b,0xbb,0xac,0x1b,0xc4,
+    0x60,0x6f,0x5c,0x41,0x30,0xfe,0x1a,0x85,0x38,0x51,0xec,0x5d,0xf7,0xf2,0x1d,0x1b};
+  std::copy(expected.begin(),expected.end(),hash);
+  if(scenario=="local_bad_hash")hash[0]^=1;
+  if(scenario=="local_revoke_hash")owner=false;
+  if(scenario=="local_stop_hash")stop=true;
+  return scenario=="local_hash_error"?-1:ESP_OK;
 }
 int rate(model_iface_data_t* d){assert(d==&data);return scenario=="rate"?24000:16000;}
 int channel(model_iface_data_t*){return scenario=="channel"?2:1;}
@@ -42,12 +70,14 @@ void destroy(model_iface_data_t* d){assert(d==&data);events+='d';}
 }
 extern "C" srmodel_list_t* esp_srmodel_init(const char* partition) {
   assert(std::strcmp(partition,"model")==0);events+='i';
+  if(scenario=="local_revoke_init")owner=false;
   shared=scenario=="missing_list"?nullptr:&list;return shared;
 }
 extern "C" void esp_srmodel_deinit(srmodel_list_t* l) {assert(l==&list);events+='l';shared=nullptr;}
 extern "C" srmodel_list_t* get_static_srmodels() {return shared;}
 extern "C" char* esp_srmodel_filter(srmodel_list_t* l,const char* a,const char* b) {
   assert(l==&list && std::strcmp(a,"wn")==0 && std::strcmp(b,"histackchan_tts3")==0);
+  if(scenario=="local_stop_filter")stop=true;
   events+='f';if(scenario=="missing_name")return nullptr;
   return scenario=="wrong_name"?wrong:name;
 }
@@ -68,6 +98,46 @@ int main(int argc,char** argv) {
   if(scenario=="no_detect")iface.detect=nullptr;
   if(scenario=="no_clean")iface.clean=nullptr;
   if(scenario=="no_destroy")iface.destroy=nullptr;
+  if(scenario.starts_with("local_")) {
+    partition.flash_chip=&chip;partition.type=ESP_PARTITION_TYPE_DATA;
+    partition.address=0xf00000;partition.size=1048576;
+    std::strcpy(partition.label,"model");partition.readonly=true;
+    if(scenario=="local_no_owner")owner=false;
+    if(scenario=="local_stopped")stop=true;
+    if(scenario=="local_bad_size")--partition.size;
+    if(scenario=="local_bad_address")partition.address=0xa00000;
+    if(scenario=="local_bad_type")partition.type=ESP_PARTITION_TYPE_APP;
+    if(scenario=="local_bad_label")std::strcpy(partition.label,"assets");
+    if(scenario=="local_writable")partition.readonly=false;
+    if(scenario=="local_encrypted")partition.encrypted=true;
+    if(scenario=="local_external")partition.flash_chip=&external_chip;
+    K151WakeNetPort p;
+    const bool accepted=p.prepare_local(owner,stop);
+    if(scenario=="local_valid") {
+      assert(accepted && p.ready() && events=="ifhc");
+      assert(finds==1 && hashes==1);
+    } else {
+      assert(!accepted && !p.ready());
+      if(scenario=="local_revoke_create")assert(events=="ifhcdl");
+      else if(scenario=="local_revoke_init")assert(events=="il");
+      else if(scenario=="local_stop_filter")assert(events=="ifl");
+      else assert(events.empty());
+      if(scenario=="local_no_owner" || scenario=="local_stopped")assert(finds==0 && hashes==0);
+    }
+    const auto before=events;
+    const auto old_finds=finds,old_hashes=hashes;
+    if(scenario!="local_no_owner" && scenario!="local_stopped") {
+      owner=true;stop=false;
+      assert(!p.prepare_local(owner,stop));
+      assert(events==before && finds==old_finds && hashes==old_hashes);
+      if(!accepted) {
+        p.close();
+        assert(!p.prepare(true,true) && !p.ready());
+        assert(events==before); // Legacy bool entry cannot bypass a failed local attempt.
+      }
+    }
+    std::cout<<"local asset/owner gate PASS; SHA API doubled, no device\n";return 0;
+  }
   if(scenario=="overlap" || scenario=="preexisting_sdk") {
     if(scenario=="preexisting_sdk") {
       shared=&list;

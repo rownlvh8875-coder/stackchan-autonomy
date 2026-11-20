@@ -4,6 +4,11 @@
 같은 `feat/wakeword-josu` / PR #3에서 기존 모듈을 연결한다. 원본/개인 프로필/키는
 배포하지 않는다. [인수 검증](validation/2026-11-20-windows-handoff.md)을 함께 본다.
 
+사용자 재연결 후 현재COM3/S3/16MB/보호 OFF와 표/OTA12KiB의 원본 일치를 확인했다.
+장치의 readonly DATA model partition 전체 SHA를 사용하는 `prepare_local`도 휴면
+연결했다. [후속 조회·코드 검증](validation/2026-11-20-k151-current-usb-and-assets.md)을 따른다.
+현재 원본 표에는 model partition이 없으며 새 펌웨어/모델을 쓰지 않았다.
+
 ## 준비한 자산과 배치 제약
 
 공개 ESP-SR commit `2f8c4b0459db5bbb39abd77adae27962d6d94bcb`의 모델 파일 3개를
@@ -20,6 +25,12 @@ K151WakeNetPort::prepare의 owner/assets_verified 입력에 이 사실을 대신
 운영 bootstrap은 실제 로컬 소유자 동의, 장치에서 읽은 model partition SHA,
 동적 메모리 증거를 각각 공급해야 한다. SDK global loader는 다른 직접 사용자가
 없어야 하며 한 live adapter만 소유한다. 정확한 model/mode/rate/chunk 검사는 유지한다.
+
+휴면 `prepare_local(owner,stop)`은 draft0xF00000/1MiB의 main-flash·DATA·model·readonly·
+unencrypted를 확인한 뒤 IDF 전체 파티션 SHA를 비교한다. pack 뒤0xff padding을 포함한
+SHA는 `1d04bf6a1f6775d43ab4398bbbac1bc4606f5c4130fe1a853851ec5df7f21d1b`다.
+검증 실패는 같은 객체의 legacy bool 진입으로도 우회할 수 없다. 로컬 소유자 UI 및
+실제 메모리 admission은 여전히 필요하며 실제 SHA 호출은 장치에서 실행하지 않았다.
 
 원본 파티션 표는 다음과 같이 재검증했다. **변경된 offset/길이는 모두 0**이다.
 

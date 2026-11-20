@@ -1,0 +1,93 @@
+{
+  "status": "CURRENT_LAYOUT_AND_OTA_READ_VERIFIED_NOT_INSTALL_APPROVAL",
+  "source_head": "a6488de1e6a9b9e11aebc22db06566548ba2288d",
+  "port": "COM3",
+  "flash_written": false,
+  "nvs_read": false,
+  "full_flash_reread": false,
+  "stub_uploaded": false,
+  "regions": [
+    {
+      "offset_hex": "0x8000",
+      "bytes": 4096,
+      "read_complete": true
+    },
+    {
+      "offset_hex": "0xd000",
+      "bytes": 8192,
+      "read_complete": true
+    }
+  ],
+  "table_matches_verified_backup": true,
+  "ota_metadata": {
+    "records": [
+      {
+        "sequence": 1,
+        "state": "valid",
+        "crc_valid": true,
+        "eligible": true
+      },
+      {
+        "sequence": 2,
+        "state": "valid",
+        "crc_valid": true,
+        "eligible": true
+      }
+    ],
+    "selected_record_without_rollback": 1,
+    "without_rollback_candidate": "ota_1",
+    "with_rollback_candidate": "ota_1",
+    "factory_bootloader_policy_verified": false,
+    "running_slot_verified": false,
+    "spare_slot_verified": false,
+    "evidence_scope": "CURRENT_ROM_READ_SNAPSHOT_NOT_RUNNING_SLOT_PROOF"
+  },
+  "otadata_matches_backup": true,
+  "install_authorized": false,
+  "usb_vid": "303A",
+  "usb_pid": "1001",
+  "chip": "ESP32-S3 QFN56",
+  "chip_revision": "v0.2",
+  "flash_bytes": 16777216,
+  "secure_boot_enabled": false,
+  "flash_encryption_enabled": false,
+  "explicit_rom_entry_reset": true,
+  "flash_boot_reset_reported": true,
+  "factory_app_boot_physically_observed": null,
+  "intentional_chip_reset_count": 2,
+  "new_firmware_installed": false,
+  "model_assets_installed": false,
+  "raw_metadata_published": false,
+  "actual_voice_recorded": false,
+  "real_api_called": false,
+  "model_partition_sha_executed_on_device": false,
+  "offline_asset_preparation": {
+    "device_assets_provisioned": false,
+    "app_main": "HOLD",
+    "actual_model_inference_tested": false,
+    "owner_ui_wiring_verified": false,
+    "runtime_memory_measured": false,
+    "draft_partition_offset_hex": "0x00f00000",
+    "partition_bytes": 1048576,
+    "pack_bytes": 292607,
+    "pack_sha256": "0255855e56bf72d1e072d2e0cbee4fb3ce1ac2c48f7fee6c8cd591f83e59ed95",
+    "padded_partition_sha256": "1d04bf6a1f6775d43ab4398bbbac1bc4606f5c4130fe1a853851ec5df7f21d1b"
+  },
+  "local_tests": {
+    "root_passed": 495,
+    "root_skipped": 2,
+    "standalone_final_passed": 423,
+    "standalone_final_skipped": 5,
+    "focused_passed": 101,
+    "single_review_important_fixed": 1,
+    "review_regressions_red": 3,
+    "target_compile": "PENDING_CI"
+  },
+  "source_sha256_lf": {
+    "firmware/standalone/esp_app/main/k151_model_assets.cpp": "58afa7709d33f8514bbdb9be15a18711e633558e2485d0a4ab6ea975ce60dfb3",
+    "firmware/standalone/esp_app/main/k151_model_assets.hpp": "927e7e36bcdb9c647a4aad79eadc8a91dcc34e35607ece3ac9b30535278aec00",
+    "firmware/standalone/esp_app/main/k151_wakenet_port.cpp": "802b5766b259eb7a281fafbebaf861616b36ffed294547c41e40310c91b809d4",
+    "firmware/standalone/esp_app/main/k151_wakenet_port.hpp": "7037f197123cda541fcf6ef9f0101847ef2cf4d2772ae67406a61e18441f9275",
+    "firmware/standalone/tools/prepare_wakenet_assets.py": "cff0372e4be0bc475f27736015db7a5bd6502853e1177e92f3295662db38c766"
+  }
+}

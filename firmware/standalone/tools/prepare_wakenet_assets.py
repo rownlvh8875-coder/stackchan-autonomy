@@ -20,6 +20,8 @@ FILES = PIN["model"]["pack_contents"]["files"]
 PACK_BYTES = PIN["model"]["pack"]["bytes"]
 PACK_SHA256 = PIN["model"]["pack"]["sha256"]
 MODEL_NAME = "wn9l_histackchan_tts3"
+PARTITION_BYTES = 1048576
+PARTITION_SHA256 = "1d04bf6a1f6775d43ab4398bbbac1bc4606f5c4130fe1a853851ec5df7f21d1b"
 
 
 def build_pack(directory: Path) -> bytes:
@@ -47,6 +49,17 @@ def build_pack(directory: Path) -> bytes:
     return pack
 
 
+def partition_digest(pack: bytes) -> str:
+    if len(pack) != PACK_BYTES or hashlib.sha256(pack).hexdigest() != PACK_SHA256:
+        raise ValueError("model pack rejected before partition digest")
+    if len(pack) > PARTITION_BYTES:
+        raise ValueError("model pack exceeds partition")
+    digest = hashlib.sha256(pack + b"\xff" * (PARTITION_BYTES - len(pack))).hexdigest()
+    if digest != PARTITION_SHA256:
+        raise ValueError("model partition digest rejected")
+    return digest
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
@@ -54,6 +67,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         pack = build_pack(args.source)
+        padded_sha = partition_digest(pack)
         with args.out.open("xb") as output:
             output.write(pack)
         print(
@@ -62,6 +76,9 @@ def main(argv=None):
                     "status": "PACK_VERIFIED_NOT_PROVISIONED",
                     "bytes": len(pack),
                     "sha256": hashlib.sha256(pack).hexdigest(),
+                    "partition_bytes": PARTITION_BYTES,
+                    "partition_sha256": padded_sha,
+                    "partition_tail_byte": 255,
                     "model": MODEL_NAME,
                     "sdk": "2.4.7",
                     "install_authorized": False,

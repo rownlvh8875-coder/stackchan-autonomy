@@ -26,3 +26,12 @@ and paid API calls remain unauthorized.
 Review focus: late worker completion after cancellation; delayed loop delivery;
 no paths/SQL/arguments/errors in timing reports; no 'spare' inference from OTA;
 no fabricated owner/assets/memory readiness; existing PCM wipe/epoch ownership.
+
+## Reconnection follow-up
+
+User reported USB reconnected. Bounded no-stub ROM queries and only12KiB current
+table/OTA reads verified the unchanged factory geometry; reset back toward flash
+boot. Reuse IDF whole-partition SHA for a dormant local-owner model preparation
+path. Keep the draft geometry readonly/unencrypted/main-flash, no current model
+partition, and no app_main construction. Tests precede code; one scoped review
+and final host/target checks follow. Preserve a6488de7/9 CI failures as evidence.

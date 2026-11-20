@@ -7,8 +7,10 @@
 model/TLS 동시 peak admission을 추가했다. [인수 결과](validation/2026-11-20-windows-handoff.md)와
 [설치/복구 준비](K151_NATIVE_INSTALL_PREP.ko.md)를 따른다. 기존696460c CI는 **8/9**이며
 과거 check_timeout의 root cause는 아직 미확정이다. 새 진단은 제한 완화나 실패 재시도 없이
-큐/worker/SQLite/전달/loop 지연을 나눈다. 현재 PnP에서 과거COM3은Unknown이고
-present Espressif 장치는 없어 포트를 열지 않았다. 설치/실물 모델 추론/유료 API는 미실행이다.
+큐/worker/SQLite/전달/loop 지연을 나눈다. 최초에는COM3이Unknown이었으나 사용자 재연결
+후COM3/303A:1001·S3/16MB/보호 OFF와 현재 표/OTA12KiB의 원본 일치를 직접 확인했다.
+[현장 조회와 실제 partition SHA 진입점 연결](validation/2026-11-20-k151-current-usb-and-assets.md)을 따른다.
+조회용 칩 리셋2회 뒤 flash 부팅 복귀를 요청했다. 설치/실물 모델 추론/유료 API는 미실행이다.
 기존 한국어 보정 반복과 임의 문턱 변경은 하지 않는다.
 
 ## 현재 우선 작업 (2026-11-20)

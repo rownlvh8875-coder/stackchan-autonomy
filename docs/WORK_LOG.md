@@ -1023,3 +1023,19 @@ RED→GREEN. PnP has no present Espressif; no port/reset/write/API/voice recordi
 Target build is separate CI evidence; app_main remains HOLD. Details and remaining
 installation/restore constraints: [handoff](validation/2026-11-20-windows-handoff.md),
 [preparation](K151_NATIVE_INSTALL_PREP.ko.md). New head CI is reported on PR#3.
+
+## 2026-11-20 USB reconnection and target asset verification gate
+
+User reconnected COM3/303A:1001. One no-reset query failed; explicit USB reset
+queried S3rev0.2/16MB/securityOFF. Read current table4KiB+OTA8KiB only; both match
+verified factory snapshot. Current seq1/2 VALID→ota_1 candidate, not running/spare
+proof. Requested hard-reset back to flash boot; actual face/menu unobserved.
+No flash/partition/NVS/eFuse write, stub upload, new voice capture or API call.
+Added dormant actual whole-DATA-partition SHA + atomic owner/STOP preparation.
+Pinned draft model partition readonly/main-flash/F00000/1MiB includingFF tail.
+17RED→44SDKPASS,2RED→5packerPASS. Single independent review found legacy-entry
+lifecycle bypass; it plus stricter revocation boundaries reproduced3RED→101focused
+PASS. Final whole standalone423PASS5SKIP/root495PASS2SKIP, Ruff335files PASS.
+Actual new target CI remains separate. Preserved a6488de7/9 CI with SQLite COMMIT
+renewal and installed-wheel Mock wait failures; no job retry/timeout relaxation.
+[Fresh device and asset evidence](validation/2026-11-20-k151-current-usb-and-assets.md).

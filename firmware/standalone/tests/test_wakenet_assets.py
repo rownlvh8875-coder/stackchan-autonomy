@@ -39,6 +39,12 @@ def fixture_assets(tmp_path, monkeypatch):
     )
     expected += b"testindexdata"
     monkeypatch.setattr(assets, "PACK_SHA256", hashlib.sha256(expected).hexdigest())
+    monkeypatch.setattr(
+        assets,
+        "PARTITION_SHA256",
+        hashlib.sha256(expected + b"\xff" * (1048576 - len(expected))).hexdigest(),
+        raising=False,
+    )
     return assets, expected
 
 
@@ -74,3 +80,27 @@ def test_pack_output_is_exclusive_and_manifest_cannot_authorize_install(
     out.write_bytes(b"preserve-local-file")
     assert assets.main(["--source", str(tmp_path), "--out", str(out)]) == 2
     assert out.read_bytes() == b"preserve-local-file"
+
+
+def test_partition_digest_covers_erased_tail_and_rejects_wrong_pin(tmp_path, monkeypatch):
+    assets, expected = fixture_assets(tmp_path, monkeypatch)
+    assert (
+        assets.partition_digest(expected)
+        == hashlib.sha256(expected + b"\xff" * (1048576 - len(expected))).hexdigest()
+    )
+    monkeypatch.setattr(assets, "PARTITION_SHA256", "0" * 64)
+    with pytest.raises(ValueError):
+        assets.partition_digest(expected)
+
+
+def test_target_partition_pin_matches_offline_packer():
+    import re
+
+    import prepare_wakenet_assets as assets
+
+    header = (
+        Path(__file__).resolve().parents[1] / "esp_app/main/k151_model_assets.hpp"
+    ).read_text()
+    digest = re.search(r'"([0-9a-f]{64})"', header).group(1)
+    assert assets.PARTITION_BYTES == 1048576
+    assert assets.PARTITION_SHA256 == digest
