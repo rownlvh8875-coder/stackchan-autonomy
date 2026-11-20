@@ -112,3 +112,15 @@ def test_device_fingerprint_detects_changed_device_at_same_index(audio):
     sd.name = "Microphone B"
     with pytest.raises(audio.AudioError, match="input_device_changed"):
         audio.require_device(sd, 9, first)
+
+
+def test_device_listing_failure_is_private_and_does_not_start_recording(audio, monkeypatch):
+    import sys
+
+    class Devices:
+        def query_devices(self):
+            raise RuntimeError("PRIVATE_DRIVER_DETAILS")
+
+    monkeypatch.setitem(sys.modules, "sounddevice", Devices())
+    with pytest.raises(audio.AudioError, match="^input_device_unavailable$"):
+        audio.select_microphone(choose=True)

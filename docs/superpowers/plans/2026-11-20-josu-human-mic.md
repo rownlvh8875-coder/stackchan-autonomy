@@ -23,24 +23,24 @@
 
 Files: `tools/pc_mic_wake_probe.py`, new `tools/pc_mic_audio.py`, `tests/test_pc_mic_audio.py`.
 Interface: `analyze_48k(samples,np) -> (trimmed_or_none, diagnostic_dict)`, legacy trim API 유지. 입력 길이/타입, 48→24k 길이/주파수, RMS/peak/clip, VAD 경계와 위험을 검사한다.
-- [ ] RED: 무음·클리핑·capture 양끝 활동·FIR alias/길이·장치 변경 시험.
-- [ ] 구현 후 기존 PC fixture 회귀를 포함해 GREEN 확인.
-- [ ] 진단 결과와 원인 미확정 제한을 문서화/커밋.
+- [x] RED: 무음·클리핑·capture 양끝 활동·FIR alias/길이·장치 변경 시험.
+- [x] 구현 후 기존 PC fixture 회귀를 포함해 GREEN 확인.
+- [x] 진단 결과와 원인 미확정 제한을 문서화/커밋.
 
 ### Task 2: 실제 C++ 점수·메모리 보정
 
 Files: `tools/wake_stage1_probe.cpp`, `tests/test_pc_mic_wake_probe.py`.
 Interfaces: `--features -` -> 832 feature bytes; `--calibrate -` -> 3+5+10 feature 입력의 SWK1; `--score -` -> profile length16be + profile + WAV 입력의 sanitized JSON.
-- [ ] RED: 기존 판정·SWK1 호환, 실제 거리/임계값, malformed/초과/중복 데이터 거부.
-- [ ] 기존 핵심 함수 호출로 구현 후 GREEN/커밋. 임계값 임의 변경 없음.
+- [x] RED: 기존 판정·SWK1 호환, 실제 거리/임계값, malformed/초과/중복 데이터 거부.
+- [x] 기존 핵심 함수 호출로 구현 후 GREEN/커밋. 임계값 임의 변경 없음.
 
 ### Task 3: 사용자 등록·평가 CLI 및 Windows 실행
 
 Files: new `tools/pc_mic_enroll.py`, existing probe/runner, new enrollment runner/tests.
 Interfaces: 명시 장치 선택·기대 identity, 3/5/10 고정 보정 후 5/10 새 평가; 모든 녹음은 Task 1 전처리, 점수는 Task 2. 개인 profile는 새 `.local/` 경로로만 exclusive 생성.
-- [ ] RED: 품질 거부·중복·평가 누출·실패 시 미저장·취소·민감 출력·경로 보호 테스트.
-- [ ] 구현 후 오프라인 합성 입력으로 전체 등록→프로필→점수 경로 GREEN/커밋.
-- [ ] 장치 목록/선택과 수동 실행 설명 제공. 실제 발화 결과는 미검증 유지.
+- [x] RED: 품질 거부·중복·평가 누출·실패 시 미저장·취소·민감 출력·경로 보호 테스트.
+- [x] 구현 후 오프라인 합성 입력으로 전체 등록→프로필→점수 경로 GREEN/커밋.
+- [x] 장치 목록/선택과 수동 실행 설명 제공. 실제 발화 결과는 미검증 유지.
 
 ### Task 4: 통합 검증과 PR #3
 

@@ -1,0 +1,218 @@
+"""Private session/persistence tests. All speech below is public synthetic replay.
+
+Transforms are regression inputs, never counted as independent human evidence.
+"""
+
+import importlib
+import io
+import json
+import wave
+from pathlib import Path
+
+import pytest
+
+BASE = Path(__file__).resolve().parents[1]
+FIXTURE = BASE / "fixtures" / "korean_josu_sapi_20261120"
+
+
+@pytest.fixture
+def enroll(monkeypatch):
+    monkeypatch.syspath_prepend(str(BASE / "tools"))
+    return importlib.import_module("pc_mic_enroll")
+
+
+def test_memory_profile_score_matches_real_cpp(enroll, probe_exe):
+    profile = (FIXTURE / "josu-20261120.swk1").read_bytes()
+    wav = (FIXTURE / "evaluation" / "evaluation_wake_01.wav").read_bytes()
+    score = enroll.score_wav(probe_exe, profile, wav)
+    assert score["accepted"] and score["limit_q8"] == 1003
+    with pytest.raises(enroll.EnrollmentError):
+        enroll.score_wav(probe_exe, profile[:-1], wav)
+
+
+def synthetic_capture(enroll):
+    np = pytest.importorskip("numpy")
+    from pc_mic_audio import analyze_48k
+
+    counter = 0
+
+    def capture(stage, label, index, prompt):
+        nonlocal counter
+        counter += 1
+        if label == "quiet":
+            return None, {"quality_issues": ["NO_SPEECH_ACTIVITY"], "capture_seconds": 2.5}
+        name = (
+            "evaluation_wake_01.wav"
+            if label == "wake"
+            else f"evaluation_nonwake_{index % 6 + 1:02}.wav"
+        )
+        with wave.open(str(FIXTURE / "evaluation" / name), "rb") as source:
+            raw = np.frombuffer(source.readframes(source.getnframes()), dtype="<i2").astype(
+                np.int32
+            )
+        # New noise per synthetic replay is NOT independent voice data.
+        noise = np.random.default_rng(counter).normal(0, 12, len(raw))
+        raw = np.clip(raw + noise, -32768, 32767).astype(np.int16)
+        mic = np.concatenate(
+            [np.zeros(9600, dtype=np.int16), np.repeat(raw, 2), np.zeros(9600, dtype=np.int16)]
+        )
+        trimmed, diag = analyze_48k(mic, np)
+        assert trimmed is not None and not diag["quality_issues"]
+        out = io.BytesIO()
+        with wave.open(out, "wb") as target:
+            target.setnchannels(1)
+            target.setsampwidth(2)
+            target.setframerate(24000)
+            target.writeframes(trimmed.astype("<i2").tobytes())
+        return out.getvalue(), diag
+
+    return capture
+
+
+def test_registration_freezes_before_separate_evaluation_and_baseline_comparison(enroll, probe_exe):
+    calls = []
+    capture = synthetic_capture(enroll)
+
+    def source(*args):
+        calls.append(args[:3])
+        return capture(*args)
+
+    model, report = enroll.run_session(
+        probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), source
+    )
+    assert model and model.startswith(b"SWK1\x03")
+    assert report["status"] == "PC_SESSION_PASSED_NOT_K151_VALIDATION"
+    assert report["personal"] == {
+        "wake_accepted": 5,
+        "wake_total": 5,
+        "nonwake_accepted": 0,
+        "nonwake_total": 10,
+        "quiet_accepted": 0,
+        "quiet_windows": 3,
+    }
+    assert report["baseline"]["wake_total"] == 5 and report["baseline"]["nonwake_total"] == 10
+    assert [s for s, _, _ in calls] == ["enrollment"] * 3 + ["calibration"] * 15 + [
+        "evaluation"
+    ] * 18
+    assert report["raw_audio_saved"] is False and report["network_or_paid_api_used"] is False
+
+
+def test_duplicate_recording_is_not_an_independent_sample(enroll, probe_exe):
+    capture = synthetic_capture(enroll)
+    sample = capture("enrollment", "wake", 0, "")
+    with pytest.raises(enroll.EnrollmentError, match="duplicate_recording"):
+        enroll.run_session(
+            probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), lambda *args: sample
+        )
+
+
+@pytest.mark.parametrize("issue", ["CLIPPING", "CAPTURE_EDGE_ACTIVITY", "NO_SPEECH_ACTIVITY"])
+def test_registration_rejects_bad_quality_before_feature_extraction(enroll, probe_exe, issue):
+    with pytest.raises(enroll.EnrollmentError, match="capture_quality_rejected"):
+        enroll.run_session(
+            probe_exe,
+            (FIXTURE / "josu-20261120.swk1").read_bytes(),
+            lambda *args: (b"PRIVATE_AUDIO", {"quality_issues": [issue]}),
+        )
+
+
+def test_failed_fresh_evaluation_never_returns_an_installable_profile(enroll, probe_exe):
+    capture = synthetic_capture(enroll)
+
+    def source(stage, label, index, prompt):
+        if stage == "evaluation" and label == "wake" and index == 0:
+            return capture(stage, "nonwake", 9, prompt)
+        return capture(stage, label, index, prompt)
+
+    model, report = enroll.run_session(
+        probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), source
+    )
+    assert model is None and report["status"] == "PC_SESSION_FAILED_NEW_EVALUATION_REQUIRED"
+    assert report["personal"]["wake_accepted"] < 5
+
+
+def test_profile_output_is_new_ignored_file_only(enroll, tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    private = root / ".local" / "josu" / "owner.swk1"
+    model = (FIXTURE / "josu-20261120.swk1").read_bytes()
+    enroll.save_private_profile(private, model, root)
+    assert private.read_bytes() == model
+    with pytest.raises(enroll.EnrollmentError):
+        enroll.save_private_profile(private, model, root)
+    with pytest.raises(enroll.EnrollmentError):
+        enroll.save_private_profile(root / "public.swk1", model, root)
+    assert not (root / "public.swk1").exists()
+
+
+def test_symlink_output_directory_is_rejected(enroll, tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".local").mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (root / ".local" / "link").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    with pytest.raises(enroll.EnrollmentError):
+        enroll.save_private_profile(
+            root / ".local" / "link" / "profile.swk1",
+            (FIXTURE / "josu-20261120.swk1").read_bytes(),
+            root,
+        )
+    assert list(outside.iterdir()) == []
+
+
+def test_missing_explicit_record_permission_has_no_side_effects(enroll, tmp_path, capsys):
+    assert enroll.main(["--output", str(tmp_path / "PRIVATE_PATH")]) == 2
+    output = capsys.readouterr().out
+    assert "PRIVATE_PATH" not in output
+    assert json.loads(output)["status"] == "PC_ENROLLMENT_REJECTED"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cancelled_prompt_never_records_or_saves(enroll, probe_exe, monkeypatch, capsys):
+    monkeypatch.setattr(enroll, "select_microphone", lambda *args: (9, "fixture-identity"))
+    monkeypatch.setattr("builtins.input", lambda *args: (_ for _ in ()).throw(KeyboardInterrupt()))
+    target = enroll.ROOT / ".local" / "cancelled-test-profile.swk1"
+    assert not target.exists()
+    assert (
+        enroll.main(
+            ["--enroll", "--probe-exe", str(probe_exe), "--device", "9", "--output", str(target)]
+        )
+        == 130
+    )
+    assert not target.exists() and "PC_ENROLLMENT_CANCELLED" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows CMD execution")
+@pytest.mark.parametrize(
+    "runner", ["build-pc-wake-probe.cmd", "run-josu-windows-mic.cmd", "enroll-josu-windows-mic.cmd"]
+)
+def test_windows_runners_help_has_no_build_or_record_side_effect(runner, tmp_path):
+    import subprocess
+
+    result = subprocess.run(
+        ["cmd.exe", "/d", "/c", str(BASE / "tools" / runner), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0 and result.stdout and result.stderr == ""
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_profile_sync_removes_the_new_file(enroll, tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = root / ".local" / "owner.swk1"
+
+    def failed_sync(_):
+        raise OSError("PRIVATE_DISK_DETAILS")
+
+    monkeypatch.setattr(enroll.os, "fsync", failed_sync)
+    with pytest.raises(enroll.EnrollmentError, match="^private_profile_write_failed$"):
+        enroll.save_private_profile(target, (FIXTURE / "josu-20261120.swk1").read_bytes(), root)
+    assert not target.exists()

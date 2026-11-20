@@ -9,10 +9,13 @@ import argparse
 import io
 import json
 import subprocess
+import time
+import tracemalloc
 import wave
 from pathlib import Path
 
-from pc_mic_audio import AudioError, analyze_48k, require_device
+from pc_mic_audio import AudioError, analyze_48k, require_device, select_microphone
+from pc_mic_profile import EnrollmentError, score_wav
 
 MIN_SAMPLE_FRAMES_24K = 2400
 MAX_WAV_BYTES = 196608
@@ -101,7 +104,15 @@ def record_laptop_mic(
         trimmed, details = analyze_48k(samples, np)
         if diagnostics is not None:
             diagnostics.update(details)
-        if sd.get_status():
+        try:
+            status = sd.get_status()
+        except Exception as exc:
+            if trimmed is not None:
+                trimmed.fill(0)
+            raise ProbeError("input_status_unavailable") from exc
+        if status:
+            if trimmed is not None:
+                trimmed.fill(0)
             raise ProbeError("input_overflow_or_underflow")
     finally:
         samples.fill(0)
@@ -127,10 +138,18 @@ def main(argv=None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--fixture", type=Path, help="existing local WAV, no microphone opened")
     source.add_argument("--listen", action="store_true", help="one short notebook mic recording")
-    parser.add_argument("--device", type=int, help="explicit notebook microphone device index")
+    device = parser.add_mutually_exclusive_group()
+    device.add_argument("--device", type=int, help="explicit notebook microphone device index")
+    device.add_argument(
+        "--choose-device", action="store_true", help="list and explicitly select a microphone"
+    )
+    parser.add_argument(
+        "--diagnostics", action="store_true", help="numeric quality, distance and timing only"
+    )
     parser.add_argument("--seconds", type=float, default=2.5)
     args = parser.parse_args(argv)
     try:
+        details = {}
         probe = safe_file(args.probe_exe, 5_000_000)
         profile = safe_file(args.profile, 2507)
         if args.fixture is not None:
@@ -138,11 +157,26 @@ def main(argv=None) -> int:
             origin = "EXISTING_LOCAL_FIXTURE"
             frames = None
         else:
-            if args.device is None:
+            if args.device is None and not args.choose_device:
                 raise ProbeError("explicit_input_device_required")
-            wav, frames = record_laptop_mic(args.device, args.seconds)
+            device, identity = select_microphone(args.device, args.choose_device)
+            wav, frames = record_laptop_mic(
+                device, args.seconds, expected_identity=identity, diagnostics=details
+            )
             origin = "NOTEBOOK_MIC_NOT_K151"
-        status = "NO_SPEECH_ACTIVITY" if wav is None else classify_wav(probe, profile, wav)
+        tracemalloc.start()
+        started = time.perf_counter()
+        try:
+            status = "NO_SPEECH_ACTIVITY" if wav is None else classify_wav(probe, profile, wav)
+            match = (
+                score_wav(probe, profile.read_bytes(), wav)
+                if wav is not None and args.diagnostics
+                else None
+            )
+            _, peak_bytes = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        elapsed_ms = (time.perf_counter() - started) * 1000
         result = {
             "status": status,
             "source": origin,
@@ -151,12 +185,31 @@ def main(argv=None) -> int:
             "recorded_audio_written_to_disk": False,
             "network_or_paid_api_used": False,
         }
+        if args.diagnostics:
+            result.update(
+                quality=details,
+                match=match,
+                wake_detected=status == "UNVERIFIED_MATCH",
+                processing_ms=round(elapsed_ms, 3),
+                python_traced_peak_bytes=peak_bytes,
+            )
+            if match is not None:
+                result["distance_margin_q8"] = round(match["limit_q8"] - match["distance_q8"], 3)
         if frames is not None:
             result["trimmed_frames_24khz"] = frames
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (ProbeError, AudioError, OSError, ValueError) as exc:
-        reason = str(exc) if isinstance(exc, (ProbeError, AudioError)) else "local_io_unavailable"
+    except KeyboardInterrupt:
+        print(
+            json.dumps({"status": "PC_MIC_TEST_CANCELLED", "recorded_audio_written_to_disk": False})
+        )
+        return 130
+    except (ProbeError, AudioError, EnrollmentError, OSError, ValueError) as exc:
+        reason = (
+            str(exc)
+            if isinstance(exc, (ProbeError, AudioError, EnrollmentError))
+            else "local_io_unavailable"
+        )
         print(
             json.dumps(
                 {

@@ -6,8 +6,6 @@ Host C++ tests can run on Linux CI. No microphone device, robot or network.
 import importlib.util
 import io
 import json
-import os
-import shutil
 import subprocess
 import sys
 import wave
@@ -19,40 +17,6 @@ BASE = Path(__file__).resolve().parents[1]
 TOOLS = BASE / "tools"
 PROFILE = BASE / "fixtures" / "korean_josu_sapi_20261120" / "josu-20261120.swk1"
 FIXTURE = BASE / "fixtures" / "korean_josu_sapi_20261120"
-
-
-@pytest.fixture(scope="module")
-def probe_exe(tmp_path_factory):
-    # Windows bench can reuse a locally built native probe without downloading a toolchain.
-    supplied = os.environ.get("STACKCHAN_TEST_WAKE_PROBE_EXE")
-    if supplied:
-        path = Path(supplied)
-        assert path.is_file() and not path.is_symlink()
-        return path
-    compiler = shutil.which("g++")
-    if not compiler:
-        pytest.skip("Native stdin probe integration runs on Linux CI; Windows uses pinned Zig")
-    binary = tmp_path_factory.mktemp("pc-wake-probe") / "wake-probe"
-    subprocess.run(
-        [
-            compiler,
-            "-std=c++20",
-            "-O2",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-pedantic",
-            "-I",
-            str(BASE / "core"),
-            str(TOOLS / "wake_stage1_probe.cpp"),
-            "-o",
-            str(binary),
-        ],
-        check=True,
-        capture_output=True,
-        timeout=90,
-    )
-    return binary
 
 
 @pytest.fixture
@@ -283,3 +247,28 @@ def test_new_private_pipe_modes_reject_malformed_or_excess_input(probe_exe, mode
     )
     assert result.returncode == 2 and result.stdout == b""
     assert result.stderr.strip() == b"OFFLINE_WAKE_PROBE_REJECTED"
+
+
+def test_fixture_diagnostics_expose_distance_but_not_biometric_feature(probe_exe):
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(TOOLS / "pc_mic_wake_probe.py"),
+            "--probe-exe",
+            str(probe_exe),
+            "--profile",
+            str(PROFILE),
+            "--fixture",
+            str(FIXTURE / "evaluation" / "evaluation_wake_01.wav"),
+            "--diagnostics",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["status"] == "UNVERIFIED_MATCH" and data["wake_detected"] is True
+    assert data["match"]["distance_q8"] < data["match"]["limit_q8"]
+    assert data["processing_ms"] >= 0 and data["python_traced_peak_bytes"] > 0
+    assert "features" not in data and str(PROFILE) not in result.stdout

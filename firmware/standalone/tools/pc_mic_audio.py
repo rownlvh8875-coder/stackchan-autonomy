@@ -112,3 +112,38 @@ def analyze_48k(samples, np):
         trimmed.fill(0)
         return None, diagnostics
     return trimmed, diagnostics
+
+
+def select_microphone(device=None, choose=False):
+    try:
+        import sounddevice as sd
+    except ImportError as exc:
+        raise AudioError("sounddevice_not_installed") from exc
+    try:
+        if choose:
+            print("노트북 입력 장치 목록 (K151 COM3는 마이크가 아닙니다):")
+            for index, desc in enumerate(sd.query_devices()):
+                if desc["max_input_channels"]:
+                    print(f"{index}: {desc['name']} [{sd.query_hostapis(desc['hostapi'])['name']}]")
+            try:
+                device = int(input("이번 실행에 사용할 입력 장치 번호: "))
+            except ValueError as exc:
+                raise AudioError("invalid_device_index") from exc
+        if device is None or device < 0:
+            raise AudioError("explicit_input_device_required")
+        identity = device_identity(sd, device)
+        print(
+            json.dumps(
+                {
+                    "stage": "INPUT_DEVICE_SELECTED",
+                    "device_index": device,
+                    "device_name": sd.query_devices(device, "input")["name"],
+                },
+                ensure_ascii=False,
+            )
+        )
+        return device, identity
+    except AudioError:
+        raise
+    except Exception as exc:
+        raise AudioError("input_device_unavailable") from exc

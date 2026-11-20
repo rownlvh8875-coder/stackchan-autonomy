@@ -1,0 +1,111 @@
+# “조수” 실제 목소리 진단·개인 등록 순서 (2026-11-20)
+
+이 안내는 **Windows 노트북 마이크**용이다. COM3·K151 마이크·스피커·모터·공장 펌웨어에 접근하지 않는다. 새 ESP-IDF 앱은 계속 **NOT APPROVED FOR DEVICE INSTALLATION**이다.
+
+## 지금 확인된 것과 원인 가설
+
+사용자 결과는 `UNVERIFIED_NO_MATCH`, 추출 22,080프레임(24kHz에서0.92초)이다. 에너지 구간이 있었으나 Heami SWK1 매칭이 거부됐다는 뜻이다. 실제 발화 내용·선택 마이크·누락 자음은 이 결과로 확인할 수 없다. 0.92초만으로 잘렸다고 결론 내리지 않는다.
+
+기존 인식기는 24→16kHz FIR, 25ms/10ms 프레임, 26mel/13MFCC, 발화 평균 제거(CMN), 64×13 int8 특징, 제한 폭 DTW로 비교한다. 공개 Heami 프로필의 수락 한계는 **1003 q8**이며 최소 DTW×256이 이보다 작아야 한다. 임계값을 변경하지 않았다. CMN은 고정 주파수 응답 차이를 줄일 뿐 다른 화자·성별·억양·두 음절의 발음 차이를 제거하지 않는다. “조수야/조수님/조수석/주스/주소”는 의미가 달라도 일부 소리가 겹치므로 실제 비호출어 보정·새 평가가 필요하다.
+
+PC 입력은 별도의 48→24kHz 81-tap Hamming FIR(10.5kHz cutoff)과 20ms 에너지 검출을 거쳐 앞뒤 최대400ms를 남긴다. 등록·보정·평가·1회 진단 모두 같은 경로다. 이전100ms와400ms의 합성 결과는 이 구간 민감도를 보여 주지만 사용자 실패의 원인 증명은 아니다. 여기서는 임계값·MFCC·VAD·패딩을 임의로 다시 조정하지 않는다.
+
+## 1. 최신 코드 받기
+
+Windows **cmd**에서 한 블록씩 따로 실행한다. 기존 작업 폴더를 재사용하며 clone하지 않는다.
+
+```cmd
+git -C "C:\Users\user\Documents\stackchan-wake-josu-20261120" status --short
+```
+
+변경 사항이 있으면 보존한다. reset/clean/강제 덮어쓰기를 하지 않는다.
+
+```cmd
+git -C "C:\Users\user\Documents\stackchan-wake-josu-20261120" pull --ff-only
+```
+
+```cmd
+cd /d "C:\Users\user\Documents\stackchan-wake-josu-20261120"
+```
+
+## 2. PC 판별기와 오디오 패키지 준비
+
+현재 소스로 **PC 실행 파일만** 빌드한다. 이전 Documents의 e8ee330 실행 파일은 새 점수·등록 pipe 모드가 없으므로 재사용하지 않는다. 이 준비 명령은 Zig 패키지를 내려받을 수 있으며 마이크를 열지 않는다.
+
+```cmd
+firmware\standalone\tools\build-pc-wake-probe.cmd
+```
+
+Python 오디오 패키지도 한 번 준비한다. 아래는 import만 하며 녹음하지 않는다.
+
+```cmd
+"%USERPROFILE%\.local\bin\uv.exe" run --no-project --with sounddevice==0.5.3 --with numpy==2.3.5 python -c "import sounddevice, numpy; print('PC_AUDIO_DEPENDENCIES_READY')"
+```
+
+이후 실행기는 `--offline`으로 같은 버전을 사용한다. cache가 없으면 실패하며 임의 버전이나 다른 마이크로 넘어가지 않는다. 회사/공유 PC가 아닌 본인 계정의 비공개 작업 폴더에서 사용한다.
+
+## 3. 먼저 1회 입력·거리 진단
+
+```cmd
+firmware\standalone\tools\run-josu-windows-mic.cmd
+```
+
+1. 목록에서 이번에 실제 사용할 노트북 마이크를 선택한다. 예전에9였어도 이름·Windows 오디오 API를 확인한다. COM3는 대상이 아니다. `INPUT_DEVICE_SELECTED`에 선택한 장치 이름이 나온다.
+2. `RECORDING_NOTEBOOK_MIC_ONLY` 표시 후 약0.3초 여유를 두고 **“조수”만** 한 번 말한다. 2.5초 녹음이 끝나기 전에 발화를 마친다.
+3. 마지막 JSON의 수치를 확인한다. 장치 이름은 선택 화면에만 나오며 최종 진단 JSON에는 없다. 개인 프로필이 `.local\josu\owner.swk1`에 있으면 그것을, 없으면 공개 Heami 기준을 사용한다.
+
+| 필드 | 해석 |
+|---|---|
+| `quality.rms`, `rms_dbfs`, `peak` | 전체 입력 레벨. 낮으면 마이크 위치·Windows 입력 이득·선택 장치를 확인. 이 코드가 이득을 자동으로 올리지 않음 |
+| `clipped_fraction` | 절댓값32760 이상인 입력 비율. 0.001 이상은 등록 거부하는 휴리스틱 |
+| `noise_floor_rms`, `vad_threshold_rms` | 추정 배경 레벨과 에너지 문턱. 음성 인식/단어 확인 결과가 아님 |
+| `activity_start_ms/end_ms` | 에너지가 활동으로 검출된 시점 |
+| `trim_start_ms/end_ms`, `leading_context_ms/trailing_context_ms` | 추출 범위와 보존한 앞뒤 여유. 실제 자음 경계는 검증하지 않음 |
+| `capture_edge_activity` | 녹음 처음/끝에 활동이 닿음. 잘림 **위험**이며 실제 잘림 확정이 아님. 타이밍을 바꾸어 새로 녹음 |
+| `input_frames_48khz`, `resampled_frames_24khz` | 입력과 변환 길이. 2.5초면120,000→60,000, 별도 trim으로 더 짧아질 수 있음 |
+| `match.distance_q8`, `match.limit_q8` | 실제 C++ 최소 거리와 프로필 한계 |
+| `distance_margin_q8` | 한계−거리. 양수면 현재 프로필에서 수락, 음수면 거부. 한계를 올리라는 권고가 아님 |
+| `processing_ms`, `python_traced_peak_bytes` | 판정 단계의 Python 시간·추적 메모리. 전체 OS/마이크/C++ 프로세스 RSS 수치가 아님 |
+
+`NO_SPEECH_ACTIVITY`는 잘못된 장치·낮은 입력·배경 에너지 대비 부족을 먼저 확인한다. `CAPTURE_EDGE_ACTIVITY`/`CLIPPING`이 있으면 입력 조건을 고친다. 정상 품질인데 `UNVERIFIED_NO_MATCH`이면 화자·음향 차이를 포함한 프로필 부적합 가능성을 조사한다. 녹음 내용을 듣거나 전사하지 않으므로 실제 “조수”였는지는 사용자가 확인한다.
+
+원본을 듣기 위해 WAV를 자동 저장/재생하지 않는다. 재생·파일 보관이 필요하면 대상과 보관 범위를 먼저 정하는 별도 작업으로 진행한다.
+
+## 4. 개인 목소리 등록·보정·새 평가
+
+```cmd
+firmware\standalone\tools\enroll-josu-windows-mic.cmd
+```
+
+매 녹음은 **Enter로 직접 시작**한다. 한 번에 최대3초이며 기본2.5초. Ctrl+C로 중단하면 오디오·특징·개인 프로필을 저장하지 않는다. 장치 이름/API/채널/기본 샘플레이트 identity를 매 녹음 전후 확인하고 같은 번호에 다른 마이크가 있으면 중단한다.
+
+| 순서 | 녹음 | 사용처 |
+|---|---:|---|
+| 등록 | “조수”3회(보통/빠르게/느리게) | 최대3개 SWK1 템플릿 |
+| 보정 | 새 “조수”5회 + 비호출어10회 | 원래 C++ 보정기의 분리 조건으로 한계 결정 |
+| 고정 | 추가 녹음 없음 | 프로필 고정. 이후 임계값 수정 없음 |
+| 새 평가 | 새 “조수”5회 + 비호출어10회 | 등록/보정과 공유하지 않음. 보통/빠르게/느리게/작게/약1m |
+| 무발화 | 새2.5초 구간3회 | 말하지 않고 생활 소음 관찰. 시간당 오탐률로 환산하지 않음 |
+
+비호출어10개는 “조수야, 조수님, 조수석, 주스, 주소, 조용히 해줘, 오늘 날씨 알려줘, 안녕 친구, 잘 자, 내일 다시 보자”이다. 평가에서는 화면의 단어를 새로 말한다. 이전 녹음 재생은 금지한다. 동일 음성/특징은 중복 거부하지만 코드가 화자·단어·녹음 독립성 자체를 증명하지는 못한다.
+
+무음·클리핑·경계 위험이 있는 등록/보정/발화 평가 샘플은 제외하고 세션을 종료한다. 자동 재녹음·수치 맞추기·평가를 학습에 합치기는 하지 않는다. 다시 시작하면 새 자료를 수집한다. 모든 음성은 메모리에만 있으므로 중단 세션을 재개하지 않는다.
+
+통과 조건은 새 호출5/5, 비호출0/10, 무발화0/3이다. 이는 작은 **PC 세션 관측**이며 실용적인 사람 인식률 또는 K151 검증 통과가 아니다. 같은 새 평가에 대한 기존 Heami 프로필 결과도 별도로 표시한다.
+
+- 통과: `PC_SESSION_PASSED_NOT_K151_VALIDATION`, `profile_saved=true`. 개인 특징이 든 `.local\josu\owner.swk1`만 새로 생성한다.
+- 평가 실패: `PC_SESSION_FAILED_NEW_EVALUATION_REQUIRED`, `profile_saved=false`, 종료코드3. 평가 실패를 숨기거나 그 자료로 한계를 조정하지 않는다.
+- 품질/중복/보정 분리/프로토콜 오류: `PC_ENROLLMENT_REJECTED`, 종료코드2. 프로필 생성 없음.
+- 취소: `PC_ENROLLMENT_CANCELLED`, 종료코드130.
+
+기존 프로필은 덮어쓰지 않는다. 다른 세션을 저장하려면 직접 Python CLI의 `--output .local\josu\다른새이름.swk1`을 지정한다. 저장 위치는 저장소 안 `.local/`의 새 파일로 제한하며 symlink/junction·기존 파일을 거부한다. 개인 프로필·오디오·특징을 Git에 강제로 추가하지 않는다. Windows ACL은 부모 폴더 정책을 따르므로 공유 폴더에 두지 않는다.
+
+등록 뒤 3번 실행기로 새 발화를 반복한다. 다른 날짜·거리·소음·작은 목소리·여러 사람과 더 긴 무발화 시간의 **새 평가**가 남아 있다. 처리 시간과 Python peak는 진단값이며 실제 장시간 메모리 안정성 검증은 별도다.
+
+## GPT·K151 연결 상태
+
+기존 `WakeVoiceEntry`는 프로필 감지→질문 녹음→STT/GPT/TTS→호출 대기의 상태·STOP·동의·speaker-busy 차단을 호스트 Mock으로 검사한다. 기존 공식 MCP+PC GPT에서 사용자가 확인한 음성 응답은 이 PC 호출 인식기의 자동 연결 증거가 아니다. 본 도구는 그 도구나 API를 자동 호출하지 않는다.
+
+K151은 ES7210 입력/AW88298 출력,24kHz I2S/TDM 및 mic/reference 채널을 공개 소스에서 확인했다. `K151MicReader`/codec port는 컴파일된 dormant 코드이며 `app_main.cpp`는 이를 시작하지 않는다. 출고 USB Serial/JTAG가 PCM을 제공한다는 지원 API는 확보되지 않았다. COM3에 임의 프로토콜을 보내지 않는다.
+
+실물 설치·OTA/NVS 변경·모터·음성 전송·유료 API는 이번 범위 밖이다. 설치 전에 정확한 image/활성 OTA/백업 복구·전원·STOP·스피커/마이크 충돌을 검증하고 구체적인 변경·복구 계획을 제시해야 한다. 현재는 PC 진단과 사용자 등록 경로를 현장에서 검증하는 단계다.
