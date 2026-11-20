@@ -30,9 +30,9 @@ def test_24_korean_tts_samples_use_genuine_korean_script_and_no_mislabeled_wake(
         assert label in {"wake", "nonwake"}
         assert isinstance(phrase, str) and phrase
         if label == "wake":
-            assert phrase == "조수야"
+            assert phrase == "조수"
         else:
-            assert phrase != "조수야"
+            assert phrase != "조수"
         groups[(stage, label)].append((phrase, rate))
     assert [
         len(groups[stage, label])
@@ -46,6 +46,16 @@ def test_24_korean_tts_samples_use_genuine_korean_script_and_no_mislabeled_wake(
     ] == [1, 5, 10, 2, 6]
     assert len(set(groups["calibration", "wake"])) == 5
     assert len(set(groups["evaluation", "wake"])) == 2
+    assert ("calibration", "nonwake", "조수야", 0) in plan
+    assert ("evaluation", "nonwake", "조수야", -2) in plan
+
+
+def test_legacy_phrase_is_explicit_only_and_not_default(sapi):
+    old = sapi.voice_plan("조수야")
+    assert all(phrase == "조수야" for _, label, phrase, _ in old if label == "wake")
+    assert ("calibration", "nonwake", "조수", 0) in old
+    with pytest.raises(ValueError, match="unsupported_wake_phrase"):
+        sapi.voice_plan("조수님")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="SAPI engine is Windows-only")
@@ -71,6 +81,7 @@ def test_opt_in_local_heami_tts_generates_24_valid_wavs(sapi, tmp_path, monkeypa
     report = sapi.generate(target)
     assert report["status"] == "LOCAL_SYNTHETIC_KOREAN_TTS_GENERATED"
     assert report["voice"] == "Microsoft Heami Desktop"
+    assert report["wake_phrase"] == "조수"
     assert report["synthetic_only"] and not report["network_or_paid_api_used"]
     assert not report["robot_or_microphone_accessed"]
     manifest = target / "synthetic-sapi.wake-corpus.json"

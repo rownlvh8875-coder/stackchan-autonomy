@@ -1,0 +1,173 @@
+{
+  "schema": "stackchan-private-wake-corpus-v1",
+  "samples": [
+    {
+      "id": "enrollment_wake_01",
+      "stage": "enrollment",
+      "label": "wake",
+      "session": "sapi_enrollment",
+      "file": "enrollment/enrollment_wake_01.wav"
+    },
+    {
+      "id": "calibration_wake_01",
+      "stage": "calibration",
+      "label": "wake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_wake_01.wav"
+    },
+    {
+      "id": "calibration_wake_02",
+      "stage": "calibration",
+      "label": "wake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_wake_02.wav"
+    },
+    {
+      "id": "calibration_wake_03",
+      "stage": "calibration",
+      "label": "wake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_wake_03.wav"
+    },
+    {
+      "id": "calibration_wake_04",
+      "stage": "calibration",
+      "label": "wake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_wake_04.wav"
+    },
+    {
+      "id": "calibration_wake_05",
+      "stage": "calibration",
+      "label": "wake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_wake_05.wav"
+    },
+    {
+      "id": "calibration_nonwake_01",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_01.wav"
+    },
+    {
+      "id": "calibration_nonwake_02",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_02.wav"
+    },
+    {
+      "id": "calibration_nonwake_03",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_03.wav"
+    },
+    {
+      "id": "calibration_nonwake_04",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_04.wav"
+    },
+    {
+      "id": "calibration_nonwake_05",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_05.wav"
+    },
+    {
+      "id": "calibration_nonwake_06",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_06.wav"
+    },
+    {
+      "id": "calibration_nonwake_07",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_07.wav"
+    },
+    {
+      "id": "calibration_nonwake_08",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_08.wav"
+    },
+    {
+      "id": "calibration_nonwake_09",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_09.wav"
+    },
+    {
+      "id": "calibration_nonwake_10",
+      "stage": "calibration",
+      "label": "nonwake",
+      "session": "sapi_calibration",
+      "file": "calibration/calibration_nonwake_10.wav"
+    },
+    {
+      "id": "evaluation_wake_01",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "sapi_evaluation",
+      "file": "evaluation/evaluation_wake_01.wav"
+    },
+    {
+      "id": "evaluation_wake_02",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "sapi_evaluation",
+      "file": "evaluation/evaluation_wake_02.wav"
+    },
+    {
+      "id": "evaluation_nonwake_01",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "sapi_evaluation",
+      "file": "evaluation/evaluation_nonwake_01.wav"
+    },
+    {
+      "id": "evaluation_nonwake_02",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "sapi_evaluation",
+      "file": "evaluation/evaluation_nonwake_02.wav"
+    },
+    {
+      "id": "evaluation_nonwake_03",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "sapi_evaluation",
+      "file": "evaluation/evaluation_nonwake_03.wav"
+    },
+    {
+      "id": "evaluation_nonwake_04",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "sapi_evaluation",
+      "file": "evaluation/evaluation_nonwake_04.wav"
+    },
+    {
+      "id": "evaluation_nonwake_05",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "sapi_evaluation",
+      "file": "evaluation/evaluation_nonwake_05.wav"
+    },
+    {
+      "id": "evaluation_nonwake_06",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "sapi_evaluation",
+      "file": "evaluation/evaluation_nonwake_06.wav"
+    }
+  ]
+}

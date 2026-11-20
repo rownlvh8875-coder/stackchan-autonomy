@@ -8,6 +8,10 @@ workspace. The prior uncommitted `firmware/standalone` implementation was not
 present in the latest GitHub branch. Never overwrite recovered work with this
 branch without an explicit review/diff.
 
+## 2026-11-20 wake-word migration: 조수
+
+New **development default** wake phrase is **조수**, replacing the previous 조수야 in freshly generated examples and PC-only exact-transcript research gates. The original frozen 조수야 datasets and experimental reports remain unchanged. New synthetic 조수 WAVs, SWK1 acoustic template, and regression tests are in fixtures/korean_josu_sapi_20261120/. See docs/2026-11-20-josu-wakeword-migration.md for methodology and limitations. Firmware HOLD remains active; neither real K151 wake recognition nor always-on speech has been enabled or validated.
+
 ## Included
 
 - `core/standalone_core.hpp`: bounded, versioned SCFG v1 framing, CRC integrity,

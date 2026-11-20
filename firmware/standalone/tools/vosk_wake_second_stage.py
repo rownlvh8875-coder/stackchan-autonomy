@@ -2,7 +2,7 @@
 
 Stage 1: existing C++ SWK1 MFCC/DTW probe (must accept).
 Stage 2: a locally installed Vosk Korean model transcribes the SAME PCM and
-must return EXACTLY "조수야" (whitespace + trailing punctuation tolerated).
+must return EXACTLY the selected phrase (default "조수").
 
 No network, microphones, robots, NVS, OTA or paid APIs. Never authorizes
 hardware installation. Confidence values are NOT assumed calibrated.
@@ -35,15 +35,21 @@ class OfflineVoskRejected(ValueError):
     """Stable diagnostics only; never echo private audio or file paths."""
 
 
-def exact_wake_transcript(text: object) -> bool:
-    """NFKC+optional trailing punctuation; no fuzzy/substring match allowed."""
+DEFAULT_WAKE_PHRASE = "조수"
+SUPPORTED_WAKE_PHRASES = ("조수", "조수야")
+
+
+def exact_wake_transcript(text: object, *, wake_phrase: str = DEFAULT_WAKE_PHRASE) -> bool:
+    """NFKC+trailing punctuation; exact word only, no substring/fuzzy."""
+    if wake_phrase not in SUPPORTED_WAKE_PHRASES:
+        return False
     if not isinstance(text, str) or not text or len(text) > MAX_TRANSCRIPT_LENGTH:
         return False
     normalized = unicodedata.normalize("NFKC", text).strip()
     normalized = normalized.rstrip(PUNCTUATION).strip()
     if not re.fullmatch(r"[가-힣\s]+", normalized):
         return False
-    return "".join(normalized.split()) == "조수야"
+    return "".join(normalized.split()) == wake_phrase
 
 
 def _resampler_kernels() -> tuple[tuple[float, ...], tuple[float, ...]]:
@@ -171,6 +177,8 @@ def evaluate_cascade(
     stage1_binary: Path,
     stage1_profile: Path,
     vosk_model_dir: Path,
+    *,
+    wake_phrase: str = DEFAULT_WAKE_PHRASE,
 ) -> dict:
     if not valid_local_model_directory(vosk_model_dir):
         raise OfflineVoskRejected("offline_korean_model_not_installed")
@@ -225,7 +233,7 @@ def evaluate_cascade(
         pcm16 = resample_24k_pcm16_to_16k(read_24k_mono_pcm16_wav(path))
         recognized = transcript_from_offline_vosk(model, pcm16)
         asr_checked += 1
-        if exact_wake_transcript(recognized):
+        if exact_wake_transcript(recognized, wake_phrase=wake_phrase):
             cascade[label] += 1
 
     return {
@@ -253,10 +261,17 @@ def main() -> int:
     parser.add_argument("--stage1-binary", required=True, type=Path)
     parser.add_argument("--stage1-profile", required=True, type=Path)
     parser.add_argument("--vosk-model-dir", required=True, type=Path)
+    parser.add_argument(
+        "--wake-phrase", choices=SUPPORTED_WAKE_PHRASES, default=DEFAULT_WAKE_PHRASE
+    )
     args = parser.parse_args()
     try:
         report = evaluate_cascade(
-            args.manifest, args.stage1_binary, args.stage1_profile, args.vosk_model_dir
+            args.manifest,
+            args.stage1_binary,
+            args.stage1_profile,
+            args.vosk_model_dir,
+            wake_phrase=args.wake_phrase,
         )
         status = 0
     except (OfflineVoskRejected, OSError, ValueError, RuntimeError) as exc:

@@ -36,12 +36,13 @@ def verifier(monkeypatch):
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("조수야", True),
-        (" 조 수 야 ", True),
-        ("조수야!", True),
-        ("조수야?", True),
-        ("조수야.", True),
-        ("조수야 지금", False),
+        ("조수", True),
+        (" 조 수 ", True),
+        ("조수!", True),
+        ("조수?", True),
+        ("조수.", True),
+        ("조수야", False),
+        ("조수 지금", False),
         ("조수아", False),
         ("조세형", False),
         ("조세 였다", False),
@@ -58,6 +59,12 @@ def verifier(monkeypatch):
 )
 def test_exact_korean_transcript_gate(verifier, text, expected):
     assert verifier.exact_wake_transcript(text) is expected
+
+
+def test_legacy_wake_requires_explicit_selection(verifier):
+    assert verifier.exact_wake_transcript("조수야", wake_phrase="조수야")
+    assert not verifier.exact_wake_transcript("조수", wake_phrase="조수야")
+    assert not verifier.exact_wake_transcript("조수", wake_phrase="invalid")
 
 
 def test_resampler_and_canonical_audio_are_local_and_bounded(verifier, tmp_path):
@@ -113,7 +120,9 @@ def test_fake_asr_called_only_after_stage1_accept(verifier, monkeypatch, tmp_pat
 
     monkeypatch.setattr(verifier, "stage1_probe", fake_stage1)
     monkeypatch.setattr(verifier, "transcript_from_offline_vosk", fake_asr)
-    answer = verifier.evaluate_cascade(MANIFEST, tmp_path / "fake-stage1", PROFILE, model_dir)
+    answer = verifier.evaluate_cascade(
+        MANIFEST, tmp_path / "fake-stage1", PROFILE, model_dir, wake_phrase="조수야"
+    )
     assert len(calls) == 16
     assert answer["asr_invocations_after_stage1_accept"] == 3
     assert answer["stage1_accepted"] == {"wake": 2, "nonwake": 1}
