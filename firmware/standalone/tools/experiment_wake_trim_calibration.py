@@ -29,16 +29,16 @@ SOURCE = CORPUS / "synthetic-sapi.wake-corpus.json"
 
 
 def _compile(source: str, target: Path, *, trim: bool) -> None:
-    compiler = shutil.which("uvx")
-    if not compiler:
-        raise RuntimeError("cached_offline_compiler_missing")
+    native = shutil.which("g++")
+    if native:
+        prefix = [native]
+    else:
+        cached = shutil.which("uvx")
+        if not cached:
+            raise RuntimeError("native_or_cached_offline_compiler_missing")
+        prefix = [cached, "--offline", "--from", "ziglang==0.15.2", "python-zig", "c++"]
     args = [
-        compiler,
-        "--offline",
-        "--from",
-        "ziglang==0.15.2",
-        "python-zig",
-        "c++",
+        *prefix,
         "-std=c++20",
         "-O2",
         "-Wall",

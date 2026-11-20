@@ -223,6 +223,19 @@ for nominal 20dB noise and either synthetic echo scenario it missed both wake
 clips. The only sound tested was one TTS voice, **not a human speaker**. See
 `docs/2026-11-20-heami-noise-echo-robustness.md` for detailed observations.
 
+## 2026-11-20 experimental wake robustness — NOT deployment-ready
+
+An opt-in host-only energy trim plus 3 augmented templates were developed on
+1 Heami training utterance and 5/10 calibration clips only. Recipe and SHA
+were frozen in commit `5cd043f`, before creating 16 NEW same-TTS evaluation
+clips under `fixtures/korean_heami_fresh_holdout_20261120/`. The fixed
+candidate detects more wake clips under nominal 20dB/10dB Gaussian noise,
+but also falsely accepts **4/12** different Korean phrases at 20dB, **2/12**
+on clean speech, and **1/12** with the 80ms echo test. **Reject deployment.**
+See `docs/2026-11-20-frozen-robust-wake-fresh-holdout.md` and the frozen
+fixture hash. Future tuning must not treat these exposed clips as independent
+validation data; the K151 HOLD and all factory hardware settings are untouched.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`

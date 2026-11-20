@@ -152,6 +152,11 @@ def compare_frozen(manifest: Path, baseline_profile: Path, frozen_profile: Path)
         "holdout_wake": EXPECTED_COUNTS["wake"],
         "holdout_nonwake": EXPECTED_COUNTS["nonwake"],
         "conditions": results,
+        "candidate_has_observed_false_accepts": any(
+            item["trim_augmented"].get("nonwake", {}).get("accepted", 0) > 0
+            for item in results.values()
+        ),
+        "candidate_recommended_for_deployment": False,
         "frozen_recipe_tuned_on_this_holdout": False,
         "human_speaker_independence_proven": False,
         "real_korean_accuracy_proven": False,
