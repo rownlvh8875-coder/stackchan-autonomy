@@ -306,6 +306,21 @@ See `docs/2026-11-20-tiny-conv-mfcc-kws-development.md`.
 This code is compiled **only for host tests**, not into ESP-IDF.
 No hardware activation or K151 HOLD change is allowed.
 
+## 2026-11-20 frozen tiny CNN postfreeze TTS evaluation — REJECTED
+
+After commit `92a3796` froze the 1,423-byte temporal CNN model,
+16 new Windows Heami TTS clips (4 wake, 12 nonwake) were generated and
+compared against fixed original/augmented DTW and linear MFCC methods.
+The CNN detected 4/4 wake in clean, 20/10/5dB nominal synthetic noise
+and 80ms echo conditions, but falsely accepted **3/12** nonwake even
+in clean speech and **4/12** at 20dB noise. The small CNN model
+**does NOT satisfy unattended wake requirements**; no weights or threshold
+were changed after the new holdout. See
+`docs/2026-11-20-tiny-conv-postfreeze-rejected.md` and
+`fixtures/korean_heami_conv_postfreeze_20261120/`. All waveforms are
+one synthetic Heami voice, not real human or in-room K151 measurements.
+Physical robot, firmware HOLD, GPIO, power, NVS and OTA remain unchanged.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`

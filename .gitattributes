@@ -11,3 +11,5 @@
 /firmware/standalone/fixtures/korean_heami_contrastive_postfreeze_20261120/post-freeze.wake-corpus.json -text
 # Frozen linear MFCC post-evaluation synthetic manifest; hash raw bytes cross-OS.
 /firmware/standalone/fixtures/korean_heami_linear_postfreeze_20261120/linear-postfreeze.wake-corpus.json -text
+# Frozen tiny CNN Heami synthetic holdout manifest must preserve raw bytes.
+/firmware/standalone/fixtures/korean_heami_conv_postfreeze_20261120/cnn-postfreeze.wake-corpus.json -text

@@ -1,0 +1,117 @@
+{
+  "schema": "stackchan-private-wake-corpus-v1",
+  "samples": [
+    {
+      "id": "cnn-eval-01",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_01.wav"
+    },
+    {
+      "id": "cnn-eval-02",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_02.wav"
+    },
+    {
+      "id": "cnn-eval-03",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_03.wav"
+    },
+    {
+      "id": "cnn-eval-04",
+      "stage": "evaluation",
+      "label": "wake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_04.wav"
+    },
+    {
+      "id": "cnn-eval-05",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_05.wav"
+    },
+    {
+      "id": "cnn-eval-06",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_06.wav"
+    },
+    {
+      "id": "cnn-eval-07",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_07.wav"
+    },
+    {
+      "id": "cnn-eval-08",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_08.wav"
+    },
+    {
+      "id": "cnn-eval-09",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_09.wav"
+    },
+    {
+      "id": "cnn-eval-10",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_10.wav"
+    },
+    {
+      "id": "cnn-eval-11",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_11.wav"
+    },
+    {
+      "id": "cnn-eval-12",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_12.wav"
+    },
+    {
+      "id": "cnn-eval-13",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_13.wav"
+    },
+    {
+      "id": "cnn-eval-14",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_14.wav"
+    },
+    {
+      "id": "cnn-eval-15",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_15.wav"
+    },
+    {
+      "id": "cnn-eval-16",
+      "stage": "evaluation",
+      "label": "nonwake",
+      "session": "heami_after_cnn_frozen_commit_92a3796",
+      "file": "evaluation/cnn_eval_16.wav"
+    }
+  ]
+}
