@@ -57,3 +57,23 @@ loop lag69.4647ms, executor wait4.3797ms; disk I/O vs worker descheduling remain
 unresolved. Each check durably advances the anti-rollback coordination clock;
 do not remove/relax that write or timeout just to obtain green. Numeric evidence
 in docs/validation/2026-11-21-windows-ci-b09e63b.json. No failed run rerun.
+
+Post-download d5 target compile/link PASS, image625968bytes/embedded pack/ELF
+binding/esptool checksum all verified. However published source_head was empty:
+container Git dubious-ownership error was swallowed in command substitution.
+Do not approve that review bundle. Added8RED provenance guards/binding cases;
+CI now captures Git HEAD with per-command named safe.directory, asserts it
+equals GITHUB_SHA, puts12 chars in PROJECT_VER, and requires40hex/nonempty
+commit+matching descriptor version. Real old d5 artifact rejected both for
+empty source and attempted relabel with known merge6efd8b0. No device writes.
+
+Created a protected current-user/SYSTEM-only full original copy on D: disk1,
+distinct from C: disk0 (two512GB NVMe/NTFS); verified16777216bytes and original
+SHA. This is a second local physical disk, not a cloud upload. Prepared exact
+same-slot undo slice from full verified original, retaining whole-flash backup.
+
+Provenance correction full standalone456PASS5SKIP (93.32s), image tests17PASS.
+D5 CI completed9/9 (push44767547014, PR44767560777, S3 target44767560757),
+but its review manifest is rejected for empty source despite successful compile.
+Recorded this distinction; no failed CI rerun and no device writes. Final source
+binding correction goes to the same branch/PR with a fresh changed-source build.

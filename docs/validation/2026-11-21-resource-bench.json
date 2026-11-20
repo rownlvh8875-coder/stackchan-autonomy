@@ -59,5 +59,38 @@
     "reason": "IDF6.1/MbedTLS4.1 has no legacy mbedtls/sha256.h",
     "local_reproduction": "FAIL before PSA replacement; focused71PASS after replacement",
     "rerun": false
+  },
+  "post_provenance_correction_standalone_optional": {
+    "passed": 456,
+    "skipped": 5,
+    "elapsed_s": 93.32
+  },
+  "post_provenance_image_tests": {
+    "passed": 17,
+    "new_red_then_green": 8
+  },
+  "d5f5d5d_ci": {
+    "source_head": "d5f5d5de31c33d2391bc4872b8cc73fe3e5f0428",
+    "passed": 9,
+    "failed": 0,
+    "push_run": 44767547014,
+    "pr_run": 44767560777,
+    "target_run": 44767560757,
+    "target_job": 136396173833,
+    "target_compile_link": "PASS",
+    "published_manifest_source_head": "",
+    "review_bundle_eligible": false,
+    "reason": "Git dubious ownership was swallowed in substitution; empty source and incorrect descriptor version now reject",
+    "rerun": false
+  },
+  "separate_backup_copy": {
+    "verified": true,
+    "bytes": 16777216,
+    "sha256": "c1241a7c87145ee8b9569cfbcfbb1f8c289641856f9b9b5ddf2ccd565019543e",
+    "source_disk": 0,
+    "copy_disk": 1,
+    "media": "two distinct local512GB NVMe/NTFS disks",
+    "acl": "protected-current-user-and-SYSTEM-only",
+    "uploaded": false
   }
 }

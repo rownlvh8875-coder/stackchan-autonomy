@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -12,6 +13,19 @@ from prepare_wakenet_assets import MODEL_NAME, PACK_BYTES, PACK_SHA256
 PACK_PREFIX = struct.pack("<I32sI", 1, MODEL_NAME.encode(), 3)
 SLOT_OFFSET = 0x510000
 SLOT_BYTES = 5_177_344
+
+
+def validate_source_head(value: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{40}", value) is None:
+        raise ValueError("missing or invalid actual checkout commit")
+    return value
+
+
+def bind_source_head(app_version: str, source_head: str) -> str:
+    source_head = validate_source_head(source_head)
+    if app_version != source_head[:12]:
+        raise ValueError("app version does not bind actual checkout commit")
+    return source_head
 
 
 def inspect_image(app: bytes, elf_sha256: str) -> dict:
@@ -69,6 +83,7 @@ def inspect_image(app: bytes, elf_sha256: str) -> dict:
         raise ValueError("embedded model is not in a DROM segment")
     return {
         "kind": "SILENT_RESOURCE_BENCH_NOT_OPERATIONAL",
+        "app_version": app[first + 16 : first + 48].split(b"\0", 1)[0].decode("ascii"),
         "image_sha256": hashlib.sha256(app).hexdigest(),
         "elf_sha256_bound_to_image": embedded_elf_sha,
         "write_offset": SLOT_OFFSET,
@@ -96,9 +111,14 @@ def main():
     parser.add_argument("--source-head", required=True)
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
+    validate_source_head(args.source_head)
     base = validate(args.elf, args.bin, args.idf_head)
     result = inspect_image(args.bin.read_bytes(), base["elf"]["sha256"])
-    result.update(idf_commit=base["idf_commit"], elf=base["elf"], source_head=args.source_head)
+    result.update(
+        idf_commit=base["idf_commit"],
+        elf=base["elf"],
+        source_head=bind_source_head(result["app_version"], args.source_head),
+    )
     with args.out.open("x", encoding="utf-8") as output:
         output.write(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, separators=(",", ":")))

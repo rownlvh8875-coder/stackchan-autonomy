@@ -31,6 +31,9 @@ CI는 기존 HOLD와 별도 진단 앱을 모두 pinned IDF6.1/SR2.4.7로 compil
 모델 라이선스만 넣는다. 원본 백업·사용자 설정·키는 포함하지 않는다.
 `check_resource_bench.py`는 ESP32-S3 header/segment/checksum/SHA, 전용 app
 descriptor와 DROM 내 모델 SHA, 슬롯 크기와 sector 반올림 범위를 검증한다.
+실제 checkout commit40자와 앱 내부 version의12자 접두부도 결합한다. 컨테이너
+Git 소유권 오류/빈 커밋을 성공으로 발행하지 않으며 ELF SHA도 bin descriptor와
+일치해야 한다. 빌드 성공과 설치 검토 자료의 완전성을 따로 검증한다.
 
 **아직 쓰기 승인은 없다.** 제안 대상은 `ota_1@0x510000`이며 이미 출고 앱이
 들어 있다. 원본 메타데이터는 이 슬롯을 선택 후보로 가리키지만 현재 실행 슬롯과
@@ -41,8 +44,15 @@ IDF bootloader/table/flash_args는 실물에 적용하지 않는다.
 
 설치 전 로컬 private 검토 묶음에 실제 app+SHA, 원본 A/B 전체 SHA 일치,
 원본 slot1 복구 slice+SHA, 정확한 쓰기/검증/복구 명령, 중단 조건을 준비한다.
-현재 실행 슬롯·factory bootloader 호환·복구 쓰기와 별도 저장장치 사본은
-미검증으로 표시한다. 승인 이후에도 포트/칩/보호 상태/원본 표·OTA가 달라지면
+2026-11-21에 C: disk0과 D: disk1이 서로 다른512GB 내장 NVMe/NTFS임을 확인했다.
+D:의 새 접근 제한 폴더에 전체 원본16MiB 사본을 만들고 SHA 일치를 확인했다.
+폴더와 파일은 현재 사용자/SYSTEM만 허용하며 원본 내용은 업로드하지 않았다.
+현재 실행 슬롯·factory bootloader 호환·실제 복구 쓰기는 미검증이다.
+슬롯 단독 복구 slice는 전체 원본 백업에서 추출한 정확한 slot1 범위이며, 다른
+영역이 바뀐 경우의 전체 flash 복구를 대신하지 않는다. 제안하는 임시 실험 범위는
+진단 앱 쓰기/검증→합성 진단1회→같은 슬롯 원본 복구/검증→출고 복귀 관찰이다.
+이 쓰기·복구 전체가 아직 미승인이다.
+승인 이후에도 포트/칩/보호 상태/원본 표·OTA가 달라지면
 중단한다. write/verify 실패나 brownout 시 자동 재시도·다른 슬롯 쓰기는 하지 않는다.
 
 근거: [고정 SDK loader](https://github.com/espressif/esp-sr/blob/2f8c4b0459db5bbb39abd77adae27962d6d94bcb/src/model_path.c),
