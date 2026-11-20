@@ -260,6 +260,22 @@ not demonstrate any further reduction in false accepts (both variants were
 See `docs/2026-11-20-contrastive-postfreeze-rejected.md` for the full
 record and limitations.
 
+## 2026-11-20 847-byte linear MFCC keyword research model — HOST ONLY
+
+A separate **non-DTW** host research prototype
+(`core/offline_linear_kws.hpp`, `tools/wake_linear_train.cpp`,
+`tools/wake_linear_eval.cpp`) learns a class-balanced logistic-linear
+classifier on 16×13 time-pooled original MFCC features. It is **not**
+a phoneme ASR model or approved production wake detector. The frozen
+synthetic-only 847-byte `SKWL1` model is in
+`fixtures/korean_heami_linear_kws_20261120/`. It used 6 known training
+wake and 26 known training nonwake Heami TTS clips plus deterministic
+augmentations; **no previously exposed evaluation WAVs were opened**.
+Development counts were 30/30 wake and 10/130 false nonwake accepts on
+correlated TRAINING examples, not independent performance. See
+`docs/2026-11-20-tiny-linear-mfcc-kws-development.md`. The real robot,
+firmware wake path, physical audio hardware, and HOLD remain unchanged.
+
 ## 2026-11-19 K151 power / LCD evidence (probe compiled, never invoked)
 
 `core/board_evidence.hpp` and `esp_app/main/k151_readonly_probe.cpp`
