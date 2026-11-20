@@ -57,6 +57,7 @@ def probe_exe(tmp_path_factory):
 
 @pytest.fixture
 def python_probe(monkeypatch):
+    monkeypatch.syspath_prepend(str(TOOLS))
     tool = TOOLS / "pc_mic_wake_probe.py"
     spec = importlib.util.spec_from_file_location("pc_mic_wake_probe", tool)
     assert spec is not None and spec.loader is not None
@@ -225,3 +226,60 @@ def test_optional_48khz_silence_is_never_a_wake(python_probe):
     np = pytest.importorskip("numpy")
     silent = np.zeros(120000, dtype=np.int16)
     assert python_probe.resample_and_trim_48k(silent, np) is None
+
+
+def test_score_reports_actual_distance_and_limit_without_audio_or_features(probe_exe):
+    profile = PROFILE.read_bytes()
+    wav = (FIXTURE / "evaluation" / "evaluation_wake_01.wav").read_bytes()
+    result = subprocess.run(
+        [str(probe_exe), "--score", "-"],
+        input=len(profile).to_bytes(2, "big") + profile + wav,
+        capture_output=True,
+        timeout=20,
+    )
+    assert result.returncode == 0
+    score = json.loads(result.stdout)
+    assert score["accepted"] is True
+    assert 0 <= score["distance_q8"] < score["limit_q8"]
+    assert score["limit_q8"] == int.from_bytes(profile[5:7], "little")
+    assert set(score) == {"accepted", "distance_q8", "limit_q8"}
+
+
+def test_feature_pipe_uses_original_mfcc_and_calibrates_in_memory(probe_exe):
+    wav = (FIXTURE / "enrollment" / "enrollment_wake_01.wav").read_bytes()
+    result = subprocess.run(
+        [str(probe_exe), "--features", "-"], input=wav, capture_output=True, timeout=20
+    )
+    assert result.returncode == 0 and len(result.stdout) == 832 and result.stderr == b""
+    # The published profile's first template is the exact feature of this public WAV.
+    assert result.stdout == PROFILE.read_bytes()[7:839]
+    # Hand-chosen distinguishable features exercise the real C++ calibrator's gate.
+    features = b"".join(bytes([n]) * 832 for n in [0, 1, 2, 3, 4, 5, 6, 7, *range(70, 80)])
+    result = subprocess.run(
+        [str(probe_exe), "--calibrate", "-"], input=features, capture_output=True, timeout=20
+    )
+    assert result.returncode == 0 and result.stdout.startswith(b"SWK1\x03")
+    assert len(result.stdout) == 2507
+    duplicated = bytes(832 * 18)
+    result = subprocess.run(
+        [str(probe_exe), "--calibrate", "-"], input=duplicated, capture_output=True, timeout=20
+    )
+    assert result.returncode == 2 and not result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "body"),
+    [
+        ("--features", b"not-wave"),
+        ("--calibrate", bytes(832 * 18 - 1)),
+        ("--calibrate", bytes(832 * 18 + 1)),
+        ("--score", b"\x00\x01x"),
+        ("--score", b"\xff\xff" + bytes(200000)),
+    ],
+)
+def test_new_private_pipe_modes_reject_malformed_or_excess_input(probe_exe, mode, body):
+    result = subprocess.run(
+        [str(probe_exe), mode, "-"], input=body, capture_output=True, timeout=20
+    )
+    assert result.returncode == 2 and result.stdout == b""
+    assert result.stderr.strip() == b"OFFLINE_WAKE_PROBE_REJECTED"
