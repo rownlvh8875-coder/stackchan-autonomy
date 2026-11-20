@@ -178,11 +178,9 @@ def main(argv=None) -> int:
             match = None
             if wav is None:
                 status = "NO_SPEECH_ACTIVITY"
-            elif args.diagnostics:
+            else:
                 match = score_wav(probe, profile.read_bytes(), wav)
                 status = "UNVERIFIED_MATCH" if match["accepted"] else "UNVERIFIED_NO_MATCH"
-            else:
-                status = classify_wav(probe, profile, wav)
             _, peak_bytes = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()

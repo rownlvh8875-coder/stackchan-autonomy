@@ -456,3 +456,25 @@ def test_quiet_valid_pcm_below_feature_floor_counts_as_rejection_not_io_failure(
     )
     assert model is not None and report["personal"]["quiet_accepted"] == 0
     assert report["personal"]["quiet_windows"] == 3
+
+
+def test_feature_bearing_nonwake_cannot_pass_on_inconsistent_null_score(
+    enroll, probe_exe, monkeypatch
+):
+    source = synthetic_capture(enroll)
+    real_score = enroll.score_wav
+    current = {}
+
+    def capture(stage, label, index, prompt):
+        current.update(stage=stage, label=label)
+        return source(stage, label, index, prompt)
+
+    def inconsistent(probe, profile, wav):
+        result = real_score(probe, profile, wav)
+        if current.get("stage") == "evaluation" and current.get("label") == "nonwake":
+            return dict(result, accepted=False, distance_q8=None)
+        return result
+
+    monkeypatch.setattr(enroll, "score_wav", inconsistent)
+    with pytest.raises(enroll.EnrollmentError, match="^inconsistent_helper_feature$"):
+        enroll.run_session(probe_exe, (FIXTURE / "josu-20261120.swk1").read_bytes(), capture)

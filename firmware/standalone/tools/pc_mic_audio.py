@@ -107,8 +107,15 @@ def analyze_48k(samples, np):
         issues.append("NO_SPEECH_ACTIVITY")
         sample24.fill(0)
         return None, diagnostics
-    first = int(active[0]) * block
-    last = min(len(sample24), (int(active[-1]) + 1) * block)
+    first_block, last_block = int(active[0]), int(active[-1])
+    # Preserve connected weaker endings/onsets even beyond the context length.
+    # Only a below-base gap separates incidental low-energy activity from this span.
+    while first_block > 0 and energy[first_block - 1] > base_threshold:
+        first_block -= 1
+    while last_block + 1 < len(energy) and energy[last_block + 1] > base_threshold:
+        last_block += 1
+    first = first_block * block
+    last = min(len(sample24), (last_block + 1) * block)
     begin, end = max(0, first - 9600), min(len(sample24), last + 9600)
     # Weak ending phonemes within retained context still count as boundary risk.
     # Ignore only weaker activity outside that context, never a strong edge.

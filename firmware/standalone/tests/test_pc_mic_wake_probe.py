@@ -293,3 +293,33 @@ def test_score_distinguishes_valid_no_feature_audio_from_malformed_wave(probe_ex
         "distance_q8": None,
         "limit_q8": 1003,
     }
+
+
+def test_diagnostics_only_adds_fields_for_valid_pcm_below_feature_floor(probe_exe, tmp_path):
+    wav = tmp_path / "synthetic-digital-silence.wav"
+    with wave.open(str(wav), "wb") as stream:
+        stream.setnchannels(1)
+        stream.setsampwidth(2)
+        stream.setframerate(24000)
+        stream.writeframes(bytes(48000))
+    statuses = []
+    for extra in [[], ["--diagnostics"]]:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(TOOLS / "pc_mic_wake_probe.py"),
+                "--probe-exe",
+                str(probe_exe),
+                "--profile",
+                str(PROFILE),
+                "--fixture",
+                str(wav),
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        statuses.append(json.loads(result.stdout)["status"])
+    assert statuses == ["UNVERIFIED_NO_MATCH", "UNVERIFIED_NO_MATCH"]

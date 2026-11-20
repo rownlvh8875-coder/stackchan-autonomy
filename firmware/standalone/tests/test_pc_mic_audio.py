@@ -214,3 +214,19 @@ def test_weak_edge_inside_primary_context_remains_a_capture_risk(audio, np):
     signal[-960:] = np.rint(160 * np.sin(2 * np.pi * 800 * np.arange(960) / 48000)).astype(np.int16)
     _, d = audio.analyze_48k(signal, np)
     assert d["capture_edge_activity"] and "CAPTURE_EDGE_ACTIVITY" in d["quality_issues"]
+
+
+@pytest.mark.parametrize("edge", ["start", "end"])
+def test_continuous_weak_activity_outside_context_cannot_be_cut_and_admitted(audio, np, edge):
+    signal = np.zeros(144000, dtype=np.int16)
+    weak = np.rint(400 * np.sin(2 * np.pi * 800 * np.arange(28800) / 48000)).astype(np.int16)
+    strong = np.rint(10000 * np.sin(2 * np.pi * 800 * np.arange(19200) / 48000)).astype(np.int16)
+    if edge == "end":
+        signal[96000:115200] = strong
+        signal[115200:] = weak
+    else:
+        signal[:28800] = weak
+        signal[28800:48000] = strong
+    _, d = audio.analyze_48k(signal, np)
+    assert d["capture_edge_activity"] and "CAPTURE_EDGE_ACTIVITY" in d["quality_issues"]
+    assert d["activity_end_ms"] == 3000 if edge == "end" else d["activity_start_ms"] == 0

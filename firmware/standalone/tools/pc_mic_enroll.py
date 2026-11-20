@@ -115,7 +115,10 @@ def run_session(probe, baseline, capture):
                         durations.append((time.perf_counter() - started) * 1000)
                         continue
             for model, stats in [(personal, personal_counts), (baseline, baseline_counts)]:
-                accepted = bool(wav is not None and score_wav(probe, model, wav)["accepted"])
+                score = score_wav(probe, model, wav) if wav is not None else None
+                if label != "quiet" and score["distance_q8"] is None:
+                    raise EnrollmentError("inconsistent_helper_feature")
+                accepted = bool(score is not None and score["accepted"])
                 if label == "quiet":
                     stats["quiet_windows"] += 1
                     stats["quiet_accepted"] += int(accepted)

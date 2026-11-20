@@ -291,3 +291,7 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 ## 2026-11-20 “조수” PC 실제 목소리 진단·등록 경로
 
 [이번 검증 상세](validation/2026-11-20-josu-human-mic-diagnostics.md): 기존 Python487PASS2SKIP, standalone271PASS7SKIP, PC진단/등록65PASS3Windows-onlySKIP, Ruff 및 독립 wheel 설치 검증 PASS. 새 Windows/Linux/ESP32 CI는 정확한 head로 후속 기록한다. 실제 사용자 발화와 K151 마이크는 미검증이고, synth재생 시험을 독립 사람 인식률로 계산하지 않았다. raw음성 저장/실제API/기기쓰기/환경게시는 수행하지 않았다.
+
+## 2026-11-20 무발화 배경 활동 경계 거부 후속 수정
+
+[이번 검증 상세](validation/2026-11-20-josu-background-activity.md): Python **487PASS2SKIP**, standalone **284PASS7SKIP**, PC 진단·등록 **78PASS3Windows-onlySKIP**, Ruff check/format315files PASS. 분리된 약한 활동을 진단하고 연속된 약한 끝음은 보존한다. quiet의 실제 오탐을 평가하고 helper의 일관성 오류를 실패시킨다. 단일 독립 검토 Important3건은 회귀 RED→GREEN으로 수정했다. 새 정확한 head의 Windows/Linux/ESP compile-only CI 결과는 [PR#3](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3)에 기록한다. 실제 사용자 인식/마이크의 물리적 원인/K151 적용은 미검증이며 장치용 core/esp_app 변경과 기기 설치·유료 API·환경 게시는 없다.
