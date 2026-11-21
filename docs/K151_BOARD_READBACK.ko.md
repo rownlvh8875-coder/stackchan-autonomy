@@ -68,8 +68,9 @@ bounded I/O·partial read·오류 후 non-elidable PCM wipe를 별도 회귀 시
 checksum·app SHA·점유 슬롯 크기/erase 범위를 검사한다. 모델 진단 검증기도 같은
 parser를 쓰며 기존 모델 SHA/DROM 검사를 유지한다. 이들은 Mock/오프라인 증거다.
 
-실제 S3 compile/link와 artifact의 최종 SHA/길이, 현재 commit의 실제 CI 결과는
-후속 검증 기록에 작성한다. 빌드/업로드 자체가 설치 승인은 아니다. 새 이미지를
+실제 S3 compile/link·artifact SHA/길이와 코드36c4e98의 CI **8/9** 결과는
+[후속 검증 기록](validation/2026-11-21-k151-board-readback-preflight.md)에 작성했다.
+빌드/업로드 자체가 설치 승인은 아니다. 새 이미지를
 검토할 때는 정확한 쓰기/erase 범위, 원본 A/B·별도 저장장치 사본·slot1 복구 slice
 재검증, 실행·검증·복구 명령, 중단 조건이 있는 로컬 검토 묶음을 먼저 준비한다.
 생성된 bootloader/partition table은 설치 대상이 아니다. 장치 상태를 다시 확인하고
@@ -90,4 +91,5 @@ COMMIT max3.3571ms, executor queue max7.6132ms, loop lag max37.2925ms로 과거 
 최종 로컬 standalone은 선택 NumPy/cryptography와 최적화/assertions ON 컴파일러를
 포함해 **550PASS5SKIP**(92.09s), root **495PASS2SKIP**(99.41s)이다.
 Ruff/format350files와 diff 검사를 통과했다. 실제 target 빌드/새 이미지의 실물 실행과
-혼동하지 않는다. 현재 코드의 CI/이미지 최종 검토는 후속 기록으로 갱신한다.
+혼동하지 않는다. CI/이미지 최종 검토는 위 기록을 따른다. S3 target은 통과했고,
+PR Windows3.11 root heartbeat 시험의 StateUnavailable는 미해결이다.

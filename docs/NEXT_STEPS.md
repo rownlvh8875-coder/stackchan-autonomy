@@ -6,7 +6,10 @@
 오류 시 부분 증거를 폐기하는 보호 및 PMIC/IO 설정 조회를 추가했다.
 [별도 보드 진단](K151_BOARD_READBACK.ko.md)은 nonce START 한 번으로 제한하며
 실제 실행 slot/chip을 먼저 검사한다. 운영 HOLD와 cloud OFF는 유지한다.
-이 단계에서 새 장치 접근/설치는 하지 않았다. 보드 설정의 읽기 성공은 전기적
+코드36c4e98 실제CI는8/9 (push4/4·PR3/4·S3 1/1)다. PR Windows3.11 root
+heartbeat 시험의 StateUnavailable가 남았다. [산출물·실패 근거](validation/2026-11-21-k151-board-readback-preflight.md)와
+로컬 설치/복구 검토 묶음을 준비했다. 이 단계에서 새 장치 접근/설치는 하지 않았다.
+보드 설정의 읽기 성공은 전기적
 전원/mute/STOP 증거가 아니다. codec1.6.2의 1000ms I/O 대기·short count 처리와
 PCM 지움 강화도 실제 mic 활성화 전 해결해야 한다. 아래 실물 기록과 구분한다.
 

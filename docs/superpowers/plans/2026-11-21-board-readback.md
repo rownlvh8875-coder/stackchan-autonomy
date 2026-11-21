@@ -28,10 +28,10 @@ observation is still pending and must precede any future approved device trial.
   once, STOP latch, only fixed numeric register JSON, no raw audio or writer.
   Record actual running partition offset and live chip model/revision so a
   future physical run can resolve slot ambiguity. Fail closed on unexpected slot.
-- [ ] Reuse/refactor ESP image envelope/ELF/source binding verifier; reject wrong
+- [x] Reuse/refactor ESP image envelope/ELF/source binding verifier; reject wrong
   app kind/slot/revision/checksum/hash/ELF/version. Build exact S3 target and
   review artifact+license through existing pinned CI. No installation now.
-- [ ] Local suite, one independent end review, fix important findings RED/GREEN,
+- [x] Local suite, one independent end review, fix important findings RED/GREEN,
   same-branch push and inspect actual CI. Prepare private install/restore review
   bundle before any new write question. Preserve prior CI failures.
 
@@ -67,3 +67,12 @@ Final review: one fresh read-only reviewer; Important3 accepted and fixed by
 RED→GREEN tests for selected build slot, actual denial telemetry and required
 license packaging. Minor mixed NACK fixture deferred. Local root495PASS2SKIP;
 finite Windows Mock120cycles PASS (no CI stall reproduced). No device access.
+
+Final target: 36c4e98 code / c991ec9523d6a82c6908c9aa4bade5b8fdb62991 actual
+checkout, run44844341123 PASS. Board image185744bytes, SHA128969c002b9b1242679baf1658b66951fe7c7c076b00e573dd221d34ff5aa17;
+ELF/ZIP/CSV/source/license50 inventory all revalidated locally. Review bundle
+includes exact write/erase, full same-slot recovery, rehashed backups and commands.
+Code CI8/9: push4/4, PR3/4, S3 1/1. PR Windows3.11 root heartbeat test fails
+StateUnavailable before virtual soak; no rerun or limit change. See sanitized
+validation/2026-11-21-k151-board-readback-preflight.md. This is a prepared
+diagnostic prerequisite, not completion of standalone operation or CI repair.
