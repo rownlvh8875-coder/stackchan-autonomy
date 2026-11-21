@@ -1,5 +1,15 @@
 # Next steps
 
+## 2026-11-21 실물 계측 — WakeNet 모델 reset 경계의 panic
+
+승인 계측 이미지에서 `model_reset_begin` 뒤 `model_reset_return` 전에
+새 nonce와 `ESP_RST_PANIC`을 수신했다. 포트의 reset 경로는 SDK
+`clean()`을 호출한다. 예외 세부나 명령 주소는 아직 없다. 합성 32프레임
+완료는 관측되지 않았다. 원본 슬롯 전체 복구·독립 digest, 표·OTA
+세 시점 일치를 검증했다. 출고 부팅 요청 뒤 COM3이 돌아왔고 사용자가
+출고 얼굴·메뉴 복귀를 확인했다.
+[실물 계측·복구](validation/2026-11-21-k151-wake-reset-panic-live.md)
+
 ## 2026-11-21 무음 WakeNet 중단 지점 계측
 
 기존 시작 메시지에 ESP-IDF reset reason을 추가했다. 무음 진단만 모델

@@ -61,6 +61,12 @@ FIR과 chunk 누적을 사용하며, 입력 단계 최대 처리 시간과 완�
 `max_detect_us`는 해당 checkpoint의 영향을 받지 않는다.
 [reset 계측과 수신기 범위](validation/2026-11-21-k151-wake-reset-telemetry.md)
 
+승인한 계측 1회에서 두 번째 시작 메시지의 reset reason은 panic이었다.
+마지막 수신 경계는 `model_reset_begin`이며 `model_reset_return`은
+수신되지 않았다. 원본 슬롯 복구와 검증을 완료했고 사용자가 출고
+얼굴·메뉴 복귀를 확인했다.
+[reset 경계 실측 기록](validation/2026-11-21-k151-wake-reset-panic-live.md)
+
 실물 검증한 `f4878fa` 이미지는 HTTP 본문 처리까지 실행했다. 이후 TLS 후속은
 고정 SDK의 Mbed TLS 1.2 클라이언트와 서버를 각각 1KiB의 메모리 FIFO로
 연결한다. 실행 때만 존재하는 PSA CA와 leaf를 사용해 인증서 체인과
