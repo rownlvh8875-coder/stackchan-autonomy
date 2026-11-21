@@ -19,11 +19,33 @@ enum class Device : std::size_t {
 
 enum class PanelHint { unknown, ili9342e_candidate };
 
+// IDF uses seven-bit addresses. esp_codec_dev 1.6.2's ES7210 (0x80)
+// and AW88298 (0x6c) constants are eight-bit and its own adapter shifts them.
+constexpr std::array<std::uint16_t, 5> kProbeAddresses{0x34, 0x58, 0x38, 0x40, 0x36};
+// Only known configuration registers, not interrupt/input/clear-on-read state.
+constexpr std::array<std::uint8_t, 5> kPmicLdoRegisters{0x90, 0x94, 0x95, 0x97, 0x99};
+
+// Dedicated diagnostic scope, never a board identity or audio authorization.
+constexpr bool board_probe_location_allowed(std::uint32_t address, std::size_t bytes,
+                                            bool esp32s3, std::uint16_t revision) {
+  return address == 0x510000 && bytes == 0x4f0000 && esp32s3 && revision == 2;
+}
+
 struct ReadOnlyEvidence {
   bool bus_opened = false;
   std::array<bool, static_cast<std::size_t>(Device::count)> acknowledged{};
   bool touch_version_read = false;
   std::array<std::uint8_t, 6> touch_version{};
+  bool pmic_id_read = false;
+  std::uint8_t pmic_id = 0;
+  bool pmic_ldo_read = false;
+  std::array<std::uint8_t, 5> pmic_ldo{};
+  bool aw9523_id_read = false;
+  std::uint8_t aw9523_id = 0;
+  bool aw9523_outputs_read = false;
+  std::array<std::uint8_t, 2> aw9523_outputs{};
+  bool aw9523_directions_read = false;
+  std::array<std::uint8_t, 2> aw9523_directions{};
   bool finished_without_bus_error = false;
 };
 

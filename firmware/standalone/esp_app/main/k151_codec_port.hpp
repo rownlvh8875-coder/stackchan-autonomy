@@ -28,10 +28,10 @@ class K151CodecPort final {
                bool amp_reset_and_power_verified);
   bool microphone_on();
   bool microphone_off();
-  bool capture_mono_24k(std::span<int16_t> mono);  // <= 10ms; channel 0 only
+  bool capture_mono_24k(std::span<int16_t> mono);  // <= 10ms PCM; channel 0; SDK wait can be 1000ms.
   bool speaker_on_low_volume();
   bool speaker_off();
-  bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms
+  bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms PCM; not wall-clock latency.
   bool drain_output_before_mute(); // False until real DMA+codec drain telemetry.
   bool quiet();      // Both codecs; error latches fault
   bool shutdown();   // Release only, never erase/flash/NVS

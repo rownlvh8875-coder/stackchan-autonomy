@@ -13,16 +13,17 @@ import check_resource_bench as bench
 ELF_SHA = hashlib.sha256(b"fixture-elf").hexdigest()
 
 
-def image(payload, address=0x3C020020, chip=9):
+def image(payload, address=0x3C020020, chip=9, project=b"k151_resource_bench", minimum=0):
     header = bytearray(24)
     header[0:2] = bytes([0xE9, 1])
     struct.pack_into("<H", header, 12, chip)
+    struct.pack_into("<H", header, 15, minimum)
     header[23] = 1
     struct.pack_into("<H", header, 17, 0xFFFF)
     desc = bytearray(256)
     struct.pack_into("<I", desc, 0, 0xABCD5432)
     desc[16:28] = b"012345abcdef"
-    project = b"k151_resource_bench\0"
+    project = project + b"\0"
     desc[48 : 48 + len(project)] = project
     desc[144:176] = bytes.fromhex(ELF_SHA)
     data = bytes(desc) + payload

@@ -7,6 +7,7 @@
 #include "k151_contract.hpp"
 #include "pcm_frame.hpp"
 #include "k151_output_evidence.hpp"
+#include "board_evidence.hpp"
 
 #include <algorithm>
 #include <array>
@@ -17,7 +18,11 @@
 namespace stackchan::standalone {
 namespace {
 constexpr char kTag[] = "SC_K151_AUDIO";
-constexpr size_t kMaxFrames = kPcmFramesPerTenMs; // 10ms at 24kHz; bounds synchronous reads/writes
+constexpr size_t kMaxFrames = kPcmFramesPerTenMs; // 10ms of PCM, NOT a driver timeout bound.
+static_assert(k151::kProbeAddresses[k151::index(k151::Device::mic_es7210)] ==
+              (ES7210_CODEC_DEFAULT_ADDR >> 1));
+static_assert(k151::kProbeAddresses[k151::index(k151::Device::amp_aw88298)] ==
+              (AW88298_CODEC_DEFAULT_ADDR >> 1));
 constexpr int kLowVolume = 10;
 constexpr int kInputGain = 30;
 constexpr int kI2cPort = 1;
