@@ -18,10 +18,15 @@ _COMPLETE = (
     _PREFIX + _DETECT + _POLL_RETURN + _FINAL_RESET,
 )
 _CHECKPOINTS = frozenset(_COMPLETE[0])
+_HEAP_WINDOW = "MODEL_RESIDENT_LOCAL_TLS_WIRE"
+_HEAP_NUMBERS = frozenset(
+    {"internal_free_at_start", "internal_min", "psram_free_at_start", "psram_min"}
+)
+_HEAP_FIELDS = _HEAP_NUMBERS | {"heap_window", "operating_admission"}
 
 
 class WakeBenchTrace:
-    """Keep the first and repeated WAIT evidence without serial operations."""
+    """Keep fixed diagnostic evidence without serial operations."""
 
     def __init__(self):
         self._initial_nonce = None
@@ -29,6 +34,7 @@ class WakeBenchTrace:
         self._repeated_reason = None
         self._repeated_nonce_changed = None
         self._checkpoints = []
+        self._heap_window = None
 
     def observe_wait(self, record):
         nonce = record.get("nonce")
@@ -68,6 +74,30 @@ class WakeBenchTrace:
         self._checkpoints.append(name)
         return True
 
+    def observe_heap_window(self, record):
+        if (
+            self._initial_nonce is None
+            or self._repeated_nonce_changed is not None
+            or self._checkpoints
+            or not isinstance(record, dict)
+            or set(record) != _HEAP_FIELDS
+            or record["heap_window"] != _HEAP_WINDOW
+            or record["operating_admission"] is not False
+        ):
+            return False
+        numbers = {field: record[field] for field in _HEAP_NUMBERS}
+        if any(type(value) is not int or not 0 <= value < 2**32 for value in numbers.values()):
+            return False
+        for pool in ("internal", "psram"):
+            baseline, minimum = numbers[f"{pool}_free_at_start"], numbers[f"{pool}_min"]
+            if not 0 <= minimum <= baseline or baseline == 0:
+                return False
+            numbers[f"{pool}_watermark_drop"] = baseline - minimum
+        if self._heap_window is not None:
+            raise ValueError("DUPLICATE_HEAP_WINDOW")
+        self._heap_window = numbers
+        return True
+
     def complete(self):
         return (
             self._initial_reason is not None
@@ -76,9 +106,12 @@ class WakeBenchTrace:
         )
 
     def summary(self):
-        return {
+        result = {
             "initial_reset_reason": self._initial_reason,
             "repeated_reset_reason": self._repeated_reason,
             "repeated_nonce_changed": self._repeated_nonce_changed,
             "wake_checkpoints": self._checkpoints.copy(),
         }
+        if self._heap_window is not None:
+            result["model_resident_local_tls_wire"] = self._heap_window.copy()
+        return result

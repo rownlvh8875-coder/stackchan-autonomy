@@ -93,3 +93,64 @@ def test_only_fixed_inactive_checkpoint_values_are_retained():
     with pytest.raises(ValueError, match="DUPLICATE_WAKE_CHECKPOINT"):
         trace.observe_checkpoint(checkpoint("model_reset_begin"))
     assert trace.summary()["wake_checkpoints"] == ["model_reset_begin"]
+
+
+def heap_window():
+    return {
+        "heap_window": "MODEL_RESIDENT_LOCAL_TLS_WIRE",
+        "internal_free_at_start": 355000,
+        "internal_min": 290000,
+        "psram_free_at_start": 8047000,
+        "psram_min": 5712000,
+        "operating_admission": False,
+    }
+
+
+def test_heap_window_records_only_the_post_model_baseline_and_loss():
+    trace = WakeBenchTrace()
+    assert not trace.observe_heap_window(heap_window())
+    trace.observe_wait(waiting("AABBCCDD", 1))
+    assert not trace.observe_heap_window([{}, "untrusted"])
+    assert trace.observe_heap_window(heap_window())
+    assert trace.summary()["model_resident_local_tls_wire"] == {
+        "internal_free_at_start": 355000,
+        "internal_min": 290000,
+        "internal_watermark_drop": 65000,
+        "psram_free_at_start": 8047000,
+        "psram_min": 5712000,
+        "psram_watermark_drop": 2335000,
+    }
+    with pytest.raises(ValueError, match="DUPLICATE_HEAP_WINDOW"):
+        trace.observe_heap_window(heap_window())
+    assert not trace.complete()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"nonce": "private text"},
+        {"internal_min": True},
+        {"internal_min": 355001},
+        {"psram_free_at_start": 0},
+        {"psram_min": -1},
+        {"psram_free_at_start": 2**32},
+        {"operating_admission": True},
+        {"heap_window": "other_trial"},
+    ],
+)
+def test_heap_window_rejects_non_numeric_inconsistent_or_unexpected_fields(change):
+    trace = WakeBenchTrace()
+    trace.observe_wait(waiting("AABBCCDD", 1))
+    assert not trace.observe_heap_window(heap_window() | change)
+    assert "model_resident_local_tls_wire" not in trace.summary()
+
+
+@pytest.mark.parametrize("repeat_boot", [False, True])
+def test_late_heap_window_is_rejected_after_wake_input_or_a_reset(repeat_boot):
+    trace = WakeBenchTrace()
+    trace.observe_wait(waiting("AABBCCDD", 1))
+    if repeat_boot:
+        trace.observe_wait(waiting("99BBCCDD", 4))
+    else:
+        trace.observe_checkpoint(checkpoint("model_reset_begin"))
+    assert not trace.observe_heap_window(heap_window())

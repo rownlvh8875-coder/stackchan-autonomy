@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Silent finite laboratory diagnostic. No codec, GPIO, NVS, Wi-Fi or cloud init.
 #include "bench_gate.hpp"
+#include "bench_heap_window.hpp"
 #include "k151_wakenet_port.hpp"
 #include "audio_wipe.hpp"
 #include "audio_memory_admission.hpp"
@@ -29,15 +30,17 @@ constexpr auto internal_caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
 constexpr auto external_caps=MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT;
 bool allowed() {return owner.load() && !stop.load();}
 static_assert(ESP_RST_UNKNOWN == 0 && ESP_RST_CPU_LOCKUP == 15);
-void snapshot(const char* stage) {
+void snapshot(const char* stage, bool post_model_window = false) {
   std::printf("{\"stage\":\"%s\",\"internal_free\":%u,\"internal_largest\":%u,"
-      "\"psram_free\":%u,\"psram_largest\":%u,\"internal_min\":%u,\"psram_min\":%u}\n",
+      "\"psram_free\":%u,\"psram_largest\":%u,\"internal_min\":%u,\"psram_min\":%u,"
+      "\"post_model_window\":%s}\n",
       stage,static_cast<unsigned>(heap_caps_get_free_size(internal_caps)),
       static_cast<unsigned>(heap_caps_get_largest_free_block(internal_caps)),
       static_cast<unsigned>(heap_caps_get_free_size(external_caps)),
       static_cast<unsigned>(heap_caps_get_largest_free_block(external_caps)),
       static_cast<unsigned>(heap_caps_get_minimum_free_size(internal_caps)),
-      static_cast<unsigned>(heap_caps_get_minimum_free_size(external_caps)));
+      static_cast<unsigned>(heap_caps_get_minimum_free_size(external_caps)),
+      post_model_window ? "true" : "false");
 }
 void reader(void*) {
   const uint32_t nonce=esp_random();
@@ -87,6 +90,12 @@ void measure() {
   }
   snapshot("model_resident");
   if(!allowed())return;
+  BenchHeapWindow heap_window;
+  if (!heap_window.start()) {
+    std::puts("{\"result\":\"HEAP_WINDOW_DENIED\"}");
+    return;
+  }
+  if (!allowed()) return;
   try {
     Pcm question{OfflineVoiceCycle::kMaxRecordedFrames};
     if(!allowed())return;
@@ -98,7 +107,7 @@ void measure() {
     if (!allowed()) return;
     {
       LocalTlsProbe tls;
-      snapshot("model_question_before_local_tls");
+      snapshot("model_question_before_local_tls", true);
       if (!tls.run(allowed)) {
         std::printf("{\"result\":\"%s\",\"local_tls_stage\":\"%s\","
                     "\"local_tls_handshake_error\":%d}\n",
@@ -107,14 +116,14 @@ void measure() {
         return;
       }
       if (!allowed()) return;
-      snapshot("model_question_local_tls_established");
+      snapshot("model_question_local_tls_established", true);
       const bool wire_ok = probe_wire_memory(
         tts.samples, allowed, [&](httpwire::Endpoint endpoint, const auto& raw, const auto& pcm) {
           const bool speech = endpoint == httpwire::Endpoint::speech;
           const bool raw_external = esp_ptr_external_ram(raw.data());
           const bool pcm_external = speech && esp_ptr_external_ram(pcm.data());
           snapshot(speech ? "model_question_tls_wire_and_decoded_pcm"
-                          : "model_question_tls_json_decoded");
+                          : "model_question_tls_json_decoded", true);
           std::printf("{\"wire_probe\":\"%s\",\"body_bytes\":%u,\"body_capacity_bytes\":%u,"
                       "\"body_in_psram\":%s,\"decoded_pcm_capacity_bytes\":%u,"
                       "\"decoded_pcm_in_psram\":%s}\n",
@@ -129,6 +138,19 @@ void measure() {
         std::puts(allowed() ? "{\"result\":\"WIRE_PROBE_DENIED\"}" : "{\"result\":\"BENCH_STOPPED\"}");
         return;
       }
+      const auto heap = heap_window.finish();
+      if (!heap || !allowed() || !wake.ready()) {
+        std::puts(allowed() ? "{\"result\":\"HEAP_WINDOW_DENIED\"}" : "{\"result\":\"BENCH_STOPPED\"}");
+        return;
+      }
+      std::printf("{\"heap_window\":\"MODEL_RESIDENT_LOCAL_TLS_WIRE\","
+          "\"internal_free_at_start\":%u,\"internal_min\":%u,"
+          "\"psram_free_at_start\":%u,\"psram_min\":%u,"
+          "\"operating_admission\":false}\n",
+          static_cast<unsigned>(heap->internal_free_at_start),
+          static_cast<unsigned>(heap->internal_min),
+          static_cast<unsigned>(heap->psram_free_at_start),
+          static_cast<unsigned>(heap->psram_min));
     }
     if(!allowed())return;
     Pcm chunk{wake.format().chunk_samples};
@@ -180,11 +202,8 @@ extern "C" void app_main() {
      heap_caps_get_free_size(internal_caps)<131072) {
     reader_done=true;owner=false;stop=true;return;
   }
-  const bool monitoring=heap_caps_monitor_local_minimum_free_size_start()==ESP_OK;
-  if(monitoring) {
-    measure();snapshot("after_cleanup");
-    heap_caps_monitor_local_minimum_free_size_stop();
-  } else std::puts("{\"result\":\"HEAP_MONITOR_BUSY\"}");
+  measure();
+  snapshot("after_cleanup");
   owner=false;stop=true;reader_done=true;
   std::puts("{\"bench\":\"HOLD_UNTIL_RESET\",\"operating_admission\":false}");
 }
