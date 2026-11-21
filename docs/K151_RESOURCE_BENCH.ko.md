@@ -73,6 +73,12 @@ FIR과 chunk 누적을 사용하며, 입력 단계 최대 처리 시간과 완�
 관측한다. 생성·해제 비용과 실물 안정성은 후속 실행에서 확인한다.
 [reset 변경의 검증 기록](validation/2026-11-21-k151-wakenet-recreate-reset.md)
 
+승인한 후속 이미지의 실물 실행은 두 reset과 24kHz 합성 32프레임을
+완료하고 HOLD에 도달했다. 직결 64개 chunk의 최대 추론은 7.241ms,
+checkpoint 출력이 포함된 합성 입력 최대 poll은 9.006ms였다.
+원본 슬롯 복구와 독립 digest를 검증했다.
+[새 컨텍스트 실측·복구](validation/2026-11-21-k151-wakenet-fresh-context-live.md)
+
 실물 검증한 `f4878fa` 이미지는 HTTP 본문 처리까지 실행했다. 이후 TLS 후속은
 고정 SDK의 Mbed TLS 1.2 클라이언트와 서버를 각각 1KiB의 메모리 FIFO로
 연결한다. 실행 때만 존재하는 PSA CA와 leaf를 사용해 인증서 체인과
