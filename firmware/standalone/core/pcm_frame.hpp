@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Host-testable bounded audio frames for future K151 24kHz codec adapter.
 #pragma once
-#include <algorithm>
+#include "audio_wipe.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -15,7 +15,7 @@ inline bool extract_k151_mic0(std::span<const int16_t> mic_and_reference,
                               std::span<int16_t> mono) {
   if (mono.empty() || mono.size() > kPcmFramesPerTenMs ||
       mic_and_reference.size() != mono.size() * 2) {
-    std::fill(mono.begin(), mono.end(), 0);
+    wipe_pcm(mono);
     return false;
   }
   for (size_t i = 0; i < mono.size(); ++i) mono[i] = mic_and_reference[i * 2];

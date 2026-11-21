@@ -8,6 +8,7 @@
 #include "pcm_frame.hpp"
 #include "k151_output_evidence.hpp"
 #include "board_evidence.hpp"
+#include "audio_wipe.hpp"
 
 #include <algorithm>
 #include <array>
@@ -26,6 +27,16 @@ static_assert(k151::kProbeAddresses[k151::index(k151::Device::amp_aw88298)] ==
 constexpr int kLowVolume = 10;
 constexpr int kInputGain = 30;
 constexpr int kI2cPort = 1;
+bool disable_owned_channel(i2s_chan_handle_t channel) {
+  i2s_chan_info_t info{};
+  if (i2s_channel_get_info(channel, &info) != ESP_OK) {
+    (void)i2s_channel_disable(channel); // Best effort; uncertainty remains faulted.
+    return false;
+  }
+  // SDK set_fmt/enable/close can change the channel behind our port. A cached
+  // flag would issue a second disable and turn a healthy close into a fault.
+  return !info.is_enabled || i2s_channel_disable(channel) == ESP_OK;
+}
 } // namespace
 
 const char* K151CodecPort::compiled_link_marker() {
@@ -96,9 +107,7 @@ bool K151CodecPort::prepare_i2s() {
   if (i2s_channel_init_std_mode(tx_, &tx_cfg) != ESP_OK ||
       i2s_channel_init_tdm_mode(rx_, &rx_cfg) != ESP_OK) return false;
   if (i2s_channel_enable(tx_) != ESP_OK) return false;
-  tx_enabled_ = true;
   if (i2s_channel_enable(rx_) != ESP_OK) return false;
-  rx_enabled_ = true;
   return true;
 }
 
@@ -108,7 +117,7 @@ bool K151CodecPort::prepare_codecs() {
   i2s_cfg.rx_handle = rx_;
   i2s_cfg.tx_handle = tx_;
   data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
-  if (!data_if_) return false;
+  if (!data_if_ || !data_port_.attach(data_if_, rx_, tx_)) return false;
 
   audio_codec_i2c_cfg_t i2c_cfg = {};
   i2c_cfg.port = static_cast<i2c_port_t>(kI2cPort);
@@ -131,7 +140,7 @@ bool K151CodecPort::prepare_codecs() {
   esp_codec_dev_cfg_t dev_cfg = {};
   dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_OUT;
   dev_cfg.codec_if = out_codec_;
-  dev_cfg.data_if = data_if_;
+  dev_cfg.data_if = data_port_.interface();
   out_dev_ = esp_codec_dev_new(&dev_cfg);
   if (!out_dev_) return false;
 
@@ -160,7 +169,7 @@ bool K151CodecPort::microphone_on() {
   // Even an unsuccessful open can leave codec state uncertain.
   // Track it before the call so fail() attempts an independent close.
   input_open_ = true;
-  if (esp_codec_dev_open(in_dev_, &fs) != 0) return fail();
+  if (esp_codec_dev_open(in_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_IN)) return fail();
   if (esp_codec_dev_set_in_channel_gain(
           in_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), kInputGain) != 0) return fail();
   return true;
@@ -169,25 +178,26 @@ bool K151CodecPort::microphone_on() {
 bool K151CodecPort::microphone_off() {
   if (!input_open_) return true;
   const int rc = esp_codec_dev_close(in_dev_);
-  if (rc != 0) { fault_ = true; return false; }
+  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_IN)) { fault_ = true; return false; }
   input_open_ = false;
   return true;
 }
 
 bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
+  wipe_pcm(mono);
   if (!prepared() || !input_open_ || output_open_ || mono.empty() ||
       mono.size() > kMaxFrames) return false;
   std::array<int16_t, kMaxFrames * 2> interleaved = {};
+  ScopedPcmWipe clear{interleaved};
   const int rc = esp_codec_dev_read(in_dev_, interleaved.data(),
                                     static_cast<int>(mono.size() * 2 * sizeof(int16_t)));
-  if (rc != 0) {
-    std::fill(mono.begin(), mono.end(), 0);
+  if (rc != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_IN)) {
+    wipe_pcm(interleaved);
     return fail();
   }
   if (!extract_k151_mic0(std::span<const int16_t>(interleaved.data(), mono.size() * 2), mono)) {
     return fail();
   }
-  std::fill(interleaved.begin(), interleaved.end(), 0);
   return true;
 }
 
@@ -203,7 +213,7 @@ bool K151CodecPort::speaker_on_low_volume() {
   fs.sample_rate = k151::kOutputHz;
   // Preserve a best-effort close even after a partially failed open.
   output_open_ = true;
-  if (esp_codec_dev_open(out_dev_, &fs) != 0) return fail();
+  if (esp_codec_dev_open(out_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT)) return fail();
   if (esp_codec_dev_set_out_vol(out_dev_, kLowVolume) != 0) return fail();
   return true;
 }
@@ -211,7 +221,7 @@ bool K151CodecPort::speaker_on_low_volume() {
 bool K151CodecPort::speaker_off() {
   if (!output_open_) return true;
   const int rc = esp_codec_dev_close(out_dev_);
-  if (rc != 0) { fault_ = true; return false; }
+  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT)) { fault_ = true; return false; }
   output_open_ = false;
   return true;
 }
@@ -221,11 +231,12 @@ bool K151CodecPort::play_mono_24k(std::span<const int16_t> mono) {
       !valid_pcm_playback(mono)) return false;
   // Copy avoids const-casting the caller's buffer through esp_codec_dev.
   std::array<int16_t, kMaxFrames> chunk = {};
+  ScopedPcmWipe clear{chunk};
   std::copy(mono.begin(), mono.end(), chunk.begin());
   const int rc = esp_codec_dev_write(out_dev_, chunk.data(),
                                      static_cast<int>(mono.size() * sizeof(int16_t)));
-  std::fill(chunk.begin(), chunk.end(), 0);
-  if (rc != 0) return fail();
+  wipe_pcm(chunk);
+  if (rc != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT)) return fail();
   return true;
 }
 
@@ -243,7 +254,7 @@ bool K151CodecPort::quiet() {
 }
 
 bool K151CodecPort::shutdown() {
-  const bool previously_faulted = fault_;
+  const bool previously_faulted = faulted();
   bool ok = quiet();
   if (in_dev_) { esp_codec_dev_delete(in_dev_); in_dev_ = nullptr; }
   if (out_dev_) { esp_codec_dev_delete(out_dev_); out_dev_ = nullptr; }
@@ -252,16 +263,15 @@ bool K151CodecPort::shutdown() {
   if (in_ctrl_) { audio_codec_delete_ctrl_if(in_ctrl_); in_ctrl_ = nullptr; }
   if (out_ctrl_) { audio_codec_delete_ctrl_if(out_ctrl_); out_ctrl_ = nullptr; }
   if (gpio_if_) { audio_codec_delete_gpio_if(gpio_if_); gpio_if_ = nullptr; }
+  data_port_.detach();
   if (data_if_) { audio_codec_delete_data_if(data_if_); data_if_ = nullptr; }
   if (rx_) {
-    if (rx_enabled_ && i2s_channel_disable(rx_) != ESP_OK) ok = false;
-    rx_enabled_ = false;
+    if (!disable_owned_channel(rx_)) ok = false;
     if (i2s_del_channel(rx_) != ESP_OK) ok = false;
     rx_ = nullptr;
   }
   if (tx_) {
-    if (tx_enabled_ && i2s_channel_disable(tx_) != ESP_OK) ok = false;
-    tx_enabled_ = false;
+    if (!disable_owned_channel(tx_)) ok = false;
     if (i2s_del_channel(tx_) != ESP_OK) ok = false;
     tx_ = nullptr;
   }
@@ -270,6 +280,7 @@ bool K151CodecPort::shutdown() {
     i2c_bus_ = nullptr;
   }
   prepared_ = false;
+  input_open_ = output_open_ = false; // Handles released, never mute proof.
   if (!ok) { fault_ = true; ESP_LOGE(kTag, "audio shutdown uncertain"); }
   // Releasing a handle cannot prove the earlier hardware fault was cleared.
   return ok && !previously_faulted;

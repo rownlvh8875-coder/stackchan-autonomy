@@ -18,7 +18,7 @@ async def wait_thread(event):
             await asyncio.sleep(0.001)
 
 
-async def test_serial_admission_and_cancelled_waiter_are_distinguished():
+async def test_serial_admission_and_cancelled_waiter_are_distinguished(monkeypatch):
     from stackchan_autonomy.timing_diagnostics import TimingProbe
 
     probe = TimingProbe()
@@ -29,16 +29,32 @@ async def test_serial_admission_and_cancelled_waiter_are_distinguished():
         entered.set()
         release.wait(3)
 
+    original_acquire = storage._slot.acquire
+    observed_wait = {}
+
+    async def observed_acquire():
+        # Tracing has started before this call; cancellation is recorded after
+        # this handler. Its real elapsed interval must fit inside the metric.
+        observed_wait["start"] = time.perf_counter()
+        try:
+            return await original_acquire()
+        except asyncio.CancelledError:
+            observed_wait["cancel"] = time.perf_counter()
+            raise
+
     with probe.collect():
         first = asyncio.create_task(storage.call(blocked))
         try:
             await wait_thread(entered)
+            monkeypatch.setattr(storage._slot, "acquire", observed_acquire)
             with pytest.raises(TimeoutError):
                 async with asyncio.timeout(0.04):
                     await storage.call(lambda: None)
             interruption = probe.snapshot()["interruptions"][-1]
             assert interruption["stage"] == "serial_wait"
-            assert interruption["elapsed_s"] >= 0.03
+            measured_wait = observed_wait["cancel"] - observed_wait["start"]
+            assert measured_wait > 0
+            assert interruption["elapsed_s"] >= measured_wait
         finally:
             release.set()
             await first
@@ -46,6 +62,7 @@ async def test_serial_admission_and_cancelled_waiter_are_distinguished():
     stats = probe.snapshot()["stages"]
     assert stats["storage_operation"]["count"] == 1
     assert stats["storage_serial_wait"]["count"] == 2
+    assert stats["storage_serial_wait"]["max_s"] >= measured_wait
 
 
 async def test_shared_executor_queue_is_distinct_from_operation():
@@ -57,6 +74,13 @@ async def test_shared_executor_queue_is_distinct_from_operation():
     executor = ThreadPoolExecutor(max_workers=1)
     loop = asyncio.get_running_loop()
     original_submit = loop.run_in_executor
+    observed_queue = {}
+
+    def shared_submit(_, fn, *args):
+        # The executor_wait trace began before this submission, and the pool
+        # cannot run it until release.set() below. Keep the real clock/queue.
+        observed_queue["start"] = time.perf_counter()
+        return original_submit(executor, fn, *args)
 
     def block_pool():
         entered.set()
@@ -73,17 +97,21 @@ async def test_shared_executor_queue_is_distinct_from_operation():
             patch.object(
                 loop,
                 "run_in_executor",
-                side_effect=lambda _, fn, *args: original_submit(executor, fn, *args),
+                side_effect=shared_submit,
             ),
         ):
             with pytest.raises(TimeoutError):
                 async with asyncio.timeout(0.04):
                     await storage.call(lambda: 7)
             assert probe.snapshot()["interruptions"][-1]["stage"] == "executor_wait"
+            assert not blocker.done()
+            observed_queue["release"] = time.perf_counter()
             release.set()
             await storage.aclose()
         stats = probe.snapshot()["stages"]
-        assert stats["storage_executor_wait"]["max_s"] >= 0.03
+        measured_queue = observed_queue["release"] - observed_queue["start"]
+        assert measured_queue > 0
+        assert stats["storage_executor_wait"]["max_s"] >= measured_queue
         assert stats["storage_operation"]["count"] == 1
     finally:
         release.set()

@@ -1,5 +1,9 @@
 # K151 기본 호출어 → 독립 GPT 대화 진행 상태
 
+2026-11-21 코드 후속: 기존 [PCM I/O 경로](K151_AUDIO_IO.ko.md)를 짧은 driver wait·
+exact count·늦은 PCM 거부·volatile wipe로 보강했다. 기기에 적용하지 않았으며,
+실제 호출어·독립 GPT·전원/mute/STOP/drain 검증은 여전히 남아 있다.
+
 2026-11-21 최신 후속: [보드 조회1회](validation/2026-11-21-k151-board-readback-live.md)에서
 실제ota_1 실행·다섯 ACK·PMIC/IO ID·설정을 관측하고 원본slot1을 복구·독립 verify했다.
 표/OTA 세 시점 일치와 사용자 얼굴/메뉴 복귀까지 확인했다. 실제 음성 경로는 아직

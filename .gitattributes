@@ -15,3 +15,5 @@
 /firmware/standalone/fixtures/korean_heami_linear_postfreeze_20261120/linear-postfreeze.wake-corpus.json -text
 # Frozen tiny CNN Heami synthetic holdout manifest must preserve raw bytes.
 /firmware/standalone/fixtures/korean_heami_conv_postfreeze_20261120/cnn-postfreeze.wake-corpus.json -text
+# Pinned codec SDK headers/license are verified as raw archive bytes in tests.
+/firmware/standalone/tests/sdk_esp_codec_dev_1_6_2/* -text

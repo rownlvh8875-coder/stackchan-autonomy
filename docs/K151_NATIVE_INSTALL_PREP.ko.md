@@ -1,5 +1,9 @@
 # K151 native wake 설치 전 검토 자료
 
+최신 [오디오 I/O 코드 보강](K151_AUDIO_IO.ko.md)은 오프라인 작업이다. PCM 짧은
+대기·exact count·반환 후 시간 검사와 지움을 추가했으며, 새 실물 설치/음성/API
+승인 요청용 운영 이미지가 아니다. 운영 HOLD와 전원/mute/STOP 제약을 유지한다.
+
 후속 [보드 readback](K151_BOARD_READBACK.ko.md)은 사용자 승인 뒤1회 실행·완료했다.
 원본 slot1 복구·독립 verify·표/OTA 일치와 사용자 얼굴/메뉴 복귀를 확인했다.
 [최신 실물 범위·증거](validation/2026-11-21-k151-board-readback-live.md)를 우선한다.

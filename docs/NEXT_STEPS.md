@@ -1,5 +1,16 @@
 # Next steps
 
+## 2026-11-21 코드 후속: 오디오 PCM 전송 보강
+
+기존 K151CodecPort에 [제한된 PCM 전송 어댑터](K151_AUDIO_IO.ko.md)를 연결했다.
+SDK clock/slot·코덱·볼륨은 재사용하며 driver wait20ms, exact count, 반환 후40ms
+검사와 오류 latch·volatile RAII wipe를 적용했다. 실제 장치 접근/설치는0이다.
+HOLD·물리 출력 false·cloud OFF·100ms 입력 gap/chunk 조건을 유지한다.
+Windows 계측 시험의 잘못된30ms 하한 가정을 유한 지연으로 재현하고, 동일40ms
+timeout/취소·실제 큐는 유지한 채 별도 실측 구간과 대조하도록 수정했다.
+과거 SQLite/OS 지연 원인 해결이나 실제 음성/physical STOP 성공으로 보고하지 않는다.
+
+
 ## 2026-11-21 실물 후속: 보드 조회·원본 복구 완료
 
 검토한 board_probe를 사용자 승인으로 한 번 실행했다. 실제 getter로ota_1 실행을
