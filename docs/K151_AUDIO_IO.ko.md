@@ -63,6 +63,27 @@ null data handle은 false/INVALID_ARG로 거부한다. 이때 유효한 제한 �
 고정 SDK의 수정하지 않은 ES7210 C도 별도 host fixture로 실행해 실제 read 오류
 누락과 observer의 감지를 대조한다. [후속 검증](validation/2026-11-21-k151-codec-control.md).
 
+## 드라이버 해제 실패 후 소유권
+
+raw RX/TX 삭제가 실패하면 포트가 I2S handle을 보존한다. 이후 명시적 shutdown이
+해당 채널만 한 번씩 정리할 수 있고, 이미 해제한 채널/SDK 객체는 다시 만지지 않는다.
+자동 반복·재시작은 없으며 나중에 정리돼도 원래 fault와 false 결과는 유지한다.
+destructor의 마지막 best-effort도 실패할 수 있어 완전한 자원 회수를 보장하지 않는다.
+
+I2C bus는 동일하게 처리할 수 없다. 고정 IDF의
+[bus destroy](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_driver_i2c/i2c_master.c#L841)는
+해제 전 interrupt 정리 실패와 **해제 후** pin 정리 오류를 모두 반환할 수 있다.
+삭제 오류 뒤 이 pointer는 재접근하지 않고 fault만 보존한다. 아직 살아 있는 bus의
+회수 성공이나 물리 mute를 주장하지 않는다. 반면
+[I2S delete](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_driver_i2s/i2s_common.c#L1237)는
+실패를 free 전에 반환하므로 실패한 채널 handle의 보존이 가능하다. 이는 고정 버전의
+소유권 계약이며 SDK 버전을 바꾸면 다시 확인해야 한다.
+
+AW88298 host double은2바이트 register 값을 검사한다. 임시 source 사본에서 read나
+write 길이를1로 잘라 실제 포트 시험이 실패하는 negative control도 실행한다.
+원문 SDK와 운영 출력 false는 바꾸지 않았다.
+[해제 후속 기록](validation/2026-11-21-k151-codec-release.md).
+
 ## 재현·검증 근거
 
 기존 실제 포트를 pinned codec1.6.2 헤더와 IDF C ABI double로 컴파일해1000ms

@@ -1,5 +1,15 @@
 # Next steps
 
+## 2026-11-21 코드 후속: 실패한 I2S 해제 소유권
+
+shutdown의 RX/TX 삭제 실패 뒤 handle이 유실되는 문제를4개 RED 시험으로 확인하고
+성공한 경우에만 pointer를 비우도록 수정했다. 이후 명시적 종료에서도 한 번씩만
+정리하며 fault·PCM 차단은 유지한다. I2C bus는 고정 IDF가 free 뒤 오류를 반환할 수도
+있어 재접근하지 않는다. 남은 bus 회수나 physical mute가 확인된 것은 아니다.
+AW88298 두 바이트 전달 회귀와 두 truncation negative control을 추가했다.
+[검증·소유권 한계](validation/2026-11-21-k151-codec-release.md)를 따른다.
+장치 접근/리셋/설치/실음성/API는0이며 HOLD와 기존 보호는 그대로다.
+
 ## 2026-11-21 코드 후속: 코덱 제어 오류 보존
 
 기존 PCM 어댑터의 null callback 방어와 I2S 상태조회 실패 회귀를 추가했다.

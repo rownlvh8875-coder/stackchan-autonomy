@@ -36,7 +36,7 @@ class K151CodecPort final {
   bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms PCM; not wall-clock latency.
   bool drain_output_before_mute(); // False until real DMA+codec drain telemetry.
   bool quiet();      // Both codecs; error latches fault
-  bool shutdown();   // Release only, never erase/flash/NVS
+  bool shutdown();   // One release attempt/handle; retains failed I2S, fault stays.
   bool prepared() const {
     return prepared_ && !faulted() && in_control_.healthy() && out_control_.healthy();
   }

@@ -56,10 +56,15 @@ def port_binary(tmp_path_factory):
     if not compiler:
         pytest.skip("C++20 compiler required")
     binary = tmp_path_factory.mktemp("codec-io") / "codec"
-    sources = [BASE / "tests/k151_codec_io_test.cpp", BASE / "esp_app/main/k151_codec_port.cpp"]
-    adapter = BASE / "esp_app/main/k151_bounded_i2s.cpp"
-    if adapter.exists():
-        sources.append(adapter)
+    return _build_port(compiler, binary, BASE / "esp_app/main")
+
+
+def _build_port(compiler, binary, app):
+    sources = [
+        BASE / "tests/k151_codec_io_test.cpp",
+        app / "k151_codec_port.cpp",
+        app / "k151_bounded_i2s.cpp",
+    ]
     command = [
         compiler,
         "-std=c++20",
@@ -72,7 +77,7 @@ def port_binary(tmp_path_factory):
         "-DCONFIG_CODEC_AW88298_SUPPORT=1",
     ]
     command += ["-isystem", str(SDK)]  # Unmodified vendor C anonymous unions.
-    for directory in [BASE / "tests/codec_io_doubles", BASE / "core", BASE / "esp_app/main"]:
+    for directory in [BASE / "tests/codec_io_doubles", BASE / "core", app]:
         command += ["-I", str(directory)]
     result = subprocess.run(
         command + [str(p) for p in sources] + ["-o", str(binary)],
@@ -136,11 +141,50 @@ def port_binary(tmp_path_factory):
         "ctrl_in_close_write",
         "ctrl_in_delete_read",
         "ctrl_in_delete_write",
+        "release_rx",
+        "release_tx",
+        "release_both",
+        "release_rx_info",
+        "release_bus_live_error",
+        "release_bus_freed_error",
+        "ctrl_out_delete_read",
+        "ctrl_out_delete_write",
     ],
 )
 def test_actual_port_fault_boundaries(port_binary, mode):
     result = subprocess.run([str(port_binary), mode], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("operation", ["read_reg", "write_reg"])
+def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
+    """An actual one-byte truncation must fail the real-port AW88298 boundary."""
+    compiler = shutil.which("g++")
+    if not compiler:
+        pytest.skip("C++20 compiler required")
+    app = tmp_path / "app"
+    app.mkdir()
+    for name in [
+        "k151_codec_port.cpp",
+        "k151_codec_port.hpp",
+        "k151_bounded_i2s.cpp",
+        "k151_bounded_i2s.hpp",
+        "k151_codec_control.hpp",
+        "k151_mic_reader.hpp",
+        "k151_contract.hpp",
+    ]:
+        shutil.copyfile(BASE / "esp_app/main" / name, app / name)
+    header = app / "k151_codec_control.hpp"
+    source = header.read_text()
+    original = f"p.base_->{operation}(p.base_, reg, len, data, size)"
+    assert source.count(original) == 1
+    header.write_text(source.replace(original, original.replace(", size)", ", 1)")))
+    binary = _build_port(compiler, tmp_path / "codec", app)
+    result = subprocess.run(
+        [str(binary), "ok"], cwd=tmp_path, capture_output=True, text=True, timeout=10
+    )
+    assert result.returncode != 0, "truncated AW88298 register transfer escaped the fixture"
+    assert "n==(out?2:1)" in result.stderr, result.stderr
 
 
 @pytest.fixture(scope="module")

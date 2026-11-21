@@ -7,8 +7,8 @@
 #include <cstring>
 #include <string>
 using namespace stackchan::standalone;
-struct i2s_channel_obj { bool enabled=false; };
-struct i2c_master_bus_t {};
+struct i2s_channel_obj { bool enabled=false; bool alive=true; int disables=0,deletes=0; };
+struct i2c_master_bus_t { bool alive=true; int deletes=0; };
 struct Dev { const audio_codec_data_if_t* data{}; esp_codec_dev_type_t type{}; bool open=false; };
 namespace {
 std::string mode;
@@ -25,19 +25,25 @@ int controls_created=0, controls_deleted=0;
 std::string phase;
 bool base_open=true;
 bool ctrl_open(const audio_codec_ctrl_if_t* h) {assert(h==&controls[0] || h==&controls[1]);return true;}
-int ctrl_io(const audio_codec_ctrl_if_t* h,int,int reg_len,void* data,int n,bool write) {
-  assert(h==&controls[0] || h==&controls[1]);assert(reg_len==1 && data && n==1);
-  if(!write)*static_cast<uint8_t*>(data)=0;
-  const std::string path=h==&controls[0]?"ctrl_out_":"ctrl_in_";
+int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,bool write) {
+  assert(h==&controls[0] || h==&controls[1]);const bool out=h==&controls[0];
+  assert(reg_len==1 && data && n==(out?2:1) && reg==(out?0x06:0x43));
+  auto* bytes=static_cast<uint8_t*>(data);
+  if(!write){bytes[0]=out?0x12:0;if(out)bytes[1]=0x34;}
+  else if(out){assert(bytes[0]==0xb7 && bytes[1]==0x6e);}
+  const std::string path=out?"ctrl_out_":"ctrl_in_";
   return mode==path+phase+(write?"_write":"_read")?ESP_CODEC_DEV_DRV_ERR:ESP_CODEC_DEV_OK;
 }
 int ctrl_read(const audio_codec_ctrl_if_t* h,int reg,int len,void* data,int n){return ctrl_io(h,reg,len,data,n,false);}
 int ctrl_write(const audio_codec_ctrl_if_t* h,int reg,int len,void* data,int n){return ctrl_io(h,reg,len,data,n,true);}
 int ctrl_info(const audio_codec_ctrl_if_t* h,audio_codec_ctrl_info_t* info){assert(ctrl_open(h));info->type=AUDIO_CODEC_CTRL_I2C;return 0;}
 void codec_operation(int i,const char* step) {
-  phase=step;uint8_t value=0;auto* c=codec_controls[i];
+  phase=step;std::array<uint8_t,3> value{0,0,0x5a};auto* c=codec_controls[i];
+  const bool out=i==0;const int reg=out?0x06:0x43,size=out?2:1;
   // ES7210 update_reg_bit discards read error; SDK gain/close discard codec rc.
-  (void)c->read_reg(c,0x43,1,&value,1);(void)c->write_reg(c,0x43,1,&value,1);
+  (void)c->read_reg(c,reg,1,value.data(),size);
+  if(out){value[0]^=0xa5;value[1]^=0x5a;}
+  (void)c->write_reg(c,reg,1,value.data(),size);assert(value[2]==0x5a);
 }
 bool sdk_open(const audio_codec_data_if_t* h) { assert(h==&base);return base_open; }
 int sdk_enable(const audio_codec_data_if_t* h,esp_codec_dev_type_t type,bool enable) {
@@ -70,14 +76,30 @@ extern "C" int64_t esp_timer_get_time() {
   return mode=="deadline" || mode=="write_deadline" ? 41001 : mode=="boundary" ? 41000 : 2000;
 }
 extern "C" esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t*,i2c_master_bus_handle_t* h){*h=&bus;return 0;}
-extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){assert(h==&bus);return 0;}
+extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){
+  assert(h==&bus && h->alive);++h->deletes;
+  if(mode=="release_bus_live_error")return ESP_ERR_INVALID_STATE;
+  h->alive=false;return mode=="release_bus_freed_error"?ESP_FAIL:ESP_OK;
+}
 extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_t* t,i2s_chan_handle_t* r){assert(c->dma_frame_num==240);*t=&tx;*r=&rx;return 0;}
 extern "C" esp_err_t i2s_channel_init_std_mode(i2s_chan_handle_t,const i2s_std_config_t*){return 0;}
 extern "C" esp_err_t i2s_channel_init_tdm_mode(i2s_chan_handle_t,const i2s_tdm_config_t*){return 0;}
-extern "C" esp_err_t i2s_channel_enable(i2s_chan_handle_t h){if(h->enabled)return ESP_ERR_INVALID_STATE;h->enabled=true;return 0;}
-extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){if(!h->enabled)return ESP_ERR_INVALID_STATE;h->enabled=false;return 0;}
-extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){assert(!h->enabled);return 0;}
-extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){if(mode=="info_fail")return ESP_FAIL;info->is_enabled=h->enabled;return 0;}
+extern "C" esp_err_t i2s_channel_enable(i2s_chan_handle_t h){assert(h->alive);if(h->enabled)return ESP_ERR_INVALID_STATE;h->enabled=true;return 0;}
+extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
+  assert(h->alive);++h->disables;
+  const bool fail_rx=h==&rx && (mode=="release_rx" || mode=="release_both" || mode=="release_rx_info");
+  const bool fail_tx=h==&tx && (mode=="release_tx" || mode=="release_both");
+  if((fail_rx || fail_tx) && h->disables==1)return ESP_FAIL;
+  if(!h->enabled)return ESP_ERR_INVALID_STATE;
+  h->enabled=false;
+  return 0;
+}
+extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
+  assert(h->alive);++h->deletes;
+  if(h->enabled)return ESP_ERR_INVALID_STATE; // Pinned IDF refuses BEFORE free.
+  h->alive=false;return 0;
+}
+extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){assert(h->alive);if(mode=="info_fail" || (mode=="release_rx_info" && h==&rx))return ESP_FAIL;info->is_enabled=h->enabled;return 0;}
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
   *bytes=(mode=="short"?n-4:mode=="overcount"?n+4:n);
@@ -141,6 +163,22 @@ int main(int argc,char** argv) {
   }
   assert(port.prepare(true,true,true));
   const auto* api=devices[1].data;
+  if(mode.starts_with("release_")) {
+    const bool bus_error=mode.starts_with("release_bus_");
+    assert(!port.shutdown());assert(port.faulted() && !port.prepared());
+    assert(!port.capture_mono_24k(pcm));zero(pcm);assert(calls==0);
+    assert(!port.microphone_on());assert(!port.prepare(true,true,true));
+    const bool retained_rx=!bus_error && mode!="release_tx";
+    const bool retained_tx=mode=="release_tx" || mode=="release_both";
+    assert(rx.alive==retained_rx && tx.alive==retained_tx);
+    assert(!port.shutdown()); // Later cleanup cannot clear the original fault.
+    assert(!rx.alive && !tx.alive);
+    assert(rx.deletes==(retained_rx?2:1));assert(tx.deletes==(retained_tx?2:1));
+    assert(!port.shutdown()); // No access to confirmed freed channels/bus.
+    assert(rx.deletes==(retained_rx?2:1) && tx.deletes==(retained_tx?2:1));
+    assert(bus.deletes==1 && bus.alive==(mode=="release_bus_live_error"));
+    assert(data_deletes==1 && deleted==created && controls_deleted==controls_created);return 0;
+  }
   if(mode.starts_with("null_")) {
     esp_codec_dev_sample_info_t fs{16,2,3,24000,0};
     if(mode=="null_open")assert(!api->is_open(nullptr));
@@ -206,7 +244,7 @@ int main(int argc,char** argv) {
     assert(!port.microphone_off());assert(!port.capture_mono_24k(pcm));zero(pcm);
     assert(!port.shutdown());return 0;
   }
-  if(mode.starts_with("ctrl_in_delete_")) {
+  if(mode.starts_with("ctrl_in_delete_") || mode.starts_with("ctrl_out_delete_")) {
     assert(port.microphone_off());assert(!port.shutdown());assert(port.faulted());
     assert(!port.shutdown());return 0;
   }

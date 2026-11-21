@@ -279,19 +279,22 @@ bool K151CodecPort::shutdown() {
   if (rx_) {
     if (!disable_owned_channel(rx_)) ok = false;
     if (i2s_del_channel(rx_) != ESP_OK) ok = false;
-    rx_ = nullptr;
+    else rx_ = nullptr; // IDF rejects a running channel before freeing it.
   }
   if (tx_) {
     if (!disable_owned_channel(tx_)) ok = false;
     if (i2s_del_channel(tx_) != ESP_OK) ok = false;
-    tx_ = nullptr;
+    else tx_ = nullptr;
   }
   if (i2c_bus_) {
     if (i2c_del_master_bus(i2c_bus_) != ESP_OK) ok = false;
+    // Pinned IDF can report pin-deinit error after freeing the bus wrapper.
+    // Never retry this ambiguous pointer. Fault remains; reclamation/mute is
+    // NOT proven if deletion failed before free. No automatic reset/recovery.
     i2c_bus_ = nullptr;
   }
   prepared_ = false;
-  input_open_ = output_open_ = false; // Handles released, never mute proof.
+  input_open_ = output_open_ = false; // Codec devices gone, never mute proof.
   if (!ok) { fault_ = true; ESP_LOGE(kTag, "audio shutdown uncertain"); }
   // Releasing a handle cannot prove the earlier hardware fault was cleared.
   return ok && !previously_faulted;
