@@ -1,5 +1,15 @@
 # Next steps
 
+## 2026-11-21 Windows 후속: lease 시험 실패 전용 계측
+
+I2S 해제 코드8a34bc1의 실제 CI는7/9다. Push Windows3.12는 기존 remaining-lifetime
+root 시험, PR Windows3.12는 virtual soak cycle1618 check_timeout에서 실패했다.
+[실패·후속 계측 기록](validation/2026-11-21-lease-failure-reporting.md)을 따른다.
+같은 시험의 로컬 단일 계측1PASS는 CI 원인을 재현하지 못했다. timeout/lease/검사는
+유지하고 해당 root 시험 실패에만 기존 TimingProbe의 큐/SQLite/전달/loop JSON을
+출력하도록 연결했다. 실패가 아닌 pass/skip/xfail은 출력하지 않는다. 실제 I/O/OS
+원인 수정이 아니며 기존 실패를 재실행으로 지우지 않는다. 기기 변경/API는0이다.
+
 ## 2026-11-21 코드 후속: 실패한 I2S 해제 소유권
 
 shutdown의 RX/TX 삭제 실패 뒤 handle이 유실되는 문제를4개 RED 시험으로 확인하고

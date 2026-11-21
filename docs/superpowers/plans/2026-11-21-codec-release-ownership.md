@@ -42,3 +42,17 @@ Interfaces: both tasks share k151_codec_io_test.cpp. The test ABI must reflect I
 refusal to delete a running channel. SDK control destructor still hides device
 removal errors; this plan avoids reaccessing the ambiguous bus pointer and keeps
 the fault, without claiming bus/hidden child recovery or physical mute.
+
+## Task 4: report evidence for the new CI lease-test failure
+
+Actual8a34bc1 Push Windows3.12 failed the unchanged remaining-lifetime test before
+virtual soak (494PASS1FAIL2SKIP148.74s); one local traced run did not reproduce it.
+Add an explicit opt-in pytest fixture reusing TimingProbe, collect in the runner
+context and print only bounded timing snapshot JSON on test-call failure. Keep
+the original test TTL1.5/sleep0.6 and all assertions, no production edits. First
+RED/GREEN subprocess tests prove original pass/fail exit preserved, failure-only
+report, real AsyncStorage trace capture and no operation-data fields. Add the
+fixture to the failed lease test; other tests remain uninstrumented. Same review
+seat checks this added scope, no new parallel reviewer. Observe original CI to
+completion before pushing diagnostics so it is not cancelled/replaced. New CI
+is for changed instrumentation, never replaces8a34bc1 failure or proves its cause.

@@ -63,6 +63,7 @@ async def test_cold_unowned_acquisition_can_return_fresh_lease_after_slow_setup(
         await executor.aclose()
 
 
+@pytest.mark.usefixtures("lease_timing_probe")
 async def test_valid_verification_uses_remaining_lifetime_not_a_fixed_fraction(monkeypatch):
     executor = ActionExecutor(FakeRobotAdapter(), Settings(lease_ttl_s=1.5))
     assert await executor.claim_control()
