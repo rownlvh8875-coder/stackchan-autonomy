@@ -1,0 +1,96 @@
+{
+  "source_head": "a6488de1e6a9b9e11aebc22db06566548ba2288d",
+  "ci_success": 7,
+  "ci_failure": 2,
+  "jobs": [
+    {
+      "run_id": 44752454968,
+      "job_id": 136343536259,
+      "name": "ubuntu-24.04 / Python 3.12",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 44752454968,
+      "job_id": 136343536773,
+      "name": "ubuntu-24.04 / Python 3.11",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 44752454968,
+      "job_id": 136343536811,
+      "name": "windows-latest / Python 3.11",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "run_id": 44752454968,
+      "job_id": 136343536887,
+      "name": "windows-latest / Python 3.12",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "run_id": 44752464762,
+      "job_id": 136343567083,
+      "name": "windows-latest / Python 3.11",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 44752464762,
+      "job_id": 136343567567,
+      "name": "ubuntu-24.04 / Python 3.12",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 44752464762,
+      "job_id": 136343567601,
+      "name": "windows-latest / Python 3.12",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 44752464762,
+      "job_id": 136343567672,
+      "name": "ubuntu-24.04 / Python 3.11",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 44752464683,
+      "job_id": 136343566230,
+      "name": "ESP-IDF v6.1 / ESP32-S3 (never install)",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "rerun_requested": false,
+  "physical_device_changed": false,
+  "paid_api_called": false,
+  "local_python311_independent_wheel": "PASS (no live API)",
+  "remaining_causes": "SQLite COMMIT blocking identified on failed renewal; physical I/O vs OS wait unresolved; installed wheel Mock GPT timeout not reproduced locally",
+  "target_manifest": {
+    "status": "COMPILED_NOT_APPROVED_FOR_DEVICE_INSTALLATION",
+    "target": "esp32s3",
+    "elf_machine": 94,
+    "idf_commit": "fff9895c82d744c7237be8847347bdd1b07c6643",
+    "app_slot_size_limit": 5177344,
+    "elf": {
+      "size": 7902328,
+      "sha256": "206860757df74bf906f823e3ab57ae98876baebc55728a34106743db214932ae"
+    },
+    "app": {
+      "size": 325792,
+      "sha256": "4795de500b5102102e4dcac05e5a78bfecb852feccbe0a96aac45ae3eb759ac7"
+    },
+    "installed": false,
+    "hardware_accessed": false,
+    "paid_api_called": false,
+    "factory_bootloader_or_partition_compatibility": "NOT_VALIDATED",
+    "hardware_audio_lcd_usb_wifi_tls": "NOT_IMPLEMENTED",
+    "note": "Do not flash; app SHA/size only, no factory recovery proof"
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "date": "2026-11-21",
+  "timezone": "Asia/Seoul",
+  "pcm_code_commit": "5cd310f4f5527d03b12d9a842a6ce0f818d61d03",
+  "initial_ci": {
+    "head": "5cd310f4f5527d03b12d9a842a6ce0f818d61d03",
+    "runs": [
+      {
+        "run": 44851505977,
+        "jobs": [
+          {
+            "id": 136683687091,
+            "name": "windows-latest / Python 3.12",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          },
+          {
+            "id": 136683687248,
+            "name": "ubuntu-24.04 / Python 3.12",
+            "status": "completed",
+            "conclusion": "failure",
+            "failed_steps": [
+              "Offline standalone C++ safety, wake, and SCFG enrollment tests (host only)"
+            ]
+          },
+          {
+            "id": 136683687422,
+            "name": "windows-latest / Python 3.11",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          },
+          {
+            "id": 136683687541,
+            "name": "ubuntu-24.04 / Python 3.11",
+            "status": "completed",
+            "conclusion": "failure",
+            "failed_steps": [
+              "Offline standalone C++ safety, wake, and SCFG enrollment tests (host only)"
+            ]
+          }
+        ]
+      },
+      {
+        "run": 44851513416,
+        "jobs": [
+          {
+            "id": 136683706331,
+            "name": "ubuntu-24.04 / Python 3.11",
+            "status": "completed",
+            "conclusion": "failure",
+            "failed_steps": [
+              "Offline standalone C++ safety, wake, and SCFG enrollment tests (host only)"
+            ]
+          },
+          {
+            "id": 136683706455,
+            "name": "windows-latest / Python 3.11",
+            "status": "completed",
+            "conclusion": "failure",
+            "failed_steps": [
+              "Offline test suite"
+            ]
+          },
+          {
+            "id": 136683706538,
+            "name": "windows-latest / Python 3.12",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          },
+          {
+            "id": 136683706755,
+            "name": "ubuntu-24.04 / Python 3.12",
+            "status": "completed",
+            "conclusion": "failure",
+            "failed_steps": [
+              "Offline standalone C++ safety, wake, and SCFG enrollment tests (host only)"
+            ]
+          }
+        ]
+      },
+      {
+        "run": 44851513434,
+        "jobs": [
+          {
+            "id": 136683706095,
+            "name": "ESP-IDF v6.1 / ESP32-S3 (never install)",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          }
+        ]
+      }
+    ],
+    "s3_module_compiled": true,
+    "reruns": 0,
+    "success": 4,
+    "total": 9
+  },
+  "local_root": {
+    "pass": 495,
+    "skip": 2,
+    "seconds": 115.99
+  },
+  "local_standalone_initial": {
+    "pass": 586,
+    "skip": 5,
+    "seconds": 113.43
+  },
+  "local_standalone_after_proof_fix": {
+    "pass": 592,
+    "skip": 5,
+    "seconds": 90.79
+  },
+  "driver_wait_ms": 20,
+  "post_call_rejection_ms": 40,
+  "hard_wall_or_physical_stop_bound": false,
+  "transfer_attempts": 1,
+  "partial_transfer_accepted": false,
+  "hold": true,
+  "physical_output_enabled": false,
+  "dma_drain_proven": false,
+  "cloud_default": false,
+  "device_commands_this_step": 0,
+  "voice_recorded_or_uploaded": false,
+  "paid_api_calls": 0,
+  "wake_gap_ms_unchanged": 100,
+  "wake_chunk_bounds_unchanged": [
+    160,
+    2048
+  ],
+  "review": {
+    "independent_passes": 1,
+    "important_fixed": "fixture checkout conversion RED to GREEN",
+    "deferred_minors": [
+      "null interface handle defensive parity",
+      "get_info failure injected regression"
+    ]
+  },
+  "production_python_runtime_changed": false,
+  "production_timeout_lease_sqlite_durability_changed": false,
+  "failed_ci_jobs_rerun": 0,
+  "followup_gnu_ci_status": "PENDING_AT_RECORDING"
+}

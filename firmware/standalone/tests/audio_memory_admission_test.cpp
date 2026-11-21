@@ -9,8 +9,29 @@ int main() {
   static_assert(kQuestionPcmBytes == 384000);
   static_assert(kSynthPcmBytes == 960000);
   static_assert(kRawConcurrentPcmBytes == 1344000);
-  static_assert(kRequiredPsramFree == 1344000 + 512 * 1024);
+  static_assert(kConcurrentSpeechPayloadBytes == 2304000);
+  static_assert(kRequiredPsramFree == 2304000 + 512 * 1024);
   static_assert(!kAudioMemoryReadinessCanAuthorizeInstall);
+
+  NativeAudioMemorySnapshot native;
+  assert(check_native_audio_memory_preflight(native)==NativeMemoryPreflight::model_unmeasured);
+  native.model_resident_during_measurement=true;
+  assert(check_native_audio_memory_preflight(native)==NativeMemoryPreflight::combined_peak_unmeasured);
+  native.question_tls_tts_peak_measured=true;
+  assert(check_native_audio_memory_preflight(native)==NativeMemoryPreflight::invalid_peak);
+  native.concurrent_psram_peak=kRawConcurrentPcmBytes;
+  native.concurrent_internal_peak=32*1024;
+  assert(check_native_audio_memory_preflight(native)==NativeMemoryPreflight::invalid_peak);
+  native.concurrent_psram_peak=kConcurrentSpeechPayloadBytes;
+  assert(check_native_audio_memory_preflight(native)==NativeMemoryPreflight::audio_budget_rejected);
+  native.after_model={true,true,true,kRequiredPsramFree,kRequiredLargestPsramBlock,
+                      kRequiredInternalFree,kRequiredLargestInternalBlock};
+  assert(check_native_audio_memory_preflight(native)==NativeMemoryPreflight::diagnostic_ready);
+  native.concurrent_internal_peak=kRequiredInternalFree;
+  assert(check_native_audio_memory_preflight(native)==NativeMemoryPreflight::internal_peak_insufficient);
+  native.concurrent_internal_peak=32*1024;
+  native.concurrent_psram_peak=kRequiredPsramFree;
+  assert(check_native_audio_memory_preflight(native)==NativeMemoryPreflight::psram_peak_insufficient);
 
   AudioMemorySnapshot e;
   assert(check_audio_memory_preflight(e) == MemoryPreflight::not_measured);

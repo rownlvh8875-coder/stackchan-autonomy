@@ -1,5 +1,238 @@
 # Next steps
 
+## 2026-11-22 코드 후속 — 마이크 진단과 검증된 내장 모델 연결
+
+1회 진단의 내장 팩 진입점은 로컬 동의와 현재 보드 증거를 먼저 확인한 뒤,
+기존 DROM·크기·SHA256 검사와 WakeNet SDK 독점 로더를 사용한다. 검증을
+통과한 모델만 같은 동의·STOP 상태로 마이크 진단에 넘긴다. HOLD 앱은
+링크 확인 메시지만 출력한다. 실물에 적용할 이미지의 검토는 전기 실측 뒤다.
+[모델 연결과 검증](validation/2026-11-21-k151-mic-wake-trial.md#2026-11-22-검증된-내장-모델-연결)
+
+## 2026-11-21 코드 후속 — 마이크 단독 WakeNet 1회 진단
+
+ES7210 수신과 공통 24kHz→16kHz 입력을 연결했다. 로컬 동의와 현재 보드의
+전기·I2S0 소유 증거가 있는 경우 최대 5초·500프레임 동안 듣는다. 드라이버
+해제와 모델 종료 뒤에도 STOP·동의를 확인하고 감지 상태만 반환한다.
+실물 시험에 필요한 전기 측정과 설치 검토는 남아 있다.
+[진단 경계와 모의 검증](validation/2026-11-21-k151-mic-wake-trial.md)
+
+## 2026-11-21 실물 후속 — 새 컨텍스트 reset과 합성 입력 완료
+
+승인한 무음 진단에서 두 reset 반환, 24kHz 합성 32프레임, 11개
+계측 경계와 최종 HOLD를 관측했다. 이번 한 번의 실행에서 이전 reset
+경계의 panic은 관측되지 않았다. 같은 `ota_1` 원본의 전체 복구와
+독립 digest, 표·OTA 세 시점 일치, 재부팅 요청 뒤 COM3 복귀를
+확인했다. 다음 물리 검증은 마이크 전원·클록·앰프 격리와 실제 입력
+경로다. [무음 실측·복구](validation/2026-11-21-k151-wakenet-fresh-context-live.md)
+
+## 2026-11-21 코드 후속 — WakeNet 모델 컨텍스트 재생성
+
+실물에서 panic이 관측된 모델 reset 구간을 변경했다. 기존 컨텍스트를
+먼저 해제한 뒤 검증된 같은 모델 목록에서 새 컨텍스트를 만든다. 생성
+실패, 포맷 변경, STOP·동의 철회 시 포트가 종료된다. 실제 코덱·클라우드의
+운영 상태는 HOLD다. 새 reset 경로의 실물 실행은 새 이미지의 설치 검토와
+승인이 필요하다.
+[reset 변경의 검증 기록](validation/2026-11-21-k151-wakenet-recreate-reset.md)
+
+## 2026-11-21 실물 계측 — WakeNet 모델 reset 경계의 panic
+
+승인 계측 이미지에서 `model_reset_begin` 뒤 `model_reset_return` 전에
+새 nonce와 `ESP_RST_PANIC`을 수신했다. 포트의 reset 경로는 SDK
+`clean()`을 호출한다. 예외 세부나 명령 주소는 아직 없다. 합성 32프레임
+완료는 관측되지 않았다. 원본 슬롯 전체 복구·독립 digest, 표·OTA
+세 시점 일치를 검증했다. 출고 부팅 요청 뒤 COM3이 돌아왔고 사용자가
+출고 얼굴·메뉴 복귀를 확인했다.
+[실물 계측·복구](validation/2026-11-21-k151-wake-reset-panic-live.md)
+
+## 2026-11-21 무음 WakeNet 중단 지점 계측
+
+기존 시작 메시지에 ESP-IDF reset reason을 추가했다. 무음 진단만 모델
+reset, 버퍼 준비, 첫 poll·detect 및 마지막 reset 경계를 고정 필드로
+남긴다. 수신기는 두 번째 시작 메시지에서 원인 값과 nonce 변경 여부를
+보존하고 추가 START 없이 STOP한다. 실제 중단 원인은 다음에 승인할
+이미지의 계측 결과가 필요하다.
+[계측과 오프라인 검증](validation/2026-11-21-k151-wake-reset-telemetry.md)
+
+## 2026-11-21 K151 무음 WakeNet 입력 실물 진단 중단
+
+승인한 `731bb2a` 이미지를 한 번 실행했다. `synthetic_inference` 기록 뒤
+두 번째 시작 대기 메시지가 들어와 수신기가 STOP을 보냈다. 합성 24kHz
+32프레임 완료는 관측되지 않았다. 원본 `ota_1` 전체를 복구하고 독립
+digest 및 표·OTA 세 시점 일치를 확인했다. 출고 재부팅을 요청한 뒤
+COM3 복귀와 사용자의 출고 얼굴·메뉴 확인까지 마쳤다. 추가 시험은 원인을 좁힐 reset reason 및 단계
+기록을 준비한 뒤 검토한다. [실물 진단 기록](validation/2026-11-21-k151-silent-wake-input-live.md)
+
+## 2026-11-21 코드 후속 — 무음 진단의 WakeNet 입력 연결
+
+운영 컨트롤러와 무음 진단이 동일한 24kHz→16kHz FIR·chunk 누적 코드를
+사용한다. 실제 마이크 코덱 코드에 I2S 모의를 연결해 512샘플 모델 입력,
+부분 chunk 폐기 및 감지 반환 중 STOP을 확인했다. 무음 진단의 새 단계는
+고정 모델에 합성 24kHz 프레임만 공급한다. 실물 마이크 전기 조건과
+실제 호출어·대화 검증은 여전히 대기다.
+[WakeNet 입력 검증](validation/2026-11-21-k151-silent-wake-input.md)
+
+## 2026-11-21 마이크 실물 시험 전 전기 확인
+
+현재 USB 장치와 원본 백업 A/B의 길이·SHA256을 다시 확인했다. 회로도의
+ES7210 전원 넷과 설명 사이의 불일치, 이전 AW_RST 래치와 누락된 핀 모드를
+검토했다. 기존 읽기 전용 보드 진단에 AXP2101의 ALDO1/2 설정값과 AW9523B의
+P0 모드 읽기를 추가했다. 실제 마이크 활성화는 현재 보드의 전원·클록·앰프
+격리 확인 뒤로 둔다. [전기 확인과 검증 범위](validation/2026-11-21-k151-mic-electrical-preflight.md)
+
+## 2026-11-21 코드 후속 — K151 마이크 단독 입력
+
+ES7210과 I2S RX만 준비하는 경로를 기존 코덱 포트에 추가했다. 모의 24kHz
+모노 프레임을 기존 FIR에 전달해 16kHz 입력으로 변환했고, STOP·동의 철회·
+해제 오류에서 PCM을 폐기하고 RX를 정리하는 경로를 시험했다.
+운영 펌웨어에서 이 경로를 연결하기 전에 현재 보드의 마이크 전원과 클록,
+공유 클록이 동작하는 동안 앰프 격리, RX FIFO의 정지·재개를 확인해야 한다.
+[마이크 단독 검증](validation/2026-11-21-k151-microphone-only.md)
+
+## 2026-11-21 실물 후속 — 메모리 TLS와 합성 응답
+
+승인한 진단 이미지로 로컬 TLS 1.2 검증과 암호화 레코드 수신을 한 번 실행했다.
+두 TLS 객체·모델·질문·speech 원본·PCM이 함께 있을 때 내부 힙 307,899 B와
+PSRAM 5,723,848 B가 남았다. 원본 슬롯 복구와 독립 digest, 표·OTA 세 시점
+일치를 확인하고 출고 부팅을 요청했다. 다음 검증 대상은 실제 codec/STOP 및 운영
+HTTPS·네트워크 동시 부하다. [실물 TLS·복구 기록](validation/2026-11-21-k151-local-tls-live.md).
+
+## 2026-11-21 코드 후속 — 메모리 안의 인증서 검증 TLS
+
+기존 자원 진단에 Mbed TLS 1.2 메모리 클라이언트·서버를 연결했다. 임시 CA와
+leaf의 검증 및 암호화 레코드 수신을 확인한 뒤 두 TLS 객체를 유지하며 최대 합성
+응답의 힙을 관측할 수 있다. [진단 범위](K151_RESOURCE_BENCH.ko.md).
+실제 Wi-Fi·운영 서버 인증서 체인·물리 codec/STOP은 별도 검증 대상이다.
+
+## 2026-11-21 실물 후속 — 모델과 합성 응답 버퍼
+
+승인한 무음 진단 이미지로 한 번 측정했다. 모델·질문·speech 원본·디코딩 PCM이
+동시에 살아 있을 때 PSRAM 5,729,228 B가 남았다. 모델 준비 시점 대비 추가
+사용량은 2,318,348 B였다. 원본 앱 슬롯 복구, 독립 digest와 표·OTA 세 시점
+일치를 확인하고 출고 부팅을 요청했다. 다음 측정 대상은 TLS와 실제 codec을
+포함한 동시 부하 및 물리 STOP이다. [실물 기록](validation/2026-11-21-k151-wire-memory-live.md).
+
+## 2026-11-21 코드 후속: 모델과 실제 응답 버퍼의 메모리
+
+8초 질문, 최대 HTTP speech body, 디코딩 PCM이 겹치는 2,304,000바이트를
+메모리 사전검사에 반영했다. HTTP 응답의 vector가 본문 제한보다 큰 용량을
+요청하지 않도록 성장 범위를 제한했다. 기존 자원 진단에서 모델을 유지한 채
+최대 합성 JSON과 PCM body를 실제 decoder로 처리하고 heap/배치를 관측할 수 있다.
+TLS handshake, 네트워크 및 실제 codec 부하의 동시 peak는 별도 측정이 필요하다.
+[자원 진단 범위](K151_RESOURCE_BENCH.ko.md).
+
+## 2026-11-21 Windows 후속: lease 시험 실패 전용 계측
+
+I2S 해제 코드8a34bc1의 실제 CI는7/9다. Push Windows3.12는 기존 remaining-lifetime
+root 시험, PR Windows3.12는 virtual soak cycle1618 check_timeout에서 실패했다.
+[실패·후속 계측 기록](validation/2026-11-21-lease-failure-reporting.md)을 따른다.
+같은 시험의 로컬 단일 계측1PASS는 CI 원인을 재현하지 못했다. timeout/lease/검사는
+유지하고 해당 root 시험 실패에만 기존 TimingProbe의 큐/SQLite/전달/loop JSON을
+출력하도록 연결했다. 실패가 아닌 pass/skip/xfail은 출력하지 않는다. 실제 I/O/OS
+원인 수정이 아니며 기존 실패를 재실행으로 지우지 않는다. 기기 변경/API는0이다.
+
+## 2026-11-21 코드 후속: 실패한 I2S 해제 소유권
+
+shutdown의 RX/TX 삭제 실패 뒤 handle이 유실되는 문제를4개 RED 시험으로 확인하고
+성공한 경우에만 pointer를 비우도록 수정했다. 이후 명시적 종료에서도 한 번씩만
+정리하며 fault·PCM 차단은 유지한다. I2C bus는 고정 IDF가 free 뒤 오류를 반환할 수도
+있어 재접근하지 않는다. 남은 bus 회수나 physical mute가 확인된 것은 아니다.
+AW88298 두 바이트 전달 회귀와 두 truncation negative control을 추가했다.
+[검증·소유권 한계](validation/2026-11-21-k151-codec-release.md)를 따른다.
+장치 접근/리셋/설치/실음성/API는0이며 HOLD와 기존 보호는 그대로다.
+
+## 2026-11-21 코드 후속: 코덱 제어 오류 보존
+
+기존 PCM 어댑터의 null callback 방어와 I2S 상태조회 실패 회귀를 추가했다.
+SDK가 버리는 register 오류는 비소유 K151CodecControl로 관측해 초기화/open/gain/
+close/해제 뒤 독립 검사한다. 실패 뒤 PCM·재시작은 차단하고 cleanup이 성공해도
+fault를 지우지 않는다. 고정 SDK ES7210 C 원문을 실제 host 실행해 read 오류 누락을
+대조했다. [범위·검증 기록](validation/2026-11-21-k151-codec-control.md)을 따른다.
+이번 기기 접근·리셋·설치·실음성·유료 API는0이며 HOLD/cloud OFF/출력·drain false는
+그대로다. 다음에는 물리 전원/mute·STOP/drain, 실제 마이크 채널·동시 TLS peak가
+필요하다. 과거 Windows 지연의 물리I/O/OS 원인은 해결됐다고 보고하지 않는다.
+
+## 2026-11-21 코드 후속: 오디오 PCM 전송 보강
+
+기존 K151CodecPort에 [제한된 PCM 전송 어댑터](K151_AUDIO_IO.ko.md)를 연결했다.
+SDK clock/slot·코덱·볼륨은 재사용하며 driver wait20ms, exact count, 반환 후40ms
+검사와 오류 latch·volatile RAII wipe를 적용했다. 실제 장치 접근/설치는0이다.
+HOLD·물리 출력 false·cloud OFF·100ms 입력 gap/chunk 조건을 유지한다.
+Windows 계측 시험의 잘못된30ms 하한 가정을 유한 지연으로 재현하고, 동일40ms
+timeout/취소·실제 큐는 유지한 채 별도 실측 구간과 대조하도록 수정했다.
+과거 SQLite/OS 지연 원인 해결이나 실제 음성/physical STOP 성공으로 보고하지 않는다.
+
+
+## 2026-11-21 실물 후속: 보드 조회·원본 복구 완료
+
+검토한 board_probe를 사용자 승인으로 한 번 실행했다. 실제 getter로ota_1 실행을
+확인했고, 다섯 주소 ACK·PMIC/IO ID·설정·터치 버전을7142µs에 읽었다. 같은 원본
+slot1 전체를 복구·독립 digest 검증하고 table/OTA 세 시점 일치를 확인했다.
+**사용자가 이번 재부팅 뒤 얼굴/메뉴 복귀까지 확인했다.**
+[실측·복구 범위·sanitized 증거](validation/2026-11-21-k151-board-readback-live.md)를 우선한다.
+전압/mute/STOP·실제 호출어·독립 GPT 성공으로 확대하지 않는다. 다음 코드 과제는
+codec1.6.2의1000ms 대기·short count·오류 후 PCM wipe를 보호하는 bounded I/O다.
+코드36c4e98와 문서e13124f의 CI는 각각8/9이며, 후자의 Windows3.11 실패는 STOP
+호출 전 명령 진입 대기1초 timeout이다. 두 실패 시험의 추가 로컬 계측2PASS로
+원인이 해결됐다고 보고하지 않는다. 이하 보드 준비 문구는 설치 전 시점의 이력이다.
+
+## 2026-11-21 후속 준비: 보드 읽기 전용 진단
+
+기존 probe의 코덱 8비트/7비트 주소 오류를 재현·수정하고, STOP/동의 철회와
+오류 시 부분 증거를 폐기하는 보호 및 PMIC/IO 설정 조회를 추가했다.
+[별도 보드 진단](K151_BOARD_READBACK.ko.md)은 nonce START 한 번으로 제한하며
+실제 실행 slot/chip을 먼저 검사한다. 운영 HOLD와 cloud OFF는 유지한다.
+코드36c4e98 실제CI는8/9 (push4/4·PR3/4·S3 1/1)다. PR Windows3.11 root
+heartbeat 시험의 StateUnavailable가 남았다. [산출물·실패 근거](validation/2026-11-21-k151-board-readback-preflight.md)와
+로컬 설치/복구 검토 묶음을 준비했다. 이 단계에서 새 장치 접근/설치는 하지 않았다.
+보드 설정의 읽기 성공은 전기적
+전원/mute/STOP 증거가 아니다. codec1.6.2의 1000ms I/O 대기·short count 처리와
+PCM 지움 강화도 실제 mic 활성화 전 해결해야 한다. 아래 실물 기록과 구분한다.
+
+## 2026-11-21 실물 후속: 모델 진단1회·원본 슬롯 복구
+
+사용자 승인 뒤 기존 어댑터와 embedded pack의 [별도 무음 진단](K151_RESOURCE_BENCH.ko.md)을
+실제ota_1에 한 번 설치했다. 512sample×64 합성 chunk, 최대7.615ms 추론,
+질문384000/TTS960000bytes 동시 PSRAM 배치를 관측했다. 같은 슬롯 원본5177344bytes를
+복구하고 독립 verify/표·OTA 전후 일치를 확인했다. 이후 보드 조회 승인 전 사용자가
+출고 얼굴/메뉴 복귀를 확인했다.
+[실물 수치·범위](validation/2026-11-21-k151-silent-resource-bench.md)를 우선한다.
+다음은 기존 운영 bootstrap의 실제 mic/출력 STOP·DMA drain과 TLS 동시 peak 증거다.
+과거 실측으로 현재 readiness를 만들지 않는다. cloud 기본 OFF/운영 HOLD를 유지하며,
+실제 호출어 인식·독립 GPT 성공은 아직 없다. 아래는 이 단계 전의 이력이다.
+
+## Windows 인수 (2026-11-20, PR #3 후속)
+
+기존 clean `feat/wakeword-josu`를696460c로 fast-forward한 뒤 Windows Mock
+지연 진단·검증한 백업의 sanitized OTA 분석·고정 모델 재패킹·휴면 owner loop와
+model/TLS 동시 peak admission을 추가했다. [인수 결과](validation/2026-11-20-windows-handoff.md)와
+[설치/복구 준비](K151_NATIVE_INSTALL_PREP.ko.md)를 따른다. 기존696460c CI는 **8/9**이며
+과거 check_timeout의 root cause는 아직 미확정이다. 새 진단은 제한 완화나 실패 재시도 없이
+큐/worker/SQLite/전달/loop 지연을 나눈다. 최초에는COM3이Unknown이었으나 사용자 재연결
+후COM3/303A:1001·S3/16MB/보호 OFF와 현재 표/OTA12KiB의 원본 일치를 직접 확인했다.
+[현장 조회와 실제 partition SHA 진입점 연결](validation/2026-11-20-k151-current-usb-and-assets.md)을 따른다.
+조회용 칩 리셋2회 뒤 flash 부팅 복귀를 요청했다. 설치/실물 모델 추론/유료 API는 미실행이다.
+기존 한국어 보정 반복과 임의 문턱 변경은 하지 않는다.
+
+## 현재 우선 작업 (2026-11-20)
+
+최신 사용자 보정은 **calibration_not_separable**로 확인됐다. 기존 문턱으로 호출과 비호출을 분리할 수 없어 동일 등록 반복을 중단한다. 사용자는 추천한 **기본 호출어 지원 검증 → 독립 GPT 대화 우선** 방향에 진행을 지시했다. 공식 Hi StackChan 모델과 고정 IDF6.1/ESP-SR2.4.7의 실제 ESP32-S3 컴파일/링크/패킹을 임시 사본에서 확인했다. 24k→16k 스트림 변환·기성 모델 어댑터·호출 이벤트와 기존 질문/STT/GPT/TTS Mock 연결을 구현했다. 다음은 모델 자산/배치·무결성·동적 메모리와 운영 bootstrap 및 복구 계획 준비다. [현재 결과와 다음 순서](K151_BUILTIN_WAKE.ko.md), [검증 증거](validation/2026-11-20-k151-builtin-wakenet-preflight.md)를 따른다. 실물 인식/자원/독립 대화는 미검증이다. 아래는 이전 진단 이력이다.
+
+현장18개 등록/보정 녹음은 모두 품질 검사를 통과했으나 마지막 품질 출력 뒤 helper가 일반 오류로 거부했다. 품질 출력이 특징 추출보다 앞서므로, 마지막 특징 추출과 이후 보정 중 어느 연산이 실패했는지는 미확정이다. 새 진단은 보정 분리 불가·SWK1 문턱 표현 범위·실행/형식 오류를 구분하고, 보정의 최악 호출/가장 가까운 비호출 번호와 거리만 표시한다. 기존 인식/등록 기준은 유지한다. [진단 검증과 한계](validation/2026-11-20-josu-calibration-diagnostics.md)를 참고하며, 이전 세션의 특징은 보존되지 않아 그 원인은 미확정이다. 새 helper로 원인을 확인하기 전 반복 등록이나 문턱 변경을 하지 않는다.
+
+추가 현장 결과에서 무발화의 약한 끝 활동 때문에 등록이 거부될 수 있음을 확인했다.
+주활동 대비 낮은 에너지가 분리된 끝으로 구간을 확장하지 않도록 하고, 무발화 잡음은
+경고를 남기면서 실제 오탐 평가에 포함한다. 기본3초 및 녹음 종료 표시를 사용한다.
+[수정 검증과 실제 재시험 범위](validation/2026-11-20-josu-background-activity.md)를 참고한다.
+
+
+기본 호출어는 **“조수”**이며 “조수야”는 신규 프로필의 비호출어다. 실제 노트북 발화에서
+`UNVERIFIED_NO_MATCH`가 보고돼 입력 품질·VAD/추출 경계·DTW 거리 진단과 개인 등록/새 평가
+경로를 준비했다. [상세 실행 순서](../firmware/standalone/docs/2026-11-20-josu-human-mic.md)와
+[검증 범위](validation/2026-11-20-josu-human-mic-diagnostics.md)를 따른다. 현재 할 일은 노트북의
+새 진단 JSON 및 독립된 실제 목소리 평가다. 실제 사람/K151 인식 성공은 미검증이며
+기기 설치·OTA/NVS·모터·유료 API 실행은 이번 범위 밖이다. 아래는 이전 경로의 이력이다.
+
+
 최신 지시(2026-11-18): 사용자는 **제조사 문의를 취소하고 직접 연결을 개발**하라고 했다.
 [문의 초안](M5STACK_OBSERVATION_API_REQUEST.ko.md)은 미게시 상태로 철회했다.
 이후 사용자는 공식 앱은 필수가 아니고 원하는 기능의 정상 작동이 우선이라고 확인했다.

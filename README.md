@@ -6,6 +6,8 @@ Observe → Perceive → Decide → Validate → Act → Evaluate 순환을 가�
 Phase 4는 MCP 계약·상태/각도/터치 파서와 메모리 내 gateway 통합 시뮬레이션을 제공한다.
 물리 실행은 계속 차단돼 있다.
 
+현재 로봇 단독 GPT 대화 준비는 [K151 기본 호출어 진행 상태](docs/K151_BUILTIN_WAKE.ko.md)를 따른다. Hi StackChan 모델의 실제 ESP32-S3 컴파일/링크·패킹을 확인했으며, 실물 호출·독립 GPT 대화와 실행용 펌웨어는 후속 검증 단계다.
+
 ## USB 관찰 확장 준비
 
 K151 공식 소스 기반의 사진·센서 읽기 전용 USB 확장과 선택적 GPT 이미지 도구는

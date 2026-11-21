@@ -1,7 +1,7 @@
 """Offline CPU Whisper tiny verification AFTER original C++ DTW wake gate.
 
 No cloud calls, pretrained weights only from an explicitly supplied pinned
-local directory. The single Korean ASR result must be EXACTLY "조수야";
+local directory. The single Korean ASR result must be EXACTLY the selected phrase (default "조수");
 rejected stage-1 clips are never sent to ASR. No fuzzy words, prompting
 with target phrases, fallback, speaker verification or hardware activation.
 
@@ -132,7 +132,9 @@ def transcript_from_whisper(model: object, pcm16: bytes) -> str:
         raise OfflineWhisperRejected("offline_whisper_inference_failed") from exc
 
 
-def evaluate_whisper_stage2(manifest: Path, binary: Path, profile: Path, model_dir: Path) -> dict:
+def evaluate_whisper_stage2(
+    manifest: Path, binary: Path, profile: Path, model_dir: Path, *, wake_phrase: str = "조수"
+) -> dict:
     # Load the local recognizer once; no network API may receive any audio.
     model = load_pinned_whisper_model(model_dir)
     labels = load_new_holdout(manifest)  # exactly 4 positive + 12 nonwake.
@@ -168,7 +170,7 @@ def evaluate_whisper_stage2(manifest: Path, binary: Path, profile: Path, model_d
             raise OfflineWhisperRejected("offline_wav_resample_failed") from exc
         transcription = transcript_from_whisper(model, pcm16)
         calls += 1
-        if exact_wake_transcript(transcription):
+        if exact_wake_transcript(transcription, wake_phrase=wake_phrase):
             final[row["label"]] += 1
     return {
         "status": "UNVERIFIED_LOCAL_WHISPER_TINY_STAGE2",
@@ -197,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stage1-binary", required=True, type=Path)
     parser.add_argument("--stage1-profile", required=True, type=Path)
     parser.add_argument("--whisper-model-dir", required=True, type=Path)
+    parser.add_argument("--wake-phrase", choices=("조수", "조수야"), default="조수")
     args = parser.parse_args(argv)
     try:
         result = evaluate_whisper_stage2(
@@ -204,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
             args.stage1_binary,
             args.stage1_profile,
             args.whisper_model_dir,
+            wake_phrase=args.wake_phrase,
         )
         code = 0
     except (OfflineWhisperRejected, OSError, ValueError, RuntimeError) as exc:

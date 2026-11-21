@@ -3,8 +3,8 @@
 #pragma once
 
 #include "question_capture.hpp"
+#include "audio_wipe.hpp"
 
-#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -27,20 +27,18 @@ class MicFrameBridge final {
   CaptureResult capture(QuestionCapture& segmenter) {
     if (stop_.load() || speaker_.load() || faulted_) return reject(segmenter);
     std::array<int16_t, QuestionCapture::kFrame> frame{};
+    ScopedPcmWipe clear{frame};
     for (size_t offset = 0; offset < frame.size(); offset += 240) {
       if (stop_.load() || speaker_.load() ||
           !mic_.read_10ms(std::span<int16_t>(frame.data() + offset, 240))) {
-        std::fill(frame.begin(), frame.end(), 0);
         return reject(segmenter);
       }
     }
     // Late STOP must invalidate both the local buffer and completed audio.
     if (stop_.load() || speaker_.load()) {
-      std::fill(frame.begin(), frame.end(), 0);
       return reject(segmenter);
     }
     const auto result = segmenter.push(frame, false, false);
-    std::fill(frame.begin(), frame.end(), 0);
     return result;
   }
 

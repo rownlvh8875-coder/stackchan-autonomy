@@ -3,6 +3,8 @@
 /src/stackchan_autonomy/data/windows-home-soak-24h-passed.json -text
 # The owner-approved synthetic WAV corpus manifest has byte-exact SHA-256 checksums.
 /firmware/standalone/fixtures/korean_heami_sapi_20261120/synthetic-sapi.wake-corpus.json -text
+# Preserve the new '조수' corpus manifest raw bytes across Windows and Linux.
+/firmware/standalone/fixtures/korean_josu_sapi_20261120/synthetic-sapi.wake-corpus.json -text
 # New Heami same-speaker holdout manifest is hashed as raw bytes.
 /firmware/standalone/fixtures/korean_heami_fresh_holdout_20261120/fresh-evaluation.wake-corpus.json -text
 # Raw synthetic contrastive calibration manifest stays byte-identical across OSes.
@@ -13,3 +15,5 @@
 /firmware/standalone/fixtures/korean_heami_linear_postfreeze_20261120/linear-postfreeze.wake-corpus.json -text
 # Frozen tiny CNN Heami synthetic holdout manifest must preserve raw bytes.
 /firmware/standalone/fixtures/korean_heami_conv_postfreeze_20261120/cnn-postfreeze.wake-corpus.json -text
+# Pinned codec SDK headers/license are verified as raw archive bytes in tests.
+/firmware/standalone/tests/sdk_esp_codec_dev_1_6_2/* -text

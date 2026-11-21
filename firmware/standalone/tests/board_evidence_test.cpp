@@ -13,6 +13,12 @@ using stackchan::standalone::k151::kAw88298ResetReference;
 using stackchan::standalone::k151::panel_hint;
 
 int main() {
+  using stackchan::standalone::k151::board_probe_location_allowed;
+  assert(board_probe_location_allowed(0x510000, 0x4f0000, true, 2));
+  assert(!board_probe_location_allowed(0x20000, 0x4f0000, true, 2));
+  assert(!board_probe_location_allowed(0x510000, 0x100000, true, 2));
+  assert(!board_probe_location_allowed(0x510000, 0x4f0000, false, 2));
+  assert(!board_probe_location_allowed(0x510000, 0x4f0000, true, 3));
   ReadOnlyEvidence e;
   assert(panel_hint(e) == PanelHint::unknown);
   assert(!expected_devices_acknowledged(e));

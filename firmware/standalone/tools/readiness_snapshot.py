@@ -17,7 +17,8 @@ REQUIRED_PHYSICAL_PROOFS = (
     "independently measured STOP-to-mute latency",
     "hardware-observed TX DMA empty plus codec output idle",
     "actual mic/codec 24 kHz timing and dual-channel mapping",
-    "live Korean '조수야' detection and false-wake results",
+    "live Hi StackChan model inference, false-wake rate and bounded latency",
+    "device model partition hash and exclusive SDK loader ownership",
     "verified allocator PSRAM placement and measured peak RAM",
     "owner-authorized installation and restoration rehearsal",
 )

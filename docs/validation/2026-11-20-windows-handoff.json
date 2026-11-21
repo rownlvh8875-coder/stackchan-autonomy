@@ -1,0 +1,64 @@
+{
+  "status": "OFFLINE_PREPARATION_NOT_INSTALL_AUTHORIZATION",
+  "base": "696460cc7671f94b71164904810ec93c68c7eb1f",
+  "branch": "feat/wakeword-josu",
+  "pr": 3,
+  "source_sha256": {
+    "src/stackchan_autonomy/action.py": "49eba4c3c7182783766429f325453384b375abf3874ede8bab6898e01e412d73",
+    "src/stackchan_autonomy/async_storage.py": "886e1495353e7b302920e576ac0518d411b812c14a89edf7b0051056b508bee9",
+    "src/stackchan_autonomy/state_store.py": "0ad5bc3da63b748857ed0e7ebaf4ac7d34709f88db41974ea847837df0797e02",
+    "src/stackchan_autonomy/soak.py": "916f49e3bce625bc8dabc40871dfe90c1c11f24040ce573801d1099b73d01b79",
+    "src/stackchan_autonomy/timing_diagnostics.py": "857874543e310bfa77d99fb6fe27c99d84b5425aacb2e92997a603d9c7d988f8",
+    "firmware/standalone/core/native_voice_loop.hpp": "3f3d22bc4b72322957ec68a519d57a795383118506e4d215be12f88f092186bd",
+    "firmware/standalone/core/audio_memory_admission.hpp": "c464a406ff4ab2460b3485a8bd43e461cde84fbebc87ae68fc4b8c4e03d1c7ea",
+    "firmware/standalone/tools/offline_factory_recovery.py": "6e64b021013f38a29a4e90bf5d0e2cfb9759089e34cee0df882303eadce187f3",
+    "firmware/standalone/tools/prepare_wakenet_assets.py": "fad58d1587f5c381e080e5eec913901cae8effd326606c00ac572994baa32d50"
+  },
+  "local_tests": {
+    "root_passed": 495,
+    "root_skipped": 2,
+    "standalone_passed": 402,
+    "standalone_skipped": 5,
+    "mock_final_report": "2026-11-20-windows-mock-diagnostic-600.json"
+  },
+  "original_ci": {
+    "success": 8,
+    "failure": 1,
+    "cause": "UNRESOLVED_CHECK_TIMEOUT"
+  },
+  "local_target_compile": "UNAVAILABLE_WSL_VHD_PATH_MISSING",
+  "model_pack": {
+    "bytes": 292607,
+    "sha256": "0255855e56bf72d1e072d2e0cbee4fb3ce1ac2c48f7fee6c8cd591f83e59ed95",
+    "device_assets_verified": false
+  },
+  "backup": {
+    "copies": 2,
+    "each_bytes": 16777216,
+    "sha256": "c1241a7c87145ee8b9569cfbcfbb1f8c289641856f9b9b5ddf2ccd565019543e",
+    "table_md5_verified": true,
+    "historical_ota_candidate": "ota_1",
+    "current_running_slot_verified": false,
+    "spare_slot_verified": false,
+    "off_device_copy_verified": false,
+    "restore_write_tested": false
+  },
+  "model_region_candidate": {
+    "offset_hex": "0x00f00000",
+    "bytes": 1048576,
+    "erased_only_in_historical_backup": true,
+    "current_safety_verified": false,
+    "partition_table_change_required": true
+  },
+  "install_image": null,
+  "planned_authorized_writes": [],
+  "device_changed": false,
+  "port_opened": false,
+  "voice_recorded": false,
+  "neural_inference_tested": false,
+  "real_api_called": false,
+  "install_authorized": false,
+  "operating_memory_measured": false,
+  "app_main": "HOLD",
+  "source_hash_basis": "canonical Git blob bytes (LF)"
+}

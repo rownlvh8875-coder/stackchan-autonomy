@@ -1,0 +1,228 @@
+{
+  "status": "FRESH_WAKE_CONTEXT_SYNTHETIC_PASS_FACTORY_SLOT_RESTORED",
+  "date": "2026-11-21",
+  "timezone": "Asia/Seoul",
+  "code_head": "354d363b7a66903d95732d713b2f432038d4bb66",
+  "actual_ci_checkout": "5bd224e81862a26771e0477eb59c63351d861934",
+  "scope": "ONE_FRESH_WAKE_CONTEXT_BENCH_AND_OTA1_RESTORE",
+  "scope_consumed": true,
+  "port": "COM3",
+  "backup_bytes_each": 16777216,
+  "backup_a_b_sha256_match": true,
+  "prewrite": {
+    "metadata_matches": true,
+    "same_chip": true,
+    "original_slot_verified": true,
+    "chip": "ESP32-S3",
+    "revision": "0.2",
+    "flash_bytes": 16777216,
+    "secure_boot_enabled": false,
+    "flash_encryption_enabled": false
+  },
+  "diagnostic_image": {
+    "sha256": "e69c3a0ad22f1459923b75838081702a75411b151691d6454f5deb5ac08466b9",
+    "offset": 5308416,
+    "write_bytes": 791488,
+    "erase_bytes": 794624,
+    "write_elapsed_s": 14.016,
+    "independent_verify_elapsed_s": 2.159
+  },
+  "trial": {
+    "kind": "APPROVED_ONE_FRESH_WAKE_CONTEXT_BENCH",
+    "port": "COM3",
+    "fresh_nonce_observed": true,
+    "start_commands": 1,
+    "stop_commands": 0,
+    "start_flush_confirmed": true,
+    "stop_flush_confirmed": false,
+    "observed_hold": true,
+    "events": [
+      {
+        "stage": "baseline",
+        "internal_free": 370803,
+        "psram_largest": 8257536,
+        "internal_min": 306072,
+        "psram_free": 8385164,
+        "internal_largest": 245760,
+        "psram_min": 8385164
+      },
+      {
+        "stage": "model_resident",
+        "internal_free": 353659,
+        "psram_largest": 7995392,
+        "internal_min": 345635,
+        "psram_free": 8047576,
+        "internal_largest": 237568,
+        "psram_min": 8046228
+      },
+      {
+        "stage": "model_question_before_local_tls",
+        "internal_free": 353659,
+        "psram_largest": 7602176,
+        "internal_min": 345635,
+        "psram_free": 7662548,
+        "internal_largest": 237568,
+        "psram_min": 7662548
+      },
+      {
+        "stage": "model_question_local_tls_established",
+        "internal_free": 307899,
+        "psram_largest": 7602176,
+        "internal_min": 298699,
+        "psram_free": 7657168,
+        "internal_largest": 196608,
+        "psram_min": 7657168
+      },
+      {
+        "stage": "model_question_tls_json_decoded",
+        "internal_free": 307899,
+        "psram_largest": 7077888,
+        "internal_min": 298699,
+        "psram_free": 7395020,
+        "internal_largest": 196608,
+        "psram_min": 6862532
+      },
+      {
+        "wire_probe": "json",
+        "body_bytes": 262144,
+        "body_capacity_bytes": 262144,
+        "decoded_pcm_capacity_bytes": 0,
+        "body_in_psram": true,
+        "decoded_pcm_in_psram": false
+      },
+      {
+        "stage": "model_question_tls_wire_and_decoded_pcm",
+        "internal_free": 307899,
+        "psram_largest": 5636096,
+        "internal_min": 298699,
+        "psram_free": 5723848,
+        "internal_largest": 196608,
+        "psram_min": 5723848
+      },
+      {
+        "wire_probe": "speech",
+        "body_bytes": 960000,
+        "body_capacity_bytes": 960000,
+        "decoded_pcm_capacity_bytes": 960000,
+        "body_in_psram": true,
+        "decoded_pcm_in_psram": true
+      },
+      {
+        "stage": "model_question_tts",
+        "internal_free": 352279,
+        "psram_largest": 6684672,
+        "internal_min": 298699,
+        "psram_free": 6694860,
+        "internal_largest": 196608,
+        "psram_min": 5723848
+      },
+      {
+        "chunk_samples": 512,
+        "tts_bytes": 960000,
+        "question_bytes": 384000,
+        "tts_in_psram": true,
+        "question_in_psram": true
+      },
+      {
+        "stage": "synthetic_inference",
+        "internal_free": 352279,
+        "psram_largest": 6684672,
+        "internal_min": 298699,
+        "psram_free": 6694860,
+        "internal_largest": 196608,
+        "psram_min": 5723848
+      },
+      {
+        "wake_input": "SYNTHETIC_24K_COMPLETE",
+        "max_poll_us": 9006,
+        "frames_10ms": 32,
+        "checkpoint_latency_included": true,
+        "operating_admission": false
+      },
+      {
+        "result": "FINITE_BENCH_COMPLETED",
+        "max_detect_us": 7241,
+        "synthetic_matches": 0,
+        "over_100ms": 0,
+        "chunks": 64,
+        "wire_decoders_exercised": true,
+        "local_tls12_peer_verified": true,
+        "tls_measured": false,
+        "operating_admission": false,
+        "synthetic_24k_input_exercised": true
+      },
+      {
+        "stage": "after_cleanup",
+        "internal_free": 369335,
+        "psram_largest": 8257536,
+        "internal_min": 298699,
+        "psram_free": 8385136,
+        "internal_largest": 196608,
+        "psram_min": 5723848
+      },
+      {
+        "bench": "HOLD_UNTIL_RESET",
+        "operating_admission": false
+      }
+    ],
+    "raw_serial_saved": false,
+    "real_audio_captured": false,
+    "paid_api_requests": 0,
+    "status": "FINITE_BENCH_COMPLETED",
+    "initial_reset_reason": 11,
+    "repeated_reset_reason": null,
+    "repeated_nonce_changed": null,
+    "wake_checkpoints": [
+      "model_reset_begin",
+      "model_reset_return",
+      "input_allocate_begin",
+      "input_allocated",
+      "input_configured",
+      "first_poll_begin",
+      "first_poll_return",
+      "first_detect_begin",
+      "first_detect_return",
+      "final_model_reset_begin",
+      "final_model_reset_return"
+    ],
+    "elapsed_s": 4.8098,
+    "ignored_lines": 30,
+    "initial_reset_reason_name": "ESP_RST_USB",
+    "both_model_resets_returned": true,
+    "synthetic_24k_completion_observed": true,
+    "panic_reproduced_in_this_trial": false,
+    "previous_exception_address_known": false,
+    "real_wakeword_recognition_validated": false,
+    "physical_stop_validated": false,
+    "standalone_gpt_turn_validated": false,
+    "trial_retried": false
+  },
+  "restore": {
+    "metadata_matches": true,
+    "independent_verify_passed": true,
+    "sha256": "39280cbec8d01362c559cedce7d8cd088d951096a5d8f045ead27fe6bf9038fb",
+    "offset": 5308416,
+    "bytes": 5177344,
+    "write_elapsed_s": 86.716,
+    "independent_verify_elapsed_s": 9.67,
+    "factory_boot_requested": true,
+    "usb_pnp_com3_observed_after_reset": true,
+    "factory_ui_status": "awaiting_user_observation"
+  },
+  "metadata": {
+    "stages": [
+      "prewrite",
+      "postbench",
+      "postrestore"
+    ],
+    "partition_table_bytes_each": 4096,
+    "ota_bytes_each": 8192,
+    "each_snapshot_matches_original": true
+  },
+  "flash_write_operations": 2,
+  "planned_reset_requests": 4,
+  "real_audio_capture_or_upload": false,
+  "paid_api_requests": 0,
+  "executed_code_ci_pass": 9,
+  "executed_code_ci_total": 9
+}

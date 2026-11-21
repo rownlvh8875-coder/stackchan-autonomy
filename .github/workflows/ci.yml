@@ -56,12 +56,20 @@ jobs:
       - name: Offline standalone C++ safety, wake, and SCFG enrollment tests (host only)
         if: runner.os == 'Linux'
         run: uv run --frozen pytest -q firmware/standalone/tests
+      - name: Build native Windows PC wake helper (no device)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p .local/ci
+          uv tool run --from ziglang==0.15.2 python-zig c++ -std=c++20 -O2 -s -Wall -Wextra -Werror -pedantic -Ifirmware/standalone/core firmware/standalone/tools/wake_stage1_probe.cpp -o .local/ci/wake-stage1.exe
+          python -c "import os; from pathlib import Path; p=Path('.local/ci/wake-stage1.exe').resolve(); open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8').write('STACKCHAN_TEST_WAKE_PROBE_EXE='+str(p)+'\n')"
+      - name: PC microphone arithmetic and private enrollment (synthetic only)
+        run: uv run --frozen --with numpy==2.3.5 pytest -q firmware/standalone/tests/test_pc_mic_audio.py firmware/standalone/tests/test_pc_mic_wake_probe.py firmware/standalone/tests/test_pc_mic_enroll.py
       - name: Offline SCPS P-256 / AES-GCM authenticated pairing fixtures (Linux)
         if: runner.os == 'Linux'
         run: |
           uv run --frozen --with cryptography==46.0.4 python -m pytest -q firmware/standalone/tests/test_scps_reference.py firmware/standalone/tests/test_scps_usb_serial.py
       - name: Accelerated virtual 24-hour stability scenario
-        run: uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --report .local/ci/soak.json
+        run: uv run --frozen stackchan-soak --cycles 2880 --virtual-step-s 30 --diagnostics --report .local/ci/soak.json
       - name: Build distributions
         run: uv build --no-sources --out-dir .local/ci/dist
       - name: Verify independent wheel installation (Linux, including Opus)

@@ -19,6 +19,7 @@ async def test_control_deadline_is_checked_even_if_loop_cannot_schedule_timer(mo
 
     from stackchan_autonomy import action
     from stackchan_autonomy.state_store import StateUnavailable
+    from stackchan_autonomy.timing_diagnostics import TimingProbe
 
     executor = ActionExecutor(FakeRobotAdapter(), Settings(lease_ttl_s=1.5))
     assert await executor.claim_control()
@@ -34,11 +35,13 @@ async def test_control_deadline_is_checked_even_if_loop_cannot_schedule_timer(mo
         action, "time", SimpleNamespace(monotonic=lambda: time.monotonic() + offset[0])
     )
     monkeypatch.setattr(executor._storage, "call", delayed_delivery)
+    probe = TimingProbe()
     try:
-        with pytest.raises(StateUnavailable):
+        with probe.collect(), pytest.raises(StateUnavailable):
             await executor.claim_control()
         assert executor.control_loss_reason == "check_timeout"
         assert not executor.robot.history
+        assert probe.snapshot()["interruptions"][-1]["stage"] == "post_delivery_deadline"
     finally:
         monkeypatch.setattr(executor._storage, "call", original_call)
         await executor.aclose()
@@ -60,6 +63,7 @@ async def test_cold_unowned_acquisition_can_return_fresh_lease_after_slow_setup(
         await executor.aclose()
 
 
+@pytest.mark.usefixtures("lease_timing_probe")
 async def test_valid_verification_uses_remaining_lifetime_not_a_fixed_fraction(monkeypatch):
     executor = ActionExecutor(FakeRobotAdapter(), Settings(lease_ttl_s=1.5))
     assert await executor.claim_control()

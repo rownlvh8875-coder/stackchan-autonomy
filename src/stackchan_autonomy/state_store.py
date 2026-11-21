@@ -5,6 +5,8 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+from .timing_diagnostics import sqlite_timing
+
 
 class StateUnavailable(OSError):
     pass
@@ -31,10 +33,12 @@ class SQLiteState:
     def transaction(self):
         db = None
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            db = sqlite3.connect(self.path, timeout=0.25, isolation_level=None)
-            db.execute("PRAGMA synchronous=FULL")
-            db.execute("BEGIN IMMEDIATE")
+            with sqlite_timing("sqlite_connect"):
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                db = sqlite3.connect(self.path, timeout=0.25, isolation_level=None)
+                db.execute("PRAGMA synchronous=FULL")
+            with sqlite_timing("sqlite_begin"):
+                db.execute("BEGIN IMMEDIATE")
             for statement in (
                 "CREATE TABLE IF NOT EXISTS autonomy_clock (scope TEXT PRIMARY KEY, at REAL NOT NULL)",
                 "CREATE TABLE IF NOT EXISTS control_leases (resource TEXT PRIMARY KEY, owner TEXT, "
@@ -45,9 +49,12 @@ class SQLiteState:
                 "CREATE TABLE IF NOT EXISTS api_usage (namespace TEXT PRIMARY KEY, requests INTEGER NOT NULL, "
                 "input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, failures INTEGER NOT NULL)",
             ):
-                db.execute(statement)
-            yield db
-            db.commit()
+                with sqlite_timing("sqlite_schema"):
+                    db.execute(statement)
+            with sqlite_timing("sqlite_body"):
+                yield db
+            with sqlite_timing("sqlite_commit"):
+                db.commit()
         except (sqlite3.Error, OSError):
             if db is not None:
                 db.rollback()
@@ -58,7 +65,8 @@ class SQLiteState:
             raise
         finally:
             if db is not None:
-                db.close()
+                with sqlite_timing("sqlite_close"):
+                    db.close()
 
     @staticmethod
     def observed_time(db, scope: str, now: float) -> float:

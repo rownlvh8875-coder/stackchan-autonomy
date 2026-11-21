@@ -39,8 +39,9 @@ def test_fixed_whisper_model_and_decoding_rules(whisper_module):
     assert mod.ASR_BEAM_SIZE == 5
     assert mod.ASR_CPU_THREADS == 4
     assert mod.ASR_MAX_NEW_TOKENS == 32
-    assert mod.exact_wake_transcript("조수야")
-    assert mod.exact_wake_transcript("조 수 야!")
+    assert mod.exact_wake_transcript("조수")
+    assert mod.exact_wake_transcript("조 수!")
+    assert not mod.exact_wake_transcript("조수야")
     assert not mod.exact_wake_transcript("조수영")
     assert not mod.exact_wake_transcript("조수야 안녕")
     assert not mod.exact_wake_transcript("")
@@ -94,6 +95,7 @@ def test_second_stage_only_runs_on_stage1_acceptance(whisper_module, monkeypatch
         tmp_path / "fake-probe",
         PROFILE,
         tmp_path / "fake-unverified-model",
+        wake_phrase="조수야",
     )
     assert len(executed_first) == 16
     assert len(executed_second) == 5

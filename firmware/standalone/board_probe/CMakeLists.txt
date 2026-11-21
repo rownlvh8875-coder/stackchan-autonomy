@@ -1,0 +1,14 @@
+# Separate board readback diagnostic. Never flash generated bootloader/table.
+cmake_minimum_required(VERSION 3.16)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(COMPONENTS main)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(k151_board_probe)
+idf_build_get_property(probe_components BUILD_COMPONENTS)
+foreach(forbidden nvs_flash esp_wifi esp_http_client esp_driver_i2s esp_codec_dev
+                  espressif__esp_codec_dev espressif__esp-sr)
+    if(forbidden IN_LIST probe_components)
+        message(FATAL_ERROR "Read-only board probe must not link ${forbidden}")
+    endif()
+endforeach()

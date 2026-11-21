@@ -1,0 +1,204 @@
+{
+  "status": "COMPILE_AND_MODEL_PACK_PASS_NOT_DEVICE_VALIDATION",
+  "date": "2026-11-20",
+  "timezone": "Asia/Seoul",
+  "source_code_base": "330946a64a34c2d8cdf7c200e065fb50c08bfb6d",
+  "upstream_stackchan_commit": "28b9f0c8bd6acd81cb3c70f1a93c3e373b39d400",
+  "esp_idf": {
+    "version": "6.1.0",
+    "commit": "fff9895c82d744c7237be8847347bdd1b07c6643",
+    "target": "esp32s3"
+  },
+  "esp_sr": {
+    "version": "2.4.7",
+    "component_hash": "809d0041cdddd98a278f0d5afef7bb60a451290577b98cf718dfffc91bdcbd9b",
+    "repository_commit": "2f8c4b0459db5bbb39abd77adae27962d6d94bcb"
+  },
+  "model": {
+    "name": "wn9l_histackchan_tts3",
+    "wake_phrase": "Hi,Stack Chan",
+    "mode_compiled": "DET_MODE_90",
+    "pack": {
+      "bytes": 292607,
+      "sha256": "0255855e56bf72d1e072d2e0cbee4fb3ce1ac2c48f7fee6c8cd591f83e59ed95"
+    },
+    "pack_contents": {
+      "model_count": 1,
+      "model_name": "wn9l_histackchan_tts3",
+      "files": [
+        {
+          "file": "_MODEL_INFO_",
+          "offset": 160,
+          "bytes": 46,
+          "sha256": "6fdf1352ff1887f86d678f5569756787a6a97454a0e42fcd86572f9392825ef7"
+        },
+        {
+          "file": "wn9_index",
+          "offset": 206,
+          "bytes": 1200,
+          "sha256": "1eedc9ede6a99e279f7a0e77fb9f4a8f1fee366a21fa082d0a09515f9076df34"
+        },
+        {
+          "file": "wn9_data",
+          "offset": 1406,
+          "bytes": 291201,
+          "sha256": "bf982eb08ae778b53183ff4fe6f9ed5a4df5d4b5d21600ed4a879048bf1493fe"
+        }
+      ]
+    }
+  },
+  "input": {
+    "official_model_rate_hz": 16000,
+    "channels": 1,
+    "bits": 16,
+    "current_k151_codec_rate_hz": 24000,
+    "streaming_conversion_required": true,
+    "model_runtime_chunk_samples_observed": null
+  },
+  "link_proof": {
+    "symbols": [
+      "4200e4ec T wakenet_link_probe_marker()",
+      "4200e444 t (anonymous namespace)::dormant_wakenet_facts(WakeNetFacts*, bool)",
+      "4200e884 T esp_srmodel_init",
+      "4200e910 T esp_wn_handle_from_name"
+    ],
+    "probe_source": {
+      "bytes": 1329,
+      "sha256": "f5d5734c87e22c08ad480565e5a7df27e56f6c2bb40e87a64696fe90c5def657"
+    },
+    "model_functions_invoked": false,
+    "neural_inference_executed": false
+  },
+  "build": {
+    "exit_code": 0,
+    "ninja_steps": 2108,
+    "hold_bin": {
+      "bytes": 334688,
+      "sha256": "30c37792b4a9a97e5363fce5a0f354b76ceb73cf2cd4c124b3ee9f22976b4691"
+    },
+    "elf_debug_file": {
+      "bytes": 8103120,
+      "sha256": "57c4b6d96cb2e1aafe5412cb5763528ff754e85044bdc8b9d10bf7076df7c538"
+    },
+    "static_size": {
+      "version": "1.2",
+      "total_size": 334572,
+      "layout": [
+        {
+          "name": "Flash Code",
+          "total": 0,
+          "used": 204858,
+          "free": 0,
+          "parts": {
+            ".text": {
+              "size": 204858
+            }
+          }
+        },
+        {
+          "name": "DIRAM",
+          "total": 341760,
+          "used": 65482,
+          "free": 276278,
+          "parts": {
+            ".text": {
+              "size": 42607
+            },
+            ".data": {
+              "size": 20035
+            },
+            ".bss": {
+              "size": 2840
+            }
+          }
+        },
+        {
+          "name": "Flash Data",
+          "total": 0,
+          "used": 50652,
+          "free": 0,
+          "parts": {
+            ".rodata": {
+              "size": 50376
+            },
+            ".appdesc": {
+              "size": 256
+            },
+            ".tdata": {
+              "size": 20
+            }
+          }
+        },
+        {
+          "name": "IRAM",
+          "total": 16384,
+          "used": 16384,
+          "free": 0,
+          "parts": {
+            ".text": {
+              "size": 15356
+            },
+            ".vectors": {
+              "size": 1028
+            }
+          }
+        },
+        {
+          "name": "RTC SLOW",
+          "total": 8192,
+          "used": 36,
+          "free": 8156,
+          "parts": {
+            ".force_slow": {
+              "size": 36
+            }
+          }
+        },
+        {
+          "name": "RTC FAST",
+          "total": 8192,
+          "used": 24,
+          "free": 8168,
+          "parts": {
+            ".rtc_reserved": {
+              "size": 24
+            }
+          }
+        }
+      ]
+    },
+    "not_full_runtime_size": true,
+    "model_partition_capacity_bytes": 1048576,
+    "layout_is_factory_compatible": false
+  },
+  "observations": {
+    "runtime_heap_peak_bytes": null,
+    "runtime_psram_usage_bytes": null,
+    "inference_latency_ms": null,
+    "real_microphone_recognition": null,
+    "factory_wake_user_confirmation": "PENDING",
+    "standalone_gpt_voice_turn": null
+  },
+  "scope": {
+    "throwaway_project_only": true,
+    "product_runtime_sources_changed": false,
+    "physical_device_accessed": false,
+    "paid_api_used": false,
+    "audio_captured_or_uploaded": false,
+    "firmware_installed": false,
+    "model_or_firmware_binaries_published": false
+  },
+  "sources": [
+    "https://github.com/m5stack/StackChan/blob/28b9f0c8bd6acd81cb3c70f1a93c3e373b39d400/firmware/sdkconfig.defaults",
+    "https://github.com/m5stack/StackChan/blob/28b9f0c8bd6acd81cb3c70f1a93c3e373b39d400/firmware/main/idf_component.yml",
+    "https://components.espressif.com/components/espressif/esp-sr/versions/2.4.7",
+    "https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/wake_word_engine/README.html"
+  ],
+  "notes": [
+    "SDK output includes vendor warnings. Build completed successfully.",
+    "Initial size --format json exited2 because IDF6.1 accepts json2; corrected esp_idf_size --format json2 succeeded.",
+    "ELF includes debug data and is not a flash or runtime-memory size. Static map is not runtime heap headroom.",
+    "The temporary development partition layout is not an installation proposal.",
+    "Exact model data files were verified inside the generated pack; no target model creation/inference was executed."
+  ]
+}

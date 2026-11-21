@@ -181,7 +181,7 @@ class OfflineVoiceCycle final {
     }
 
     const uint64_t epoch = session_.epoch();
-    if (!ledger_.reserve(unix_seconds, time_.load(), consent_.load())) {
+    if (!ledger_.reserve(unix_seconds, time_.load(), consent_.load(), epoch)) {
       (void)session_.recorded(monotonic_ms, epoch, true, false, time_.load());
       ledger_.cancel_permit();
       return false;

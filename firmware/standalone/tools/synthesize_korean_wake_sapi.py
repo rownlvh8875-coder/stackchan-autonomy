@@ -17,16 +17,20 @@ from pathlib import Path
 
 VOICE = "Microsoft Heami Desktop"
 SCHEMA = "stackchan-private-wake-corpus-v1"
+DEFAULT_WAKE_PHRASE = "조수"
+SUPPORTED_WAKE_PHRASES = ("조수", "조수야")
 
 
-def voice_plan():
-    """Synthetic utterances, not statistically independent speaker recordings."""
-    entries = [("enrollment", "wake", "조수야", 0)]
-    entries += [("calibration", "wake", "조수야", rate) for rate in (-3, -2, -1, 1, 2)]
+def voice_plan(wake_phrase: str = DEFAULT_WAKE_PHRASE):
+    """A new phrase requires NEW WAVs and a NEW acoustic profile."""
+    if wake_phrase not in SUPPORTED_WAKE_PHRASES:
+        raise ValueError("unsupported_wake_phrase")
+    entries = [("enrollment", "wake", wake_phrase, 0)]
+    entries += [("calibration", "wake", wake_phrase, rate) for rate in (-3, -2, -1, 1, 2)]
     entries += [
         ("calibration", "nonwake", phrase, rate)
         for phrase, rate in (
-            ("조수", 0),
+            ("조수야" if wake_phrase == "조수" else "조수", 0),
             ("조용히 해", -1),
             ("조수님", 2),
             ("주스야", -2),
@@ -38,14 +42,14 @@ def voice_plan():
             ("작업 시작해", 2),
         )
     ]
-    entries += [("evaluation", "wake", "조수야", rate) for rate in (3, 4)]
+    entries += [("evaluation", "wake", wake_phrase, rate) for rate in (3, 4)]
     entries += [
         ("evaluation", "nonwake", phrase, rate)
         for phrase, rate in (
             ("조심해", 1),
             ("주스 줘", 2),
             ("저기요", 0),
-            ("조선아", -2),
+            ("조수야" if wake_phrase == "조수" else "조선아", -2),
             ("준수야", 1),
             ("소주야", -1),
         )
@@ -117,7 +121,8 @@ def _canonicalize(raw: Path, output: Path) -> None:
         raise ValueError("invalid_synthesized_wav") from exc
 
 
-def generate(output: Path) -> dict:
+def generate(output: Path, *, wake_phrase: str = DEFAULT_WAKE_PHRASE) -> dict:
+    plan = voice_plan(wake_phrase)
     if os.name != "nt":
         raise ValueError("windows_sapi_required")
     repo = Path(__file__).resolve().parents[3]
@@ -131,7 +136,7 @@ def generate(output: Path) -> dict:
     try:
         spec = []
         counts = {}
-        for stage, label, phrase, rate in voice_plan():
+        for stage, label, phrase, rate in plan:
             key = f"{stage}_{label}"
             counts[key] = counts.get(key, 0) + 1
             number = counts[key]
@@ -173,6 +178,7 @@ def generate(output: Path) -> dict:
         return {
             "status": "LOCAL_SYNTHETIC_KOREAN_TTS_GENERATED",
             "voice": VOICE,
+            "wake_phrase": wake_phrase,
             "counts": counts,
             "synthetic_only": True,
             "independent_speakers_or_sessions_proven": False,
@@ -192,9 +198,12 @@ def main(argv=None):
     parser.add_argument(
         "--output", required=True, type=Path, help="NEW private directory outside Git checkout"
     )
+    parser.add_argument(
+        "--wake-phrase", choices=SUPPORTED_WAKE_PHRASES, default=DEFAULT_WAKE_PHRASE
+    )
     args = parser.parse_args(argv)
     try:
-        report = generate(args.output)
+        report = generate(args.output, wake_phrase=args.wake_phrase)
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     except (OSError, ValueError):

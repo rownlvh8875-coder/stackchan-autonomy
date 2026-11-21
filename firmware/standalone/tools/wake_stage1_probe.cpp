@@ -6,12 +6,22 @@
 #include "wake_wav_pcm.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <limits>
 #include <iostream>
 #include <optional>
+#include <string_view>
 #include <vector>
+
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 using namespace stackchan::standalone;
 
@@ -33,21 +43,154 @@ std::optional<std::vector<uint8_t>> read_private_file(
     return std::nullopt;
   return out;
 }
+// Exactly one bounded WAV from stdin, for local microphones without a temp file.
+// The caller alone owns recording permission and buffering; no audio is logged.
+std::optional<std::vector<uint8_t>> read_stdin_wav(size_t bound) {
+#if defined(_WIN32)
+  if (_setmode(_fileno(stdin), _O_BINARY) == -1) return std::nullopt;
+#endif
+  std::vector<uint8_t> out;
+  std::array<char, 4096> buffer{};
+  for (;;) {
+    std::cin.read(buffer.data(), buffer.size());
+    const auto count = std::cin.gcount();
+    if (count < 0 || static_cast<size_t>(count) > bound - out.size())
+      return std::nullopt;
+    for (std::streamsize i = 0; i < count; ++i)
+      out.push_back(static_cast<uint8_t>(buffer[static_cast<size_t>(i)]));
+    if (std::cin.eof()) break;
+    if (std::cin.bad() || std::cin.fail()) return std::nullopt;
+  }
+  if (out.empty()) return std::nullopt;
+  return out;
+}
 int refuse() {
   std::cerr << "OFFLINE_WAKE_PROBE_REJECTED\n";
   return 2;
+}
+
+std::optional<WakeFeature> feature_from_wav(std::span<const uint8_t> wav) {
+  auto pcm = parse_wake_pcm24k_wav(wav);
+  if (!pcm) return std::nullopt;
+  const auto feature = offline_wake_extract(*pcm);
+  std::fill(pcm->begin(), pcm->end(), int16_t{0});
+  return feature;
+}
+int calibration_failure(const std::array<WakeFeature,18>& features) {
+  auto best = [&](const WakeFeature& sample) {
+    float distance = std::numeric_limits<float>::infinity();
+    for (size_t i=0; i<3; ++i)
+      distance = std::min(distance,wake_dtw_distance(features[i],sample));
+    return distance;
+  };
+  float worst_pos = -1, best_neg = std::numeric_limits<float>::infinity();
+  size_t positive_trial = 0, negative_trial = 0;
+  for (size_t i=0; i<5; ++i) {
+    const float distance = best(features[3+i]);
+    if (distance > worst_pos) { worst_pos = distance; positive_trial = i+1; }
+  }
+  for (size_t i=0; i<10; ++i) {
+    const float distance = best(features[8+i]);
+    if (distance < best_neg) { best_neg = distance; negative_trial = i+1; }
+  }
+  if (!std::isfinite(worst_pos) || !std::isfinite(best_neg)) return refuse();
+  const bool overlap = worst_pos >= best_neg || best_neg <= 0;
+  const float threshold = (worst_pos+best_neg)*0.5f*256.f;
+  if (!overlap && threshold >= 1.f && threshold <= 65535.f) return refuse();
+  std::cerr << "{\"reason\":\"" << (overlap ? "calibration_not_separable" :
+      "calibration_threshold_out_of_range") << "\",\"worst_wake_trial\":" << positive_trial
+      << ",\"nearest_nonwake_trial\":" << negative_trial
+      << ",\"worst_wake_distance_q8\":" << std::setprecision(9) << worst_pos*256.f
+      << ",\"nearest_nonwake_distance_q8\":" << best_neg*256.f << "}\n";
+  return 2;
+}
+int private_pipe(std::string_view mode) {
+  constexpr size_t calibration_bytes = 18 * kWakeBytes;
+  auto bytes = read_stdin_wav(mode == "--calibrate" ? calibration_bytes :
+      kWakeWavMaxFileBytes + 2509);
+  if (!bytes) return refuse();
+  // Every input is bounded. Never echo raw audio/features in diagnostic modes.
+  if (mode == "--features") {
+    if (bytes->size() > kWakeWavMaxFileBytes) return refuse();
+    auto feature = feature_from_wav(*bytes);
+    std::fill(bytes->begin(), bytes->end(), uint8_t{0});
+    if (!feature) return refuse();
+#if defined(_WIN32)
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1) return refuse();
+#endif
+    std::cout.write(reinterpret_cast<const char*>(feature->quantized.data()), kWakeBytes);
+    std::fill(feature->quantized.begin(), feature->quantized.end(), int8_t{0});
+    return std::cout.good() ? 0 : refuse();
+  }
+  if (mode == "--calibrate") {
+    if (bytes->size() != calibration_bytes) return refuse();
+    std::array<WakeFeature, 18> features{};
+    for (size_t n = 0; n < features.size(); ++n) {
+      for (size_t i = 0; i < kWakeBytes; ++i)
+        features[n].quantized[i] = static_cast<int8_t>((*bytes)[n*kWakeBytes+i]);
+      for (size_t previous = 0; previous < n; ++previous)
+        if (features[n] == features[previous]) return refuse();
+    }
+    std::fill(bytes->begin(), bytes->end(), uint8_t{0});
+    auto profile = calibrate_wake(std::span(features).first(3),
+        std::span(features).subspan(3,5), std::span(features).subspan(8,10));
+    if (!profile) {
+      const int result = calibration_failure(features);
+      for (auto &feature : features) feature.quantized.fill(0);
+      return result;
+    }
+    for (auto &feature : features) feature.quantized.fill(0);
+    auto wire = encode_wake_profile(*profile);
+    if (!wire) return refuse();
+#if defined(_WIN32)
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1) return refuse();
+#endif
+    std::cout.write(reinterpret_cast<const char*>(wire->data()), wire->size());
+    std::fill(wire->begin(), wire->end(), uint8_t{0});
+    return std::cout.good() ? 0 : refuse();
+  }
+  if (bytes->size() < 2) return refuse();
+  const size_t profile_size = size_t((*bytes)[0])*256 + (*bytes)[1];
+  if (profile_size < 843 || profile_size > 2507 || bytes->size() <= 2+profile_size)
+    return refuse();
+  auto all = std::span<const uint8_t>(*bytes);
+  auto profile = decode_wake_profile(all.subspan(2,profile_size));
+  auto pcm = parse_wake_pcm24k_wav(all.subspan(2+profile_size));
+  std::fill(bytes->begin(), bytes->end(), uint8_t{0});
+  if (!profile || !pcm) return refuse();
+  auto feature = offline_wake_extract(*pcm);
+  std::fill(pcm->begin(), pcm->end(), int16_t{0});
+  if (!feature) {
+    // Valid PCM may naturally have no usable acoustic feature. This is a
+    // non-trigger, not malformed input or an unavailable helper process.
+    std::cout << "{\"accepted\":false,\"distance_q8\":null,\"limit_q8\":"
+              << profile->limit_q8 << "}\n";
+    return std::cout.good() ? 0 : refuse();
+  }
+  float best = std::numeric_limits<float>::infinity();
+  for (const auto &sample : profile->templates)
+    best = std::min(best, wake_dtw_distance(sample,*feature)*256.f);
+  std::cout << "{\"accepted\":" << (profile->accepts(*feature) ? "true" : "false")
+      << ",\"distance_q8\":" << std::setprecision(9) << best
+      << ",\"limit_q8\":" << profile->limit_q8 << "}\n";
+  return std::cout.good() ? 0 : refuse();
 }
 } // namespace
 
 int main(int argc, char** argv) {
   if (argc != 3) return refuse();
+  const std::string_view mode(argv[1]);
+  if ((mode == "--features" || mode == "--calibrate" || mode == "--score") &&
+      std::string_view(argv[2]) == "-") return private_pipe(mode);
   auto raw_profile = read_private_file(argv[1], 2507);
   if (!raw_profile) return refuse();
   const auto profile = decode_wake_profile(*raw_profile);
   std::fill(raw_profile->begin(), raw_profile->end(), uint8_t{0});
   if (!profile) return refuse();
 
-  auto wav = read_private_file(argv[2], kWakeWavMaxFileBytes);
+  auto wav = std::string_view(argv[2]) == "-" ?
+      read_stdin_wav(kWakeWavMaxFileBytes) :
+      read_private_file(argv[2], kWakeWavMaxFileBytes);
   if (!wav) return refuse();
   auto pcm = parse_wake_pcm24k_wav(*wav);
   std::fill(wav->begin(), wav->end(), uint8_t{0});

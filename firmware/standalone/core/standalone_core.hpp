@@ -225,14 +225,16 @@ enum class State : uint8_t {
 // epoch to make late HTTP/audio responses inert. No implicit retry/restart.
 class Session {
  public:
-  void boot(uint64_t now, bool configured, bool enrolled) {
+  // Readiness is either a validated legacy profile or an explicitly prepared
+  // built-in model. It never enables cloud calls or initializes a detector.
+  void boot(uint64_t now, bool configured, bool wake_source_ready) {
     configured_ = configured;
-    enrolled_ = enrolled;
+    wake_source_ready_ = wake_source_ready;
     cloud_enabled_ = false;  // Paid calls require explicit owner enable.
     ++epoch_;
     last_ms_ = now;
     state_ = !configured_ ? State::setup_required :
-             !enrolled_ ? State::enroll_required : State::wake_wait;
+             !wake_source_ready_ ? State::enroll_required : State::wake_wait;
   }
   void cloud_enable(bool enabled) { cloud_enabled_ = enabled; }
   State state() const { return state_; }
@@ -282,7 +284,7 @@ class Session {
     ++epoch_;
     last_ms_ = now;
     state_ = !configured_ ? State::setup_required :
-             !enrolled_ ? State::enroll_required : State::wake_wait;
+             !wake_source_ready_ ? State::enroll_required : State::wake_wait;
     return true;
   }
   void tick(uint64_t now) { (void)check(now); }
@@ -317,7 +319,7 @@ class Session {
   }
   State state_ = State::setup_required;
   bool configured_ = false;
-  bool enrolled_ = false;
+  bool wake_source_ready_ = false;
   bool cloud_enabled_ = false;
   uint64_t epoch_ = 0;
   uint64_t last_ms_ = 0;

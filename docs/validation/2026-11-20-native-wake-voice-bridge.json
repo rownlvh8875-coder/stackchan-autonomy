@@ -1,0 +1,29 @@
+{
+  "status": "COMPILED_DORMANT_NOT_INSTALL_APPROVAL",
+  "base": "14126606eb9270f44767ec4dd3c45d14863a948e",
+  "idf_commit": "fff9895c82d744c7237be8847347bdd1b07c6643",
+  "esp_sr_version": "2.4.7",
+  "esp_sr_component_hash": "809d0041cdddd98a278f0d5afef7bb60a451290577b98cf718dfffc91bdcbd9b",
+  "target": "esp32s3",
+  "app": {
+    "size": 325792,
+    "sha256": "d49f8db217e5d2692fa39851f40c7d580bf77aba4030253a7ef2f7b7a014a0fc"
+  },
+  "elf": {
+    "size": 7951624,
+    "sha256": "23d1186d44f7352930ef08a65b6348c373a10b50f91d82f727b2df9297cd8610"
+  },
+  "static_diram_bytes": 59030,
+  "source_sha256": {
+    "firmware/standalone/esp_app/main/k151_wakenet_port.cpp": "27b54ea44cbc7f50cf28b2bce1a68f14de8d61dcc80c21e0aea813d15b0bc505",
+    "firmware/standalone/esp_app/main/k151_wakenet_port.hpp": "dbef2781a5e0d5ebf3bd0a23c69f8e8c448d3d3c64c4ffc90aa0d9eb65c702ec"
+  },
+  "model_assets_in_app": false,
+  "model_started": false,
+  "neural_inference_tested": false,
+  "device_accessed": false,
+  "real_api_called": false,
+  "app_main": "HOLD: link marker only",
+  "runtime_heap_psram_latency": "UNVERIFIED",
+  "factory_install_recovery_compatibility": "UNVERIFIED"
+}

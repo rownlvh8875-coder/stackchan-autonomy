@@ -50,6 +50,26 @@ int main(){
  BoundedReply overrun(Endpoint::responses);
  assert(overrun.begin(200,"application/json",2,false));
  assert(!overrun.append(pcm));
+ BoundedReply declared(Endpoint::speech);
+ assert(declared.begin(200, "audio/pcm", 6, false));
+ assert(declared.append(pcm) && declared.append(std::span{pcm}.first(2)));
+ assert(declared.data().capacity() <= 6 && declared.finish(true));
+ for (bool chunked_body : {false, true}) {
+   BoundedReply full(Endpoint::speech);
+   const auto length = chunked_body ? std::nullopt : std::optional{kMaxSpeechBytes};
+   assert(full.begin(200, "audio/pcm", length, chunked_body));
+   const std::array<uint8_t, 1024> silence{};
+   for (size_t offset = 0; offset < kMaxSpeechBytes; offset += silence.size()) {
+     assert(full.append(std::span{silence}.first(
+         std::min(silence.size(), kMaxSpeechBytes - offset))));
+     assert(full.data().capacity() <= kMaxSpeechBytes);
+   }
+   assert(full.finish(true));
+   auto received = full.take_bytes();
+   const auto samples = decode_pcm(received);
+   assert(received.size() == kMaxSpeechBytes);
+   assert(samples && samples->size() == kMaxSpeechBytes / 2);
+ }
  std::array<uint8_t,3> odd{1,2,3};
  assert(!decode_pcm(odd));
  std::cout<<"HTTP/WAV/JSON/PCM offline wire PASS\n";

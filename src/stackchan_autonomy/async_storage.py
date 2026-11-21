@@ -4,6 +4,8 @@ import asyncio
 import contextvars
 from functools import partial
 
+from .timing_diagnostics import storage_trace
+
 
 async def finish_cleanup(future: asyncio.Future):
     """Finish resource cleanup before propagating even repeated caller cancellation."""
@@ -40,25 +42,48 @@ class AsyncStorage:
             future.exception()  # Retrieve errors even if the awaiting caller was canceled.
 
     async def call(self, operation, *args, **kwargs):
+        trace = storage_trace()
+        try:
+            return await self._call(operation, args, kwargs, trace)
+        except asyncio.CancelledError:
+            if trace is not None:
+                trace.probe.interrupt(trace)
+                if trace.stage in {"serial_wait", "delivery"}:
+                    trace.advance("cancelled")
+            raise
+
+    async def _call(self, operation, args, kwargs, trace):
         if self._closed:
             raise RuntimeError("storage worker closed")
         # Admission happens before submission. The worker's completion owns this slot,
         # so caller cancellation cannot submit competing IO or exhaust the shared pool.
         await self._slot.acquire()
+        if trace is not None:
+            trace.advance("executor_wait")
         if self._closed:
             self._slot.release()
             raise RuntimeError("storage worker closed")
         try:
             context = contextvars.copy_context()
-            future = asyncio.get_running_loop().run_in_executor(
-                None, context.run, partial(operation, *args, **kwargs)
-            )
+            work = partial(operation, *args, **kwargs)
+            if trace is not None:
+                work = partial(trace.run, work)
+            future = asyncio.get_running_loop().run_in_executor(None, context.run, work)
         except BaseException:
             self._slot.release()
             raise
         self._pending.add(future)
         future.add_done_callback(self._finished)
-        return await asyncio.shield(future)
+        cancelled = False
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+        finally:
+            # A cancelled caller must not call a still-running worker 'delivered'.
+            if trace is not None and future.done() and not cancelled:
+                trace.advance("finished")
 
     async def drain(self):
         while self._pending:

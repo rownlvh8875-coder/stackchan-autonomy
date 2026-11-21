@@ -18,9 +18,11 @@ from .engine import AutonomyEngine
 from .models import ControlLossReason, Event, EventKind, State, StrictModel
 from .robot import FakeRobotAdapter
 from .settings import Settings
+from .timing_diagnostics import TimingProbe
 
 
 class SoakConfig(StrictModel):
+    diagnostics: bool = False
     cycles: int | None = Field(default=1000, ge=1, le=10_000_000)
     duration_s: float | None = Field(default=None, gt=0, le=86400)
     interval_s: float = Field(default=0, ge=0, le=60)
@@ -54,6 +56,7 @@ class SoakFailure(StrictModel):
 
 
 class SoakReport(StrictModel):
+    timing_diagnostics: dict | None = None
     passed: bool
     cycles: int
     measured_cycles: int
@@ -130,6 +133,11 @@ async def run_soak(config: SoakConfig) -> SoakReport:
     previous_finished = started
     previous_wall = time.time()
     engine = None
+    probe = TimingProbe() if config.diagnostics else None
+    collection = probe.collect() if probe is not None else None
+    if probe is not None:
+        collection.__enter__()
+        probe.start_loop_monitor(asyncio.get_running_loop())
     try:
         async with AsyncExitStack() as stack:
             directory = stack.enter_context(tempfile.TemporaryDirectory(prefix="stackchan soak "))
@@ -273,6 +281,7 @@ async def run_soak(config: SoakConfig) -> SoakReport:
         if remaining:
             violations.add("tasks_remaining")
         return SoakReport(
+            timing_diagnostics=probe.snapshot() if probe is not None else None,
             passed=not violations,
             cycles=cycles,
             measured_cycles=max(0, cycles - config.warmup_cycles),
@@ -299,6 +308,9 @@ async def run_soak(config: SoakConfig) -> SoakReport:
             max_wall_clock_drift_s=max_clock_drift,
         )
     finally:
+        if probe is not None:
+            probe.stop_loop_monitor()
+            collection.__exit__(None, None, None)
         if owns_tracer:
             tracemalloc.stop()
 
@@ -313,9 +325,13 @@ def main(argv=None) -> int:
     parser.add_argument("--warmup-cycles", default="100")
     parser.add_argument("--restart-every", default="250")
     parser.add_argument("--report", type=Path, help="optional metadata-only JSON report path")
+    parser.add_argument(
+        "--diagnostics", action="store_true", help="bounded numerical queue/SQLite/loop timings"
+    )
     args = parser.parse_args(argv)
     try:
         config = SoakConfig(
+            diagnostics=args.diagnostics,
             cycles=None if args.duration_s is not None else int(args.cycles or "1000"),
             duration_s=float(args.duration_s) if args.duration_s is not None else None,
             interval_s=float(args.interval_s),

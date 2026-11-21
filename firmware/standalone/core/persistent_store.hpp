@@ -89,16 +89,35 @@ class PersistentGuard {
     return true;
   }
 
+  // Trusted local detector only; never a wire/cloud operation. This RAM-only
+  // grant proves one builtin hit, not enrollment or a paid-request permit.
+  bool admit_builtin_wake(uint64_t wake_epoch, bool local_owner, bool model_ready) {
+    if (fatal_ || !budget_ || !local_owner || !model_ready || !wake_epoch ||
+        wake_epoch <= last_builtin_epoch_ || permit_active_) {
+      cancel_permit();
+      return false;
+    }
+    builtin_wake_epoch_ = wake_epoch;
+    last_builtin_epoch_ = wake_epoch;
+    return true;
+  }
+
   // Caller must check SNTP, trusted epoch and paid-request owner consent.
   // The first remote request is forbidden until NVS commit and read-back pass.
-  bool reserve(uint64_t epoch, bool trusted_clock, bool paid_owner_consent) {
-    if (fatal_ || !paid_owner_consent || !budget_ || permit_active_) return false;
+  bool reserve(uint64_t epoch, bool trusted_clock, bool paid_owner_consent,
+               uint64_t wake_epoch = 0) {
+    const bool builtin = builtin_wake_epoch_ && *builtin_wake_epoch_ == wake_epoch;
+    const bool mismatch = builtin_wake_epoch_ && !builtin;
+    builtin_wake_epoch_.reset(); // Consumed even if a later gate refuses.
+    if (mismatch || (wake_epoch && !profile_ && !builtin) || fatal_ ||
+        !paid_owner_consent || !budget_ || permit_active_) return false;
     const bool ok = budget_->reserve(epoch, trusted_clock, [this](std::span<const uint8_t> wire) {
       return verified_commit(kBudgetKey, wire);
     });
     if (budget_->faulted()) fatal_ = true;
     if (ok && !fatal_) {
       permit_active_ = true;
+      builtin_permit_ = builtin;
       next_step_ = 0;
     }
     return ok && !fatal_;
@@ -111,17 +130,20 @@ class PersistentGuard {
   // Consume the permit BEFORE each outbound API send. Even if the HTTP
   // request times out, the same step cannot be authorized twice.
   bool authorize_step(PaidStage step, bool paid_owner_consent, bool trusted_clock) {
-    if (fatal_ || !permit_active_ || !budget_ || !profile_ ||
+    if (fatal_ || !permit_active_ || !budget_ || (!profile_ && !builtin_permit_) ||
         !paid_owner_consent || !trusted_clock ||
         static_cast<unsigned>(step) != next_step_ || next_step_ >= 3) return false;
     ++next_step_;
-    if (next_step_ == 3) permit_active_ = false;
+    if (next_step_ == 3) { permit_active_ = false; builtin_permit_ = false; }
     return true;
   }
 
   // STOP, error or timeout discards unused tokens without refund. The durable
   // conversation/3-request reservation remains charged after cancellation.
-  void cancel_permit() { permit_active_ = false; next_step_ = 0; }
+  void cancel_permit() {
+    permit_active_ = false; next_step_ = 0;
+    builtin_permit_ = false; builtin_wake_epoch_.reset();
+  }
   bool permit_active() const { return permit_active_; }
 
  private:
@@ -145,6 +167,9 @@ class PersistentGuard {
   bool fatal_ = false;
   bool permit_active_ = false;
   unsigned next_step_ = 0;
+  std::optional<uint64_t> builtin_wake_epoch_;
+  uint64_t last_builtin_epoch_ = 0;
+  bool builtin_permit_ = false;
 };
 
 }  // namespace stackchan::standalone
