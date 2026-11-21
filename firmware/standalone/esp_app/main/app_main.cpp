@@ -12,6 +12,7 @@
 #include "wake_voice_entry.hpp" // Compile-only: never instantiate on startup.
 #include "question_capture.hpp" // Compile-only question segmentation.
 #include "k151_mic_reader.hpp" // Dormant codec -> 10ms frame bridge.
+#include "k151_mic_wake_trial.hpp" // Link proof only; no microphone trial starts here.
 #include "voice_turn_coordinator.hpp" // Compile-only mic/session/API controller.
 #include "guarded_voice_speaker.hpp" // Compile-only speaker lifecycle gate.
 #include "k151_pcm_speaker_sink.hpp" // Dormant, 10ms-bounded K151 output.
@@ -66,6 +67,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151VoiceDecoder::compiled_link_marker());
 
   ESP_LOGI(kTag, "%s", K151WakeNetPort::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151MicWakeTrial::compiled_link_marker());
 
   IsolatedNvs nvs;
   if (!nvs.init_without_erase()) {

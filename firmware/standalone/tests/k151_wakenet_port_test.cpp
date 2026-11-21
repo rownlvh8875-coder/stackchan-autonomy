@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Complete vendor interface with host C ABI doubles, not neural inference.
 #include "k151_wakenet_port.hpp"
+#include "k151_mic_only_evidence.hpp"
+#include "k151_mic_wake_trial.hpp"
 #include "k151_model_assets.hpp"
 #include "synthetic_wake_probe.hpp"
 #include <esp_partition.h>
@@ -47,6 +49,7 @@ int detects=0,cleans=0,creates=0,ret=0;
 srmodel_list_t* shared=nullptr;
 std::atomic_bool owner{true},stop{false};
 int finds=0,hashes=0;
+int mic_trial_handoffs=0;
 std::array<uint8_t,292607> embedded{};
 esp_partition_t partition{};
 model_iface_data_t* create(const void* n,det_mode_t mode) {
@@ -54,7 +57,7 @@ model_iface_data_t* create(const void* n,det_mode_t mode) {
   assert(mode==DET_MODE_90 && !active_data);
   ++creates;
   if(scenario=="local_revoke_create")owner=false;
-  if(scenario=="embedded_stop_create")stop=true;
+  if(scenario=="embedded_stop_create" || scenario=="mic_trial_stop_create")stop=true;
   if(scenario=="reset_stop_create" && creates==2)stop=true;
   if(scenario=="create_failure" || (scenario=="reset_create_failure" && creates==2))return nullptr;
   auto& fresh=contexts[static_cast<size_t>(creates-1)%contexts.size()];
@@ -119,8 +122,8 @@ extern "C" psa_status_t psa_hash_compute(psa_algorithm_t alg,const uint8_t* p,si
     0x02,0x55,0x85,0x5e,0x56,0xbf,0x72,0xd1,0xe0,0x72,0xd2,0xe0,0xcb,0xee,0x4f,0xb3,
     0xce,0x1a,0xc2,0xc4,0x8f,0x7f,0xee,0x6c,0x8c,0xd5,0x91,0xf8,0x3e,0x59,0xed,0x95};
   std::copy(expected.begin(),expected.end(),hash);
-  if(scenario=="embedded_bad_hash")hash[31]^=1;
-  if(scenario=="embedded_revoke_hash")owner=false;
+  if(scenario=="embedded_bad_hash" || scenario=="mic_trial_bad_hash")hash[31]^=1;
+  if(scenario=="embedded_revoke_hash" || scenario=="mic_trial_revoke_hash")owner=false;
   return scenario=="embedded_hash_error"?-1:0;
 }
 extern "C" srmodel_list_t* srmodel_load(const void* p) {
@@ -147,6 +150,20 @@ extern "C" char* esp_srmodel_filter(srmodel_list_t* l,const char* a,const char* 
 extern "C" const esp_wn_iface_t* esp_wn_handle_from_name(const char* n) {
   assert(std::strcmp(n,name)==0);events+='h';return scenario=="missing_iface"?nullptr:&iface;
 }
+
+// The codec suite executes the real consumer. This seam observes the handoff
+// after the concrete WakeNet port's DROM/SHA/SDK preparation on this side.
+K151MicWakeTrialResult K151MicWakeTrial::run_prepared(
+    const std::atomic_bool& supplied_owner, const std::atomic_bool& supplied_stop,
+    const K151MicOnlyEvidence& evidence, std::unique_ptr<NativeWakePort> model) {
+  ++mic_trial_handoffs;
+  assert(&supplied_owner==&owner && &supplied_stop==&stop && owner && !stop);
+  assert(evidence.verified() && model && model->ready());
+  assert((model->format()==NativeWakeFormat{16000,480,1,16}));
+  assert(events=="efhc" && active_data && shared==&list && hashes==1 && finds==0);
+  return K151MicWakeTrialResult::detected;
+}
+
 int main(int argc,char** argv) {
   assert(argc==2);scenario=argv[1];
   list.num=scenario=="multiple"?2:1;list.model_name=names;
@@ -161,6 +178,33 @@ int main(int argc,char** argv) {
   if(scenario=="no_detect")iface.detect=nullptr;
   if(scenario=="no_clean")iface.clean=nullptr;
   if(scenario=="no_destroy")iface.destroy=nullptr;
+  if(scenario.starts_with("mic_trial_")) {
+    using Result = K151MicWakeTrialResult;
+    owner=scenario!="mic_trial_no_owner";
+    stop=scenario=="mic_trial_stopped";
+    const K151MicOnlyEvidence evidence{true,true,scenario!="mic_trial_no_evidence",true};
+    const auto input=scenario=="mic_trial_bad_size"?std::span(embedded).first(10):std::span(embedded);
+    K151MicWakeTrial trial;
+    const auto r=trial.run_embedded(owner,stop,evidence,input);
+    if (scenario=="mic_trial_ok") {
+      assert(r==Result::detected && mic_trial_handoffs==1 && hashes==1 && events=="efhcdb");
+    } else {
+      assert(mic_trial_handoffs==0);
+      if(scenario=="mic_trial_bad_hash" || scenario=="mic_trial_bad_size")assert(r==Result::fault);
+      else if(scenario=="mic_trial_stopped" || scenario=="mic_trial_revoke_hash" ||
+              scenario=="mic_trial_stop_create")assert(r==Result::stopped);
+      else assert(r==Result::denied);
+      assert(hashes==(scenario=="mic_trial_bad_hash" || scenario=="mic_trial_revoke_hash" ||
+                      scenario=="mic_trial_stop_create"?1:0));
+      assert(events==(scenario=="mic_trial_stop_create"?"efhcdb":""));
+    }
+    const auto before=events;
+    const auto hash_count=hashes;
+    owner=true;stop=false;
+    assert(trial.run_embedded(owner,stop,{true,true,true,true},embedded)==Result::denied);
+    assert(hashes==hash_count && events==before && !active_data && !shared && finds==0);
+    return 0;
+  }
   if(scenario=="bench_reset_bridge") {
     K151WakeNetPort p;
     assert(p.prepare_embedded(owner,stop,embedded));

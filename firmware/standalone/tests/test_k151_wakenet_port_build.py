@@ -38,6 +38,7 @@ def compiled(tmp_path_factory):
             str(BASE / "esp_app/main/k151_wakenet_port.cpp"),
             str(BASE / "esp_app/main/k151_model_assets.cpp"),
             str(BASE / "esp_app/main/k151_embedded_assets.cpp"),
+            str(BASE / "esp_app/main/k151_mic_wake_trial_embedded.cpp"),
             "-o",
             str(binary),
         ],
@@ -121,6 +122,14 @@ def compiled(tmp_path_factory):
         "reset_stop_create",
         "reset_revoke_format",
         "bench_reset_bridge",
+        "mic_trial_ok",
+        "mic_trial_no_evidence",
+        "mic_trial_no_owner",
+        "mic_trial_stopped",
+        "mic_trial_bad_size",
+        "mic_trial_bad_hash",
+        "mic_trial_revoke_hash",
+        "mic_trial_stop_create",
     ],
 )
 def test_sdk_wake_case(compiled, case):

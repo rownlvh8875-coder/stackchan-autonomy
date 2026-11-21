@@ -206,6 +206,7 @@ def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
         "k151_bounded_i2s.hpp",
         "k151_codec_control.hpp",
         "k151_mic_reader.hpp",
+        "k151_mic_only_evidence.hpp",
         "k151_mic_wake_trial.hpp",
         "k151_mic_wake_trial.cpp",
         "k151_contract.hpp",

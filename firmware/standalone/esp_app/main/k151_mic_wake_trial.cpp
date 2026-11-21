@@ -2,6 +2,7 @@
 #include "k151_mic_wake_trial.hpp"
 #include "k151_mic_reader.hpp"
 #include <esp_timer.h>
+#include <utility>
 
 namespace stackchan::standalone {
 namespace {
@@ -47,13 +48,17 @@ K151MicWakeTrialResult K151MicWakeTrial::run(const std::atomic_bool& owner,
                                            const std::atomic_bool& stop,
                                            const K151MicOnlyEvidence& evidence,
                                            std::unique_ptr<NativeWakePort> model) {
-  if (attempted_) return Result::denied;
-  attempted_ = true;
-  if (stop.load()) return Result::stopped;
-  if (!owner.load() || !evidence.verified()) return Result::denied;
-  if (!model || !model->ready() || !input_.configure(model->format())) return Result::fault;
+  if (const auto denied = begin(owner, stop, evidence)) return *denied;
+  return run_prepared(owner, stop, evidence, std::move(model));
+}
 
+K151MicWakeTrialResult K151MicWakeTrial::run_prepared(const std::atomic_bool& owner,
+                                                     const std::atomic_bool& stop,
+                                                     const K151MicOnlyEvidence& evidence,
+                                                     std::unique_ptr<NativeWakePort> model) {
   const auto allowed = [&] { return owner.load() && !stop.load(); };
+  if (!allowed()) return Result::stopped;
+  if (!model || !model->ready() || !input_.configure(model->format())) return Result::fault;
   if (!allowed()) return Result::stopped;
   if (!model->reset() || !input_.matches(*model)) return Result::fault;
   if (!allowed()) return Result::stopped;
