@@ -154,7 +154,7 @@
     "independent_verify_elapsed_s": 9.638,
     "factory_boot_requested": true,
     "usb_pnp_com3_observed_after_reset": true,
-    "factory_ui_status": "awaiting_user_observation"
+    "factory_ui_status": "confirmed_by_user_after_restore"
   },
   "metadata": {
     "stages": [
