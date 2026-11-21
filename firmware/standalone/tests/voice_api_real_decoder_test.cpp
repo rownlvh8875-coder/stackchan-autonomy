@@ -2,6 +2,7 @@
 // drivers, API keys, microphone, audio files, or live OpenAI requests.
 #include "voice_api_bridge.hpp"
 #include "k151_voice_decode.hpp"
+#include "wire_memory_probe.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -142,6 +143,30 @@ struct Fixture {
 };
 
 int main() {
+  {
+    std::vector<int16_t> decoded;
+    unsigned observed = 0;
+    const auto observe = [&](httpwire::Endpoint endpoint, const auto& raw, const auto& pcm) {
+      assert(raw.size() == httpwire::response_cap(endpoint));
+      assert(raw.capacity() <= httpwire::response_cap(endpoint));
+      if (observed++ == 0) {
+        assert(endpoint == httpwire::Endpoint::responses && pcm.empty());
+      } else {
+        assert(endpoint == httpwire::Endpoint::speech);
+        assert(pcm.size() == OfflineVoiceCycle::kMaxSynthFrames);
+        assert(std::all_of(pcm.begin(), pcm.end(), [](auto v) { return v == 0; }));
+      }
+      return true;
+    };
+    assert(probe_wire_memory(decoded, [] { return true; }, observe));
+    assert(observed == 2);
+    decoded.clear();
+    observed = 0;
+    // Cancel while filling the first body. No decoded data or peak observation.
+    unsigned calls = 0;
+    assert(!probe_wire_memory(decoded, [&] { return ++calls < 16; }, observe));
+    assert(observed == 0 && decoded.empty() && calls == 16);
+  }
   {
     Fixture f;
     assert(f.run());

@@ -3,6 +3,8 @@
 #include "bench_gate.hpp"
 #include "k151_wakenet_port.hpp"
 #include "audio_wipe.hpp"
+#include "audio_memory_admission.hpp"
+#include "wire_memory_probe.hpp"
 #include <driver/usb_serial_jtag.h>
 #include <esp_heap_caps.h>
 #include <esp_memory_utils.h>
@@ -63,22 +65,39 @@ void measure() {
   snapshot("model_resident");
   if(!allowed())return;
   try {
-    // Exact current 8s question and 20s TTS mono/24k PCM limits, default allocator.
-    Pcm question{192000};
+    Pcm question{OfflineVoiceCycle::kMaxRecordedFrames};
     if(!allowed())return;
-    Pcm tts{480000};
+    Pcm tts{0};
+    const bool q_external=esp_ptr_external_ram(question.samples.data());
+    if(!q_external) {
+      std::puts("{\"result\":\"ALLOCATOR_PLACEMENT_DENIED\"}");return;
+    }
+    const bool wire_ok = probe_wire_memory(
+        tts.samples, allowed, [&](httpwire::Endpoint endpoint, const auto& raw, const auto& pcm) {
+          const bool speech = endpoint == httpwire::Endpoint::speech;
+          const bool raw_external = esp_ptr_external_ram(raw.data());
+          const bool pcm_external = speech && esp_ptr_external_ram(pcm.data());
+          snapshot(speech ? "model_question_wire_and_decoded_pcm" : "model_question_json_decoded");
+          std::printf("{\"wire_probe\":\"%s\",\"body_bytes\":%u,\"body_capacity_bytes\":%u,"
+                      "\"body_in_psram\":%s,\"decoded_pcm_capacity_bytes\":%u,"
+                      "\"decoded_pcm_in_psram\":%s}\n",
+                      speech ? "speech" : "json", static_cast<unsigned>(raw.size()),
+                      static_cast<unsigned>(raw.capacity()), raw_external ? "true" : "false",
+                      static_cast<unsigned>(pcm.capacity() * sizeof(int16_t)),
+                      pcm_external ? "true" : "false");
+          return raw.capacity() <= httpwire::response_cap(endpoint) &&
+                 (!speech || (raw_external && pcm_external));
+        });
+    if (!wire_ok) {
+      std::puts(allowed() ? "{\"result\":\"WIRE_PROBE_DENIED\"}" : "{\"result\":\"BENCH_STOPPED\"}");
+      return;
+    }
     if(!allowed())return;
     Pcm chunk{wake.format().chunk_samples};
     snapshot("model_question_tts");
-    const bool q_external=esp_ptr_external_ram(question.samples.data());
-    const bool t_external=esp_ptr_external_ram(tts.samples.data());
     std::printf("{\"question_bytes\":384000,\"tts_bytes\":960000,"
-        "\"question_in_psram\":%s,\"tts_in_psram\":%s,\"chunk_samples\":%u}\n",
-        q_external?"true":"false",t_external?"true":"false",
+        "\"question_in_psram\":true,\"tts_in_psram\":true,\"chunk_samples\":%u}\n",
         static_cast<unsigned>(chunk.samples.size()));
-    if(!q_external || !t_external) {
-      std::puts("{\"result\":\"ALLOCATOR_PLACEMENT_DENIED\"}");return;
-    }
     int64_t max_us=0;unsigned completed=0,over100ms=0,matches=0;
     bool failed=false;
     for(unsigned i=0;i<64 && allowed();++i) {
@@ -94,7 +113,8 @@ void measure() {
     }
     snapshot("synthetic_inference");
     std::printf("{\"result\":\"%s\",\"chunks\":%u,\"max_detect_us\":%lld,"
-        "\"over_100ms\":%u,\"synthetic_matches\":%u,\"tls_measured\":false,"
+        "\"over_100ms\":%u,\"synthetic_matches\":%u,\"wire_decoders_exercised\":true,"
+        "\"tls_measured\":false,"
         "\"operating_admission\":false}\n",
         !failed && allowed() && completed==64?"FINITE_BENCH_COMPLETED":"BENCH_STOPPED",
         completed,static_cast<long long>(max_us),over100ms,matches);

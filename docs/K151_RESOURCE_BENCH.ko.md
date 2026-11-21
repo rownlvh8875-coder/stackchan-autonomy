@@ -24,12 +24,26 @@
 취소하며, 이미 실행 중인 SDK 동기 호출을 강제 선점하지는 못한다.
 이는 로컬 실험자의 명시적 시작이며 인증된 사용자 신원이나 운영 STOP 증거가 아니다.
 
-측정 대상은 실제 model context 전후의 capability별 free/largest/minimum heap,
+기존 실물 실행의 측정 대상은 실제 model context 전후의 capability별 free/largest/minimum heap,
 동시 질문384000bytes/TTS960000bytes vector의 실제 PSRAM 배치, 합성 무음
 64chunk의 최대 detect 시간/100ms 초과 수다. 모델 flash 길이를 RAM으로
 환산하지 않는다. PCM은 기존 volatile wipe를 재사용한다. TLS/JSON/네트워크와
 codec/DMA 동시 부하는 **미측정**, operating_admission은 항상false다.
 64chunk 완료도 실제 호출어 인식이나 GPT 대화 성공이 아니다.
+
+후속 빌드는 모델과 8초 질문 버퍼가 살아 있는 동안 256KiB 합성 JSON과
+960,000바이트 합성 speech body를 기존 `BoundedReply`와 `K151VoiceDecoder`에
+차례로 공급한다. `model_question_wire_and_decoded_pcm` 단계에서 raw body와
+디코딩한 960,000바이트 PCM이 동시에 살아 있다. 이때 세 버퍼의 본문 합계는
+2,304,000바이트다. 실제 heap 수치에는 allocator와 모델이 함께 반영되며,
+`body_capacity_bytes`와 `decoded_pcm_capacity_bytes`로 실제 vector capacity를
+따로 출력한다. JSON 단계의 minimum은 decoder 안의 임시 할당도 포함하는 누적
+watermark다. 모든 입력은 메모리에서 생성한 합성 데이터이고 USB에는 수치만 출력한다.
+기존 64chunk 합성 추론에는 디코딩 PCM과 질문 버퍼를 계속 유지한다.
+
+새 자원 진단은 HTTP 본문 처리만 실행한다. TLS handshake/certificate chain,
+network stack과 실제 codec/DMA의 동시 peak는 별도 측정 대상이다.
+운영 admission 플래그는 계속 false이며 이번 빌드의 실물 실행은 별도 승인 범위다.
 
 ## 산출물과 변경 범위
 

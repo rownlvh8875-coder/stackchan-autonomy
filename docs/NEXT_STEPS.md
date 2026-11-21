@@ -1,5 +1,14 @@
 # Next steps
 
+## 2026-11-21 코드 후속: 모델과 실제 응답 버퍼의 메모리
+
+8초 질문, 최대 HTTP speech body, 디코딩 PCM이 겹치는 2,304,000바이트를
+메모리 사전검사에 반영했다. HTTP 응답의 vector가 본문 제한보다 큰 용량을
+요청하지 않도록 성장 범위를 제한했다. 기존 자원 진단에서 모델을 유지한 채
+최대 합성 JSON과 PCM body를 실제 decoder로 처리하고 heap/배치를 관측할 수 있다.
+TLS handshake, 네트워크 및 실제 codec 부하의 동시 peak는 별도 측정이 필요하다.
+[자원 진단 범위](K151_RESOURCE_BENCH.ko.md).
+
 ## 2026-11-21 Windows 후속: lease 시험 실패 전용 계측
 
 I2S 해제 코드8a34bc1의 실제 CI는7/9다. Push Windows3.12는 기존 remaining-lifetime

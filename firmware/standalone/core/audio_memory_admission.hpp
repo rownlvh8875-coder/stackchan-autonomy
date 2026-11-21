@@ -10,19 +10,21 @@
 
 namespace stackchan::standalone {
 
-// Raw peak bytes only: one 8s question may coexist with one 20s TTS buffer.
-// std::vector capacity, TLS, JSON, wake scratch and decoder memory ADD overhead.
+// The question remains live while the decoder reads the HTTP speech body and
+// builds the playback PCM. TLS, JSON and allocator overhead are measured separately.
 inline constexpr size_t kQuestionPcmBytes =
     OfflineVoiceCycle::kMaxRecordedFrames * sizeof(int16_t); // 384000B
 inline constexpr size_t kSynthPcmBytes =
     OfflineVoiceCycle::kMaxSynthFrames * sizeof(int16_t);   // 960000B
 inline constexpr size_t kRawConcurrentPcmBytes =
     kQuestionPcmBytes + kSynthPcmBytes;                     // 1344000B
+inline constexpr size_t kConcurrentSpeechPayloadBytes =
+    kRawConcurrentPcmBytes + kSynthPcmBytes;                // 2304000B
 
 // Deliberately conservative *policy margins*, not measured K151 heap usage.
 inline constexpr size_t kUnmeasuredOverheadReserve = 512 * 1024;
 inline constexpr size_t kRequiredPsramFree =
-    kRawConcurrentPcmBytes + kUnmeasuredOverheadReserve;
+    kConcurrentSpeechPayloadBytes + kUnmeasuredOverheadReserve;
 inline constexpr size_t kRequiredLargestPsramBlock =
     kSynthPcmBytes + 128 * 1024;
 inline constexpr size_t kRequiredInternalFree = 128 * 1024;
@@ -94,7 +96,8 @@ inline NativeMemoryPreflight check_native_audio_memory_preflight(
     return NativeMemoryPreflight::model_unmeasured;
   if (!e.question_tls_tts_peak_measured)
     return NativeMemoryPreflight::combined_peak_unmeasured;
-  if (e.concurrent_internal_peak == 0 || e.concurrent_psram_peak < kRawConcurrentPcmBytes)
+  if (e.concurrent_internal_peak == 0 ||
+      e.concurrent_psram_peak < kConcurrentSpeechPayloadBytes)
     return NativeMemoryPreflight::invalid_peak;
   if (check_audio_memory_preflight(e.after_model) !=
       MemoryPreflight::diagnostic_budget_satisfied_not_install_approval)
