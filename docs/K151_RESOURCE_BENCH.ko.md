@@ -67,6 +67,12 @@ FIR과 chunk 누적을 사용하며, 입력 단계 최대 처리 시간과 완�
 얼굴·메뉴 복귀를 확인했다.
 [reset 경계 실측 기록](validation/2026-11-21-k151-wake-reset-panic-live.md)
 
+후속 reset 구현은 기존 컨텍스트를 먼저 파기하고 검증된 같은 모델 목록에서
+새 컨텍스트를 생성한다. 이 경로에서 SDK `clean()`을 호출하지 않는다.
+기존 경계 계측은 새 컨텍스트의 reset 반환과 합성 32프레임 완료를 별도로
+관측한다. 생성·해제 비용과 실물 안정성은 후속 실행에서 확인한다.
+[reset 변경의 검증 기록](validation/2026-11-21-k151-wakenet-recreate-reset.md)
+
 실물 검증한 `f4878fa` 이미지는 HTTP 본문 처리까지 실행했다. 이후 TLS 후속은
 고정 SDK의 Mbed TLS 1.2 클라이언트와 서버를 각각 1KiB의 메모리 FIFO로
 연결한다. 실행 때만 존재하는 PSA CA와 leaf를 사용해 인증서 체인과

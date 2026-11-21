@@ -2,6 +2,7 @@
 // Complete vendor interface with host C ABI doubles, not neural inference.
 #include "k151_wakenet_port.hpp"
 #include "k151_model_assets.hpp"
+#include "synthetic_wake_probe.hpp"
 #include <esp_partition.h>
 #include <psa/crypto.h>
 #include <array>
@@ -10,21 +11,39 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <utility>
 using namespace stackchan::standalone;
+
+template<class Owner, class Stop>
+concept CanPrepareLocal = requires(K151WakeNetPort& port) {
+  port.prepare_local(std::declval<Owner>(), std::declval<Stop>());
+};
+template<class Owner, class Stop>
+concept CanPrepareEmbedded = requires(K151WakeNetPort& port, std::span<const uint8_t> pack) {
+  port.prepare_embedded(std::declval<Owner>(), std::declval<Stop>(), pack);
+};
+
+using Flag = std::atomic_bool;
+static_assert(CanPrepareLocal<const Flag&, Flag&> && CanPrepareEmbedded<Flag&, const Flag&>);
+static_assert(!CanPrepareLocal<Flag, Flag&> && !CanPrepareLocal<Flag&, Flag>);
+static_assert(!CanPrepareEmbedded<Flag, Flag&> && !CanPrepareEmbedded<Flag&, Flag>);
+static_assert(!CanPrepareLocal<bool, Flag&> && !CanPrepareEmbedded<Flag&, bool>);
+
 struct esp_flash_t {int unused;};
 esp_flash_t chip{},external_chip{};
 extern "C" { esp_flash_t* esp_flash_default_chip=&chip; }
-struct model_iface_data_t {int unused;};
+struct model_iface_data_t {int consumed;};
 namespace {
 std::string_view scenario;
 std::string events;
-model_iface_data_t data{};
+std::array<model_iface_data_t,2> contexts{};
+model_iface_data_t* active_data=nullptr;
 srmodel_list_t list{};
 char name[]="wn9l_histackchan_tts3";
 char wrong[]="wn9_wrong";
 char* names[]={name};
 esp_wn_iface_t iface{};
-int detects=0,cleans=0,ret=0;
+int detects=0,cleans=0,creates=0,ret=0;
 srmodel_list_t* shared=nullptr;
 std::atomic_bool owner{true},stop{false};
 int finds=0,hashes=0;
@@ -32,10 +51,15 @@ std::array<uint8_t,292607> embedded{};
 esp_partition_t partition{};
 model_iface_data_t* create(const void* n,det_mode_t mode) {
   events+='c';assert(std::strcmp(static_cast<const char*>(n),name)==0);
-  assert(mode==DET_MODE_90);
+  assert(mode==DET_MODE_90 && !active_data);
+  ++creates;
   if(scenario=="local_revoke_create")owner=false;
   if(scenario=="embedded_stop_create")stop=true;
-  return scenario=="create_failure"?nullptr:&data;
+  if(scenario=="reset_stop_create" && creates==2)stop=true;
+  if(scenario=="create_failure" || (scenario=="reset_create_failure" && creates==2))return nullptr;
+  auto& fresh=contexts[static_cast<size_t>(creates-1)%contexts.size()];
+  fresh.consumed=0;active_data=&fresh;
+  return active_data;
 }
 extern "C" const esp_partition_t* esp_partition_find_first(
     esp_partition_type_t type,esp_partition_subtype_t subtype,const char* label) {
@@ -55,21 +79,31 @@ extern "C" esp_err_t esp_partition_get_sha256(const esp_partition_t* p,uint8_t* 
   if(scenario=="local_stop_hash")stop=true;
   return scenario=="local_hash_error"?-1:ESP_OK;
 }
-int rate(model_iface_data_t* d){assert(d==&data);return scenario=="rate"?24000:16000;}
+int rate(model_iface_data_t* d) {
+  assert(d==active_data);
+  if(scenario=="reset_revoke_format" && creates==2)owner=false;
+  return scenario=="rate" || (scenario=="reset_bad_rate" && creates==2)?24000:16000;
+}
 int channel(model_iface_data_t*){return scenario=="channel"?2:1;}
 int words(model_iface_data_t*){return scenario=="words"?2:1;}
 int chunk(model_iface_data_t*) {
   if(scenario=="chunk_negative")return -1;
   if(scenario=="chunk_small")return 159;
   if(scenario=="chunk_large")return 2049;
+  if(scenario=="bench_reset_bridge")return 512;
+  if(scenario=="reset_changed_chunk" && creates==2)return 512;
   return 480;
 }
 wakenet_state_t detect(model_iface_data_t* d,int16_t* p) {
-  assert(d==&data && p);++detects;
+  assert(d==active_data && p);++detects;++d->consumed;
   return static_cast<wakenet_state_t>(ret);
 }
-void clean(model_iface_data_t* d){assert(d==&data);++cleans;}
-void destroy(model_iface_data_t* d){assert(d==&data);events+='d';}
+void clean(model_iface_data_t* d){assert(d==active_data);++cleans;}
+void destroy(model_iface_data_t* d) {
+  assert(d==active_data && active_data);
+  active_data=nullptr;events+='d';
+  if(scenario=="reset_revoke_destroy" && creates==1)owner=false;
+}
 }
 extern "C" bool esp_ptr_external_ram(const void*) {return scenario=="embedded_psram";}
 extern "C" bool esp_ptr_in_drom(const void*) {return scenario!="embedded_mutable";}
@@ -127,6 +161,53 @@ int main(int argc,char** argv) {
   if(scenario=="no_detect")iface.detect=nullptr;
   if(scenario=="no_clean")iface.clean=nullptr;
   if(scenario=="no_destroy")iface.destroy=nullptr;
+  if(scenario=="bench_reset_bridge") {
+    K151WakeNetPort p;
+    assert(p.prepare_embedded(owner,stop,embedded));
+    std::array<int16_t,512> samples{};
+    for(int i=0;i<64;++i)assert(p.detect(samples)==NativeWakeResult::none);
+    assert(active_data->consumed==64);
+    int64_t clock=0;
+    unsigned checkpoints=0;
+    const auto result=probe_synthetic_wake_input(
+        p,[] {return owner.load() && !stop.load();},[&] {return ++clock;},[] {},
+        [&](std::string_view checkpoint) {
+          if(checkpoint=="model_reset_return" || checkpoint=="final_model_reset_return")
+            assert(active_data && active_data->consumed==0);
+          ++checkpoints;return true;
+        });
+    assert(result==1 && checkpoints==11 && creates==3 && detects==74 && cleans==0);
+    assert(events=="efhcdcdc" && shared==&list && hashes==1);
+    p.close();assert(events=="efhcdcdcdb" && !active_data && !shared);
+    return 0;
+  }
+  if(scenario.starts_with("reset_")) {
+    K151WakeNetPort p;
+    assert(p.prepare_embedded(owner,stop,embedded) && events=="efhc");
+    std::array<int16_t,480> samples{};
+    assert(p.detect(samples)==NativeWakeResult::none && active_data->consumed==1);
+    const auto* old_data=active_data;
+    const auto before=p.format();
+    if(scenario=="reset_stop_before")stop=true;
+    if(scenario=="reset_valid") {
+      assert(p.reset() && events=="efhcdc" && cleans==0 && shared==&list);
+      assert(p.ready() && p.format()==before && active_data!=old_data && active_data->consumed==0);
+      assert(p.detect(samples)==NativeWakeResult::none && active_data->consumed==1);
+      p.close();assert(events=="efhcdcdb");
+    } else {
+      assert(!p.reset() && !p.ready() && !p.reset());
+      assert(!p.prepare_embedded(owner,stop,embedded) && !p.prepare(true,true));
+      assert(p.detect(samples)==NativeWakeResult::error && detects==1);
+      if(scenario=="reset_stop_before" || scenario=="reset_revoke_destroy")
+        assert(events=="efhcdb");
+      else if(scenario=="reset_create_failure")assert(events=="efhcdcb");
+      else assert(events=="efhcdcdb");
+      const auto after=events;
+      p.close();assert(events==after);
+    }
+    assert(cleans==0 && hashes==1 && finds==0 && !active_data && !shared);
+    return 0;
+  }
   if(scenario.starts_with("embedded_")) {
     if(scenario=="embedded_no_owner")owner=false;
     if(scenario=="embedded_stopped")stop=true;
@@ -173,6 +254,7 @@ int main(int argc,char** argv) {
     if(scenario=="local_valid") {
       assert(accepted && p.ready() && events=="ifhc");
       assert(finds==1 && hashes==1);
+      assert(p.reset() && p.ready() && events=="ifhcdc" && cleans==0);
     } else {
       assert(!accepted && !p.ready());
       if(scenario=="local_revoke_create")assert(events=="ifhcdl");
@@ -220,7 +302,7 @@ int main(int argc,char** argv) {
     if(scenario=="gate") {
       assert(!p.prepare(false,true));assert(!p.prepare(true,false));
       assert(events.empty());assert(p.prepare(true,true));
-    } else if(scenario=="valid" || scenario=="closed" || scenario=="unknown" ||
+    } else if(scenario=="valid" || scenario=="no_clean" || scenario=="closed" || scenario=="unknown" ||
               scenario=="wrong_buffer") {
       assert(p.prepare(true,true));assert(p.ready());
       const auto f=p.format();assert(f.sample_rate_hz==16000 && f.channels==1 &&
@@ -240,11 +322,11 @@ int main(int argc,char** argv) {
         assert(events=="ifhcdl"); // Fault releases speech context before scope ends.
         p.close();assert(events=="ifhcdl");
       } else {
-        assert(p.reset() && cleans==1);
+        assert(p.reset() && events=="ifhcdc" && cleans==0);
         ret=0;assert(p.detect(samples)==NativeWakeResult::none);
         ret=-1;assert(p.detect(samples)==NativeWakeResult::none);
         ret=1;assert(p.detect(samples)==NativeWakeResult::detected);
-        assert(detects==3 && p.reset() && cleans==2);
+        assert(detects==3 && p.reset() && events=="ifhcdcdc" && cleans==0);
       }
     } else {
       assert(!p.prepare(true,true) && !p.ready());

@@ -3,6 +3,7 @@
 #include <esp_wn_models.h>
 #include <cstring>
 #include <atomic>
+#include <utility>
 namespace stackchan::standalone {
 namespace { std::atomic_flag loader_owner=ATOMIC_FLAG_INIT; }
 bool K151WakeNetPort::prepare(bool owner,bool verified) {
@@ -30,18 +31,23 @@ bool K151WakeNetPort::prepare_verified(bool owner,bool verified,
   iface_=esp_wn_handle_from_name(name);
   if(!allowed() || !iface_ || !iface_->create || !iface_->destroy || !iface_->get_samp_rate ||
      !iface_->get_samp_chunksize || !iface_->get_channel_num ||
-     !iface_->get_word_num || !iface_->clean || !iface_->detect) {
+     !iface_->get_word_num || !iface_->detect) {
     close();return false;
   }
   data_=iface_->create(name,DET_MODE_90);
   if(!allowed() || !data_) {close();return false;}
+  format_=checked_context_format();
+  if(!allowed() || format_.chunk_samples==0) {close();return false;}
+  model_name_=name;
+  live_owner_=live_owner;
+  physical_stop_=stop;
+  return true;
+}
+NativeWakeFormat K151WakeNetPort::checked_context_format() const {
   const int chunk=iface_->get_samp_chunksize(data_);
   if(iface_->get_samp_rate(data_)!=16000 || iface_->get_channel_num(data_)!=1 ||
-     iface_->get_word_num(data_)!=1 || chunk<160 || chunk>2048 || !allowed()) {
-    close();return false;
-  }
-  format_={16000,static_cast<size_t>(chunk),1,16};
-  return true;
+     iface_->get_word_num(data_)!=1 || chunk<160 || chunk>2048) return {};
+  return {16000,static_cast<size_t>(chunk),1,16};
 }
 bool K151WakeNetPort::ready() const {
   return data_ && iface_ && models_ && !faulted_;
@@ -49,25 +55,44 @@ bool K151WakeNetPort::ready() const {
 NativeWakeResult K151WakeNetPort::detect(std::span<int16_t> pcm) {
   if(!ready())return NativeWakeResult::error;
   if(pcm.size()!=format_.chunk_samples) {
-    faulted_=true;close();return NativeWakeResult::error;
+    fault();return NativeWakeResult::error;
   }
   const auto r=iface_->detect(data_,pcm.data());
   if(r==WAKENET_NO_DETECT || r==WAKENET_CHANNEL_VERIFIED)return NativeWakeResult::none;
   if(r==WAKENET_DETECTED)return NativeWakeResult::detected;
-  faulted_=true;close();return NativeWakeResult::error;
+  fault();return NativeWakeResult::error;
 }
+bool K151WakeNetPort::reset_allowed() const {
+  return (!live_owner_ || live_owner_->load()) &&
+         (!physical_stop_ || !physical_stop_->load());
+}
+
 bool K151WakeNetPort::reset() {
   if(!ready())return false;
-  iface_->clean(data_);return true;
+  if(!reset_allowed()) {fault();return false;}
+  // A K151 trial observed a panic across the SDK clean boundary. Start a
+  // fresh context with the verified model list, keeping one context at a time.
+  iface_->destroy(std::exchange(data_,nullptr));
+  if(!reset_allowed()) {fault();return false;}
+  data_=iface_->create(model_name_,DET_MODE_90);
+  if(!data_ || !reset_allowed() || checked_context_format()!=format_ ||
+     !reset_allowed()) {fault();return false;}
+  return true;
+}
+
+void K151WakeNetPort::fault() {
+  faulted_=true;
+  close();
 }
 void K151WakeNetPort::close() {
-  if(data_)iface_->destroy(data_);
-  data_=nullptr;iface_=nullptr;
+  if(data_)iface_->destroy(std::exchange(data_,nullptr));
+  iface_=nullptr;model_name_=nullptr;
   if(models_) {
     if(embedded_)srmodel_host_deinit(models_);
     else esp_srmodel_deinit(models_);
   }
   models_=nullptr;format_={};
+  live_owner_=nullptr;physical_stop_=nullptr;
   embedded_=false;
   if(owns_loader_)loader_owner.clear(std::memory_order_release);
   owns_loader_=false;

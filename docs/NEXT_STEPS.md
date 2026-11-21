@@ -1,5 +1,14 @@
 # Next steps
 
+## 2026-11-21 코드 후속 — WakeNet 모델 컨텍스트 재생성
+
+실물에서 panic이 관측된 모델 reset 구간을 변경했다. 기존 컨텍스트를
+먼저 해제한 뒤 검증된 같은 모델 목록에서 새 컨텍스트를 만든다. 생성
+실패, 포맷 변경, STOP·동의 철회 시 포트가 종료된다. 실제 코덱·클라우드의
+운영 상태는 HOLD다. 새 reset 경로의 실물 실행은 새 이미지의 설치 검토와
+승인이 필요하다.
+[reset 변경의 검증 기록](validation/2026-11-21-k151-wakenet-recreate-reset.md)
+
 ## 2026-11-21 실물 계측 — WakeNet 모델 reset 경계의 panic
 
 승인 계측 이미지에서 `model_reset_begin` 뒤 `model_reset_return` 전에
