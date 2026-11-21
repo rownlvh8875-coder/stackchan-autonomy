@@ -15,12 +15,30 @@ std::string mode;
 i2s_channel_obj tx,rx;
 i2c_master_bus_t bus;
 audio_codec_data_if_t base{};
-audio_codec_ctrl_if_t ctrl{};
+audio_codec_ctrl_if_t controls[2]{};
+const audio_codec_ctrl_if_t* codec_controls[2]{};
 audio_codec_gpio_if_t gpio{};
-audio_codec_if_t codec{};
+audio_codec_if_t codecs[2]{};
 Dev devices[2];
 int created=0, deleted=0, data_deletes=0, calls=0, legacy_calls=0, timer_calls=0, gains=0, formats=0;
+int controls_created=0, controls_deleted=0;
+std::string phase;
 bool base_open=true;
+bool ctrl_open(const audio_codec_ctrl_if_t* h) {assert(h==&controls[0] || h==&controls[1]);return true;}
+int ctrl_io(const audio_codec_ctrl_if_t* h,int,int reg_len,void* data,int n,bool write) {
+  assert(h==&controls[0] || h==&controls[1]);assert(reg_len==1 && data && n==1);
+  if(!write)*static_cast<uint8_t*>(data)=0;
+  const std::string path=h==&controls[0]?"ctrl_out_":"ctrl_in_";
+  return mode==path+phase+(write?"_write":"_read")?ESP_CODEC_DEV_DRV_ERR:ESP_CODEC_DEV_OK;
+}
+int ctrl_read(const audio_codec_ctrl_if_t* h,int reg,int len,void* data,int n){return ctrl_io(h,reg,len,data,n,false);}
+int ctrl_write(const audio_codec_ctrl_if_t* h,int reg,int len,void* data,int n){return ctrl_io(h,reg,len,data,n,true);}
+int ctrl_info(const audio_codec_ctrl_if_t* h,audio_codec_ctrl_info_t* info){assert(ctrl_open(h));info->type=AUDIO_CODEC_CTRL_I2C;return 0;}
+void codec_operation(int i,const char* step) {
+  phase=step;uint8_t value=0;auto* c=codec_controls[i];
+  // ES7210 update_reg_bit discards read error; SDK gain/close discard codec rc.
+  (void)c->read_reg(c,0x43,1,&value,1);(void)c->write_reg(c,0x43,1,&value,1);
+}
 bool sdk_open(const audio_codec_data_if_t* h) { assert(h==&base);return base_open; }
 int sdk_enable(const audio_codec_data_if_t* h,esp_codec_dev_type_t type,bool enable) {
   assert(h==&base);
@@ -59,7 +77,7 @@ extern "C" esp_err_t i2s_channel_init_tdm_mode(i2s_chan_handle_t,const i2s_tdm_c
 extern "C" esp_err_t i2s_channel_enable(i2s_chan_handle_t h){if(h->enabled)return ESP_ERR_INVALID_STATE;h->enabled=true;return 0;}
 extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){if(!h->enabled)return ESP_ERR_INVALID_STATE;h->enabled=false;return 0;}
 extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){assert(!h->enabled);return 0;}
-extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){info->is_enabled=h->enabled;return 0;}
+extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){if(mode=="info_fail")return ESP_FAIL;info->is_enabled=h->enabled;return 0;}
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
   *bytes=(mode=="short"?n-4:mode=="overcount"?n+4:n);
@@ -79,28 +97,32 @@ extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void*,size_t n,
 extern "C" const audio_codec_data_if_t* audio_codec_new_i2s_data(audio_codec_i2s_cfg_t*) {
   base.is_open=sdk_open;base.enable=sdk_enable;base.set_fmt=sdk_format;base.read=legacy_read;base.write=legacy_write;base.close=sdk_close;return &base;
 }
-extern "C" const audio_codec_ctrl_if_t* audio_codec_new_i2c_ctrl(audio_codec_i2c_cfg_t*){return &ctrl;}
+extern "C" const audio_codec_ctrl_if_t* audio_codec_new_i2c_ctrl(audio_codec_i2c_cfg_t*){
+  assert(controls_created<2);auto* c=&controls[controls_created++];
+  c->is_open=ctrl_open;c->read_reg=ctrl_read;c->write_reg=ctrl_write;c->get_info=ctrl_info;return c;
+}
 extern "C" const audio_codec_gpio_if_t* audio_codec_new_gpio(){return &gpio;}
-extern "C" const audio_codec_if_t* aw88298_codec_new(aw88298_codec_cfg_t*){return &codec;}
-extern "C" const audio_codec_if_t* es7210_codec_new(es7210_codec_cfg_t*){return &codec;}
+extern "C" const audio_codec_if_t* aw88298_codec_new(aw88298_codec_cfg_t* cfg){codec_controls[0]=cfg->ctrl_if;codec_operation(0,"init");return &codecs[0];}
+extern "C" const audio_codec_if_t* es7210_codec_new(es7210_codec_cfg_t* cfg){codec_controls[1]=cfg->ctrl_if;codec_operation(1,"init");return &codecs[1];}
 extern "C" esp_codec_dev_handle_t esp_codec_dev_new(esp_codec_dev_cfg_t* cfg) {
   assert(created<2);devices[created]={cfg->data_if,cfg->dev_type,false};return &devices[created++];
 }
 extern "C" int esp_codec_dev_open(esp_codec_dev_handle_t h,esp_codec_dev_sample_info_t* fs) {
   auto* d=static_cast<Dev*>(h);d->open=true;
   d->data->set_fmt(d->data,d->type,fs);d->data->enable(d->data,d->type,true);
+  codec_operation(d->type==ESP_CODEC_DEV_TYPE_IN?1:0,"open");
   return 0; // pinned SDK ignores these two callback errors
 }
 extern "C" int esp_codec_dev_close(esp_codec_dev_handle_t h) {
-  auto* d=static_cast<Dev*>(h);if(d->open){d->data->enable(d->data,d->type,false);d->open=false;}return 0;
+  auto* d=static_cast<Dev*>(h);if(d->open){codec_operation(d->type==ESP_CODEC_DEV_TYPE_IN?1:0,"close");d->data->enable(d->data,d->type,false);d->open=false;}return 0;
 }
-extern "C" int esp_codec_dev_set_in_channel_gain(esp_codec_dev_handle_t,uint16_t,float){++gains;return 0;}
+extern "C" int esp_codec_dev_set_in_channel_gain(esp_codec_dev_handle_t,uint16_t,float){++gains;codec_operation(1,"gain");return 0;}
 extern "C" int esp_codec_dev_set_out_vol(esp_codec_dev_handle_t,int){return 0;}
 extern "C" int esp_codec_dev_read(esp_codec_dev_handle_t h,void* p,int n){auto* d=static_cast<Dev*>(h);return d->data->read(d->data,static_cast<uint8_t*>(p),n);}
 extern "C" int esp_codec_dev_write(esp_codec_dev_handle_t h,void* p,int n){auto* d=static_cast<Dev*>(h);return d->data->write(d->data,static_cast<uint8_t*>(p),n);}
 extern "C" void esp_codec_dev_delete(esp_codec_dev_handle_t h){assert(!static_cast<Dev*>(h)->open);++deleted;}
-extern "C" int audio_codec_delete_codec_if(const audio_codec_if_t*){return 0;}
-extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t*){return 0;}
+extern "C" int audio_codec_delete_codec_if(const audio_codec_if_t* c){assert(deleted==created);codec_operation(c==&codecs[0]?0:1,"delete");return 0;}
+extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t* c){assert(c==&controls[0] || c==&controls[1]);++controls_deleted;return 0;}
 extern "C" int audio_codec_delete_gpio_if(const audio_codec_gpio_if_t*){return 0;}
 extern "C" int audio_codec_delete_data_if(const audio_codec_data_if_t* h){assert(h==&base && deleted==created);++data_deletes;return 0;}
 int main(int argc,char** argv) {
@@ -112,8 +134,31 @@ int main(int argc,char** argv) {
   if(mode=="denied") {
     assert(!port.prepare(false,true,true));assert(!port.capture_mono_24k(pcm));zero(pcm);assert(created==0);return 0;
   }
+  if(mode.starts_with("ctrl_") && mode.find("_init_")!=std::string::npos) {
+    assert(!port.prepare(true,true,true));assert(port.faulted() && !port.prepared());
+    assert(!port.capture_mono_24k(pcm));zero(pcm);assert(calls==0);
+    assert(!port.shutdown());assert(controls_deleted==controls_created);return 0;
+  }
   assert(port.prepare(true,true,true));
   const auto* api=devices[1].data;
+  if(mode.starts_with("null_")) {
+    esp_codec_dev_sample_info_t fs{16,2,3,24000,0};
+    if(mode=="null_open")assert(!api->is_open(nullptr));
+    if(mode=="null_format")assert(api->set_fmt(nullptr,ESP_CODEC_DEV_TYPE_IN,&fs)==ESP_CODEC_DEV_INVALID_ARG);
+    if(mode=="null_enable")assert(api->enable(nullptr,ESP_CODEC_DEV_TYPE_IN,true)==ESP_CODEC_DEV_INVALID_ARG);
+    if(mode=="null_read") {
+      assert(api->read(nullptr,reinterpret_cast<uint8_t*>(pcm.data()),480)==ESP_CODEC_DEV_INVALID_ARG);zero(pcm);
+    }
+    if(mode=="null_write") {
+      assert(api->write(nullptr,reinterpret_cast<uint8_t*>(pcm.data()),480)==ESP_CODEC_DEV_INVALID_ARG);
+      for(auto sample:pcm)assert(sample==123);
+    }
+    assert(calls==0 && formats==0);assert(!port.faulted());assert(port.shutdown());return 0;
+  }
+  if(mode=="info_fail") {
+    assert(!port.shutdown());assert(port.faulted() && !port.prepared());
+    assert(!tx.enabled && !rx.enabled);assert(!port.shutdown());return 0;
+  }
   if(mode.starts_with("write_") || mode=="halfduplex") {
     esp_codec_dev_sample_info_t fs{16,1,0,24000,0};
     assert(api->set_fmt(api,ESP_CODEC_DEV_TYPE_OUT,&fs)==0);
@@ -150,7 +195,21 @@ int main(int argc,char** argv) {
   if(mode=="format_fail" || mode=="enable_fail") {
     assert(!port.microphone_on());assert(port.faulted() && gains==0 && calls==0);port.shutdown();return 0;
   }
+  if(mode.starts_with("ctrl_in_open_") || mode.starts_with("ctrl_in_gain_")) {
+    assert(!port.microphone_on());assert(port.faulted() && !port.prepared());
+    assert(!port.capture_mono_24k(pcm));zero(pcm);assert(calls==0);
+    assert(!port.microphone_on());assert(!port.shutdown());return 0;
+  }
   assert(port.microphone_on());
+  if(mode.starts_with("ctrl_in_close_")) {
+    assert(!port.microphone_off());assert(port.faulted());
+    assert(!port.microphone_off());assert(!port.capture_mono_24k(pcm));zero(pcm);
+    assert(!port.shutdown());return 0;
+  }
+  if(mode.starts_with("ctrl_in_delete_")) {
+    assert(port.microphone_off());assert(!port.shutdown());assert(port.faulted());
+    assert(!port.shutdown());return 0;
+  }
   if(mode=="reader_bad_size") {
     std::array<int16_t,241> invalid;invalid.fill(123);K151MicReader reader{port};
     assert(!reader.read_10ms(invalid));zero(invalid);assert(calls==0);return 0;

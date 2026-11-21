@@ -1,5 +1,16 @@
 # Next steps
 
+## 2026-11-21 코드 후속: 코덱 제어 오류 보존
+
+기존 PCM 어댑터의 null callback 방어와 I2S 상태조회 실패 회귀를 추가했다.
+SDK가 버리는 register 오류는 비소유 K151CodecControl로 관측해 초기화/open/gain/
+close/해제 뒤 독립 검사한다. 실패 뒤 PCM·재시작은 차단하고 cleanup이 성공해도
+fault를 지우지 않는다. 고정 SDK ES7210 C 원문을 실제 host 실행해 read 오류 누락을
+대조했다. [범위·검증 기록](validation/2026-11-21-k151-codec-control.md)을 따른다.
+이번 기기 접근·리셋·설치·실음성·유료 API는0이며 HOLD/cloud OFF/출력·drain false는
+그대로다. 다음에는 물리 전원/mute·STOP/drain, 실제 마이크 채널·동시 TLS peak가
+필요하다. 과거 Windows 지연의 물리I/O/OS 원인은 해결됐다고 보고하지 않는다.
+
 ## 2026-11-21 코드 후속: 오디오 PCM 전송 보강
 
 기존 K151CodecPort에 [제한된 PCM 전송 어댑터](K151_AUDIO_IO.ko.md)를 연결했다.

@@ -118,8 +118,64 @@ def port_binary(tmp_path_factory):
         "reformat_active",
         "reader_denied",
         "reader_bad_size",
+        "null_open",
+        "null_format",
+        "null_enable",
+        "null_read",
+        "null_write",
+        "info_fail",
+        "ctrl_out_init_read",
+        "ctrl_out_init_write",
+        "ctrl_in_init_read",
+        "ctrl_in_init_write",
+        "ctrl_in_open_read",
+        "ctrl_in_open_write",
+        "ctrl_in_gain_read",
+        "ctrl_in_gain_write",
+        "ctrl_in_close_read",
+        "ctrl_in_close_write",
+        "ctrl_in_delete_read",
+        "ctrl_in_delete_write",
     ],
 )
 def test_actual_port_fault_boundaries(port_binary, mode):
     result = subprocess.run([str(port_binary), mode], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.fixture(scope="module")
+def control_binary(tmp_path_factory):
+    compiler = shutil.which("g++")
+    if not compiler:
+        pytest.skip("C++20 compiler required")
+    folder = tmp_path_factory.mktemp("codec-control")
+    obj = folder / "es7210.o"
+    includes = ["-isystem", str(SDK), "-I", str(BASE / "tests/codec_io_doubles")]
+    # Vendor C is compiled as C, unmodified, separately from strict owned C++.
+    # Real IDF headers supply allocation declarations transitively; the tiny
+    # no-hardware log double deliberately does not emulate that header tree.
+    command = [compiler, "-x", "c", "-std=c11", "-O2", "-include", "stdlib.h", *includes]
+    result = subprocess.run(
+        command + ["-c", str(SDK / "es7210.c"), "-o", str(obj)],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert result.returncode == 0, result.stderr
+    binary = folder / "control"
+    command = [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic"]
+    command += includes + ["-I", str(BASE / "esp_app/main")]
+    result = subprocess.run(
+        command + [str(BASE / "tests/k151_codec_control_test.cpp"), str(obj), "-o", str(binary)],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert result.returncode == 0, result.stderr
+    return binary
+
+
+@pytest.mark.parametrize("mode", ["raw_read", "guard_read", "guard_write", "boundaries", "lost"])
+def test_real_es7210_control_errors(control_binary, mode):
+    result = subprocess.run([str(control_binary), mode], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr

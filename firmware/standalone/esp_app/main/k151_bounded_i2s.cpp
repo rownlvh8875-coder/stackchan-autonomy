@@ -45,6 +45,7 @@ void K151BoundedI2s::detach() {
   base_ = nullptr; rx_ = tx_ = nullptr; formats_ = {}; enabled_ = {};
 }
 bool K151BoundedI2s::opened(const audio_codec_data_if_t* h) {
+  if (!h) return false;
   const auto& p = self(h);
   return p.base_ && p.base_->is_open(p.base_);
 }
@@ -59,6 +60,7 @@ bool K151BoundedI2s::disabled(esp_codec_dev_type_t type) const {
 }
 int K151BoundedI2s::format_data(const audio_codec_data_if_t* h, esp_codec_dev_type_t type,
                                esp_codec_dev_sample_info_t* fs) {
+  if (!h) return ESP_CODEC_DEV_INVALID_ARG;
   auto& p = self(h); Access access{p};
   if (!access) return ESP_CODEC_DEV_DRV_ERR;
   const int i = index(type);
@@ -73,6 +75,7 @@ int K151BoundedI2s::format_data(const audio_codec_data_if_t* h, esp_codec_dev_ty
   return ESP_CODEC_DEV_OK;
 }
 int K151BoundedI2s::enable_data(const audio_codec_data_if_t* h, esp_codec_dev_type_t type, bool enable) {
+  if (!h) return ESP_CODEC_DEV_INVALID_ARG;
   auto& p = self(h); Access access{p};
   if (!access) return ESP_CODEC_DEV_DRV_ERR;
   const int i = index(type);
@@ -85,9 +88,14 @@ int K151BoundedI2s::enable_data(const audio_codec_data_if_t* h, esp_codec_dev_ty
   return ESP_CODEC_DEV_OK;
 }
 int K151BoundedI2s::read_data(const audio_codec_data_if_t* h, uint8_t* data, int bytes) {
+  if (!h) {
+    if (data && bytes > 0 && bytes <= 960) wipe_audio_bytes({data, static_cast<size_t>(bytes)});
+    return ESP_CODEC_DEV_INVALID_ARG;
+  }
   return self(h).transfer(false, data, bytes);
 }
 int K151BoundedI2s::write_data(const audio_codec_data_if_t* h, uint8_t* data, int bytes) {
+  if (!h) return ESP_CODEC_DEV_INVALID_ARG;
   return self(h).transfer(true, data, bytes);
 }
 int K151BoundedI2s::transfer(bool output, uint8_t* data, int bytes) {

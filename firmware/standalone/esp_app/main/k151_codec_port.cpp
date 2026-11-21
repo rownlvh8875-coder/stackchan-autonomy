@@ -125,17 +125,17 @@ bool K151CodecPort::prepare_codecs() {
   i2c_cfg.bus_handle = i2c_bus_;
   out_ctrl_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
   gpio_if_ = audio_codec_new_gpio();
-  if (!out_ctrl_ || !gpio_if_) return false;
+  if (!out_ctrl_ || !gpio_if_ || !out_control_.attach(out_ctrl_)) return false;
 
   aw88298_codec_cfg_t out_cfg = {};
-  out_cfg.ctrl_if = out_ctrl_;
+  out_cfg.ctrl_if = out_control_.interface();
   out_cfg.gpio_if = gpio_if_;
   out_cfg.reset_pin = GPIO_NUM_NC; // External AW9523 reset NOT implemented.
   out_cfg.hw_gain.pa_voltage = 5.0f;
   out_cfg.hw_gain.codec_dac_voltage = 3.3f;
   out_cfg.hw_gain.pa_gain = 1;
   out_codec_ = aw88298_codec_new(&out_cfg);
-  if (!out_codec_) return false;
+  if (!out_codec_ || !out_control_.healthy()) return false;
 
   esp_codec_dev_cfg_t dev_cfg = {};
   dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_OUT;
@@ -146,12 +146,12 @@ bool K151CodecPort::prepare_codecs() {
 
   i2c_cfg.addr = ES7210_CODEC_DEFAULT_ADDR;
   in_ctrl_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
-  if (!in_ctrl_) return false;
+  if (!in_ctrl_ || !in_control_.attach(in_ctrl_)) return false;
   es7210_codec_cfg_t in_cfg = {};
-  in_cfg.ctrl_if = in_ctrl_;
+  in_cfg.ctrl_if = in_control_.interface();
   in_cfg.mic_selected = ES7210_SEL_MIC1 | ES7210_SEL_MIC2 | ES7210_SEL_MIC3;
   in_codec_ = es7210_codec_new(&in_cfg);
-  if (!in_codec_) return false;
+  if (!in_codec_ || !in_control_.healthy()) return false;
   dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_IN;
   dev_cfg.codec_if = in_codec_;
   in_dev_ = esp_codec_dev_new(&dev_cfg);
@@ -169,16 +169,20 @@ bool K151CodecPort::microphone_on() {
   // Even an unsuccessful open can leave codec state uncertain.
   // Track it before the call so fail() attempts an independent close.
   input_open_ = true;
-  if (esp_codec_dev_open(in_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_IN)) return fail();
+  if (esp_codec_dev_open(in_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_IN) ||
+      !in_control_.healthy()) return fail();
   if (esp_codec_dev_set_in_channel_gain(
-          in_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), kInputGain) != 0) return fail();
+          in_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), kInputGain) != 0 ||
+      !in_control_.healthy()) return fail();
   return true;
 }
 
 bool K151CodecPort::microphone_off() {
-  if (!input_open_) return true;
+  if (!input_open_) return !in_control_.faulted();
   const int rc = esp_codec_dev_close(in_dev_);
-  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_IN)) { fault_ = true; return false; }
+  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_IN) || !in_control_.healthy()) {
+    fault_ = true; return false;
+  }
   input_open_ = false;
   return true;
 }
@@ -213,15 +217,18 @@ bool K151CodecPort::speaker_on_low_volume() {
   fs.sample_rate = k151::kOutputHz;
   // Preserve a best-effort close even after a partially failed open.
   output_open_ = true;
-  if (esp_codec_dev_open(out_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT)) return fail();
-  if (esp_codec_dev_set_out_vol(out_dev_, kLowVolume) != 0) return fail();
+  if (esp_codec_dev_open(out_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT) ||
+      !out_control_.healthy()) return fail();
+  if (esp_codec_dev_set_out_vol(out_dev_, kLowVolume) != 0 || !out_control_.healthy()) return fail();
   return true;
 }
 
 bool K151CodecPort::speaker_off() {
-  if (!output_open_) return true;
+  if (!output_open_) return !out_control_.faulted();
   const int rc = esp_codec_dev_close(out_dev_);
-  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT)) { fault_ = true; return false; }
+  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT) || !out_control_.healthy()) {
+    fault_ = true; return false;
+  }
   output_open_ = false;
   return true;
 }
@@ -260,6 +267,10 @@ bool K151CodecPort::shutdown() {
   if (out_dev_) { esp_codec_dev_delete(out_dev_); out_dev_ = nullptr; }
   if (in_codec_) { audio_codec_delete_codec_if(in_codec_); in_codec_ = nullptr; }
   if (out_codec_) { audio_codec_delete_codec_if(out_codec_); out_codec_ = nullptr; }
+  // Codec destruction can itself issue register operations whose errors the
+  // SDK drops. Observe before detaching/freeing either original control object.
+  if (in_control_.faulted() || out_control_.faulted()) ok = false;
+  in_control_.detach(); out_control_.detach();
   if (in_ctrl_) { audio_codec_delete_ctrl_if(in_ctrl_); in_ctrl_ = nullptr; }
   if (out_ctrl_) { audio_codec_delete_ctrl_if(out_ctrl_); out_ctrl_ = nullptr; }
   if (gpio_if_) { audio_codec_delete_gpio_if(gpio_if_); gpio_if_ = nullptr; }

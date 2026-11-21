@@ -11,6 +11,7 @@
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
 #include "k151_bounded_i2s.hpp"
+#include "k151_codec_control.hpp"
 
 namespace stackchan::standalone {
 
@@ -36,8 +37,12 @@ class K151CodecPort final {
   bool drain_output_before_mute(); // False until real DMA+codec drain telemetry.
   bool quiet();      // Both codecs; error latches fault
   bool shutdown();   // Release only, never erase/flash/NVS
-  bool prepared() const { return prepared_ && !faulted(); }
-  bool faulted() const { return fault_ || data_port_.faulted(); }
+  bool prepared() const {
+    return prepared_ && !faulted() && in_control_.healthy() && out_control_.healthy();
+  }
+  bool faulted() const {
+    return fault_ || data_port_.faulted() || in_control_.faulted() || out_control_.faulted();
+  }
 
  private:
   bool fail();
@@ -50,6 +55,7 @@ class K151CodecPort final {
   K151BoundedI2s data_port_;
   const audio_codec_ctrl_if_t* in_ctrl_ = nullptr;
   const audio_codec_ctrl_if_t* out_ctrl_ = nullptr;
+  K151CodecControl in_control_, out_control_;
   const audio_codec_if_t* in_codec_ = nullptr;
   const audio_codec_if_t* out_codec_ = nullptr;
   const audio_codec_gpio_if_t* gpio_if_ = nullptr;

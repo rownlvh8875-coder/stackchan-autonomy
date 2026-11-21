@@ -31,9 +31,10 @@ wake 프로토콜 검사도 그대로 남는다. 코덱 open/close·gain·I2C �
 시간 범위 밖의 동기 호출이며 실제 전원/mute/drain 증거가 필요하다.
 
 SDK open이 데이터 설정 오류 뒤에도 코덱 설정을 일부 실행할 수 있어 input_open을
-호출 전에 추적하고 실패 뒤 독립 close를 시도한다. SDK의 코덱 제어/I2C 오류 전달을
-전부 해결한 것은 아니다. data disabled는 논리 상태이며 analog mute의 증거가 아니다.
-실제 microphone 활성화 전 이 제어 경로와 전기적 조건도 검증해야 한다.
+호출 전에 추적하고 실패 뒤 독립 close를 시도한다. 후속 비소유 control observer는
+SDK가 버리는 register read/write/get_info 오류도 별도로 latch한다. 실제 microphone
+활성화 전 전기적 조건과 제어 지연은 여전히 검증해야 한다. data disabled나 register
+성공은 논리 상태이며 analog mute의 증거가 아니다.
 
 ## 소유권과 준비 상태
 
@@ -46,6 +47,21 @@ SDK open이 데이터 설정 오류 뒤에도 코덱 설정을 일부 실행할 
 HOLD app_main은 포트를 생성·prepare하지 않는다. speaker_on의 두 false 상수와
 drain=false를 유지한다. 과거 보드 설정값·모델 heap 수치로 owner/assets/power/
 readiness를 true로 만들지 않는다. 이번 코드의 target 빌드는 실물 음성 성공이 아니다.
+
+## 코덱 제어 오류 후속
+
+K151CodecControl은 SDK I2C 객체를 빌려 원래 pointer와 register 인자를 그대로
+전달한다. SDK ES7210의 update_reg_bit는 read 오류를 버리고, 상위 gain/close는
+일부 codec 반환값을 버린다. 따라서 초기화/open/gain/close 뒤 독립 observer를
+검사한다. 해제 중 생긴 오류도 shutdown 실패로 남고, 이후 성공 호출·detach가
+fault를 지우지 않는다. 오류 뒤 cleanup 전달은 허용하지만 재시작은 차단한다.
+codec/device를 먼저 삭제하고 observer를 분리한 뒤 원래 control만 해제한다.
+
+null data handle은 false/INVALID_ARG로 거부한다. 이때 유효한 제한 크기의 read
+버퍼는 volatile wipe하고 caller-owned write 원본은 유지한다. I2S 상태 조회 실패
+주입 시험은 best-effort disable이 성공해도 shutdown/fault가 실패 상태임을 확인한다.
+고정 SDK의 수정하지 않은 ES7210 C도 별도 host fixture로 실행해 실제 read 오류
+누락과 observer의 감지를 대조한다. [후속 검증](validation/2026-11-21-k151-codec-control.md).
 
 ## 재현·검증 근거
 
