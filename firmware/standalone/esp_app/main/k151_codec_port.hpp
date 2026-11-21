@@ -2,6 +2,7 @@
 // Build-verified K151 codec transport, explicitly dormant at app startup.
 #pragma once
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -14,6 +15,15 @@
 #include "k151_codec_control.hpp"
 
 namespace stackchan::standalone {
+
+// Current physical observations from the caller's exclusive audio owner.
+// Stored board readback and synthetic bench flags cannot supply these.
+struct K151MicOnlyEvidence {
+  bool exact_board_verified = false;
+  bool microphone_supply_and_clock_pins_verified = false;
+  bool amplifier_isolation_with_input_clocks_verified = false;
+  bool exclusive_i2s0_owner_verified = false;
+};
 
 // This class MUST NOT be started by app_main. Amp reset, power rails, exact
 // LCD/board identity and physical STOP require a separate hardware review.
@@ -28,6 +38,9 @@ class K151CodecPort final {
 
   bool prepare(bool physical_owner_approval, bool exact_k151_identity,
                bool amp_reset_and_power_verified);
+  // Both atomic flags must outlive this port and latch loss until teardown.
+  bool prepare_microphone_only(const std::atomic_bool& owner, const std::atomic_bool& stop,
+                               const K151MicOnlyEvidence& evidence);
   bool microphone_on();
   bool microphone_off();
   bool capture_mono_24k(std::span<int16_t> mono);  // <= 10ms PCM; 20ms driver wait + 40ms postcheck.
@@ -38,16 +51,28 @@ class K151CodecPort final {
   bool quiet();      // Both codecs; error latches fault
   bool shutdown();   // One release attempt/handle; retains failed I2S, fault stays.
   bool prepared() const {
-    return prepared_ && !faulted() && in_control_.healthy() && out_control_.healthy();
+    return prepared_ && !faulted() && input_allowed() && in_control_.healthy() &&
+           (microphone_only() || out_control_.healthy());
   }
   bool faulted() const {
     return fault_ || data_port_.faulted() || in_control_.faulted() || out_control_.faulted();
   }
 
  private:
+  bool microphone_only() const { return mic_owner_ != nullptr; }
+  bool input_allowed() const {
+    return !microphone_only() || (mic_owner_->load() && !mic_stop_->load());
+  }
   bool fail();
+  bool prepare_hardware();
   bool prepare_i2s();
+  bool prepare_i2s_tx();
   bool prepare_codecs();
+  bool prepare_output_codec();
+  bool prepare_input_codec();
+  bool close_microphone(); // Used by shutdown without initiating nested cleanup.
+  const std::atomic_bool* mic_owner_ = nullptr;
+  const std::atomic_bool* mic_stop_ = nullptr;
   i2c_master_bus_handle_t i2c_bus_ = nullptr;
   i2s_chan_handle_t tx_ = nullptr;
   i2s_chan_handle_t rx_ = nullptr;

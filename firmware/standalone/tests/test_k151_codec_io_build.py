@@ -149,6 +149,17 @@ def _build_port(compiler, binary, app):
         "release_bus_freed_error",
         "ctrl_out_delete_read",
         "ctrl_out_delete_write",
+        "mic_only_gates",
+        "mic_only_peer",
+        "mic_only_ok",
+        "mic_only_output",
+        "mic_only_short",
+        "mic_only_revoke",
+        "mic_only_stop_open",
+        "mic_only_stop_read",
+        "mic_only_release_latched",
+        "mic_only_close_failure",
+        "mic_only_stop_before_read",
     ],
 )
 def test_actual_port_fault_boundaries(port_binary, mode):

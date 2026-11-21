@@ -48,6 +48,26 @@ HOLD app_main은 포트를 생성·prepare하지 않는다. speaker_on의 두 fa
 drain=false를 유지한다. 과거 보드 설정값·모델 heap 수치로 owner/assets/power/
 readiness를 true로 만들지 않는다. 이번 코드의 target 빌드는 실물 음성 성공이 아니다.
 
+## ES7210 마이크 단독 준비
+
+`prepare_microphone_only`는 수명 동안 유효한 로컬 소유자 동의와 STOP 상태를
+받는다. 현재 보드 식별, 마이크 전원·클록 핀, 입력 클록 중 앰프 격리,
+I2S0 독점 소유도 각각 확인돼야 한다. 보드 조회에서 얻은 레지스터값만으로는
+이 조건을 채울 수 없다.
+
+I2S RX만 예약하고 짝 채널과 활성 상태를 확인한 뒤 핀을 설정한다. 포트는
+24kHz PCM16, 2슬롯 TDM으로 초기화하고 ES7210에 기존의 bounded read
+인터페이스를 넘긴다. SDK I2S data factory가 같은 포트의 TX를 찾는 경로를
+거치지 않으며, 이 경로에서 AW88298이나 TX를 할당하지 않는다. MCLK는
+GPIO0과 공유되므로 핀 설정 전에 전기적 조건을 확인해야 한다.
+
+동의 철회나 STOP을 관측한 호출은 PCM을 지우고 포트를 fault 상태로 전환한
+뒤 해제를 시도한다. 닫기 오류에서도 raw RX 상태를 확인한다. 해제 실패
+후 입력 요청은 하드웨어를 다시 건드리지 않으며, 보존한 I2S handle은
+명시적 종료에서 정리할 수 있다. 실제 driver 호출의 선점 지연, FIFO 초기화
+및 마이크 채널은 현장에서 검증해야 한다.
+[마이크 단독 검증](validation/2026-11-21-k151-microphone-only.md)
+
 ## 코덱 제어 오류 후속
 
 K151CodecControl은 SDK I2C 객체를 빌려 원래 pointer와 register 인자를 그대로

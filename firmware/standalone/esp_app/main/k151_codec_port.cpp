@@ -45,9 +45,23 @@ const char* K151CodecPort::compiled_link_marker() {
 
 K151CodecPort::~K151CodecPort() { (void)shutdown(); }
 
+bool K151CodecPort::prepare_microphone_only(const std::atomic_bool& owner,
+                                            const std::atomic_bool& stop,
+                                            const K151MicOnlyEvidence& evidence) {
+  if (attempted_ || !owner.load() || stop.load() || !evidence.exact_board_verified ||
+      !evidence.microphone_supply_and_clock_pins_verified ||
+      !evidence.amplifier_isolation_with_input_clocks_verified ||
+      !evidence.exclusive_i2s0_owner_verified) return false;
+  mic_owner_ = &owner;
+  mic_stop_ = &stop;
+  return prepare_hardware();
+}
+
 bool K151CodecPort::fail() {
+  if (microphone_only() && fault_) return false;
   fault_ = true;
-  (void)quiet();
+  if (microphone_only()) (void)shutdown();
+  else (void)quiet();
   return false;
 }
 
@@ -57,8 +71,13 @@ bool K151CodecPort::prepare(bool physical_owner_approval, bool exact_k151_identi
   // These booleans are NOT supplied by a USB frame, configuration blob or app_main.
   if (attempted_ || !physical_owner_approval || !exact_k151_identity ||
       !amp_reset_and_power_verified) return false;
+  return prepare_hardware();
+}
+
+bool K151CodecPort::prepare_hardware() {
   attempted_ = true;
-  if (!prepare_i2s() || !prepare_codecs()) return fail();
+  if (!input_allowed() || !prepare_i2s() || !input_allowed() ||
+      !prepare_codecs() || !input_allowed()) return fail();
   // Output is deliberately NOT opened and the amplifier is NOT enabled.
   prepared_ = true;
   return true;
@@ -74,12 +93,48 @@ bool K151CodecPort::prepare_i2s() {
   bus_cfg.flags.enable_internal_pullup = 1;
   if (i2c_new_master_bus(&bus_cfg, &i2c_bus_) != ESP_OK) return false;
 
-  // Two channels on the same peripheral: STD TX and four-slot TDM RX.
   i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   chan.dma_desc_num = 6;
   chan.dma_frame_num = 240;
-  if (i2s_new_channel(&chan, &tx_, &rx_) != ESP_OK) return false;
+  if (!input_allowed() ||
+      i2s_new_channel(&chan, microphone_only() ? nullptr : &tx_, &rx_) != ESP_OK)
+    return false;
+  if (microphone_only()) {
+    if (!data_port_.attach_receive_only(rx_)) return false;
+  } else if (!prepare_i2s_tx()) {
+    return false;
+  }
 
+  i2s_tdm_config_t rx_cfg = {};
+  rx_cfg.clk_cfg = I2S_TDM_CLK_DEFAULT_CONFIG(k151::kInputHz);
+  rx_cfg.clk_cfg.bclk_div = 8;
+  const auto slot_mask = static_cast<i2s_tdm_slot_mask_t>(microphone_only()
+      ? (I2S_TDM_SLOT0 | I2S_TDM_SLOT1)
+      : (I2S_TDM_SLOT0 | I2S_TDM_SLOT1 | I2S_TDM_SLOT2 | I2S_TDM_SLOT3));
+  rx_cfg.slot_cfg = I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG(
+      I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, slot_mask);
+  if (microphone_only()) {
+    // Same final 2-slot/16-bit TDM format as esp_codec_dev 1.6.2 set_drv_fs.
+    rx_cfg.slot_cfg.total_slot = 2;
+    rx_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_16BIT;
+    rx_cfg.slot_cfg.ws_width = 16;
+    rx_cfg.slot_cfg.left_align = true;
+  }
+  rx_cfg.gpio_cfg.mclk = static_cast<gpio_num_t>(k151::kI2sMclk);
+  rx_cfg.gpio_cfg.bclk = static_cast<gpio_num_t>(k151::kI2sBclk);
+  rx_cfg.gpio_cfg.ws = static_cast<gpio_num_t>(k151::kI2sWs);
+  rx_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
+  rx_cfg.gpio_cfg.din = static_cast<gpio_num_t>(k151::kI2sDin);
+
+  if (!input_allowed() ||
+      i2s_channel_init_tdm_mode(rx_, &rx_cfg) != ESP_OK) return false;
+  if (microphone_only()) return true; // Leave RX disabled until microphone_on.
+  if (i2s_channel_enable(tx_) != ESP_OK) return false;
+  if (i2s_channel_enable(rx_) != ESP_OK) return false;
+  return true;
+}
+
+bool K151CodecPort::prepare_i2s_tx() {
   i2s_std_config_t tx_cfg = {};
   tx_cfg.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(k151::kOutputHz);
   tx_cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
@@ -90,35 +145,23 @@ bool K151CodecPort::prepare_i2s() {
   tx_cfg.gpio_cfg.ws = static_cast<gpio_num_t>(k151::kI2sWs);
   tx_cfg.gpio_cfg.dout = static_cast<gpio_num_t>(k151::kI2sDout);
   tx_cfg.gpio_cfg.din = I2S_GPIO_UNUSED;
-
-  i2s_tdm_config_t rx_cfg = {};
-  rx_cfg.clk_cfg = I2S_TDM_CLK_DEFAULT_CONFIG(k151::kInputHz);
-  rx_cfg.clk_cfg.bclk_div = 8;
-  rx_cfg.slot_cfg = I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG(
-      I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO,
-      static_cast<i2s_tdm_slot_mask_t>(I2S_TDM_SLOT0 | I2S_TDM_SLOT1 |
-                                        I2S_TDM_SLOT2 | I2S_TDM_SLOT3));
-  rx_cfg.gpio_cfg.mclk = static_cast<gpio_num_t>(k151::kI2sMclk);
-  rx_cfg.gpio_cfg.bclk = static_cast<gpio_num_t>(k151::kI2sBclk);
-  rx_cfg.gpio_cfg.ws = static_cast<gpio_num_t>(k151::kI2sWs);
-  rx_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
-  rx_cfg.gpio_cfg.din = static_cast<gpio_num_t>(k151::kI2sDin);
-
-  if (i2s_channel_init_std_mode(tx_, &tx_cfg) != ESP_OK ||
-      i2s_channel_init_tdm_mode(rx_, &rx_cfg) != ESP_OK) return false;
-  if (i2s_channel_enable(tx_) != ESP_OK) return false;
-  if (i2s_channel_enable(rx_) != ESP_OK) return false;
-  return true;
+  return i2s_channel_init_std_mode(tx_, &tx_cfg) == ESP_OK;
 }
 
 bool K151CodecPort::prepare_codecs() {
-  audio_codec_i2s_cfg_t i2s_cfg = {};
-  i2s_cfg.port = I2S_NUM_0;
-  i2s_cfg.rx_handle = rx_;
-  i2s_cfg.tx_handle = tx_;
-  data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
-  if (!data_if_ || !data_port_.attach(data_if_, rx_, tx_)) return false;
+  if (!microphone_only()) {
+    audio_codec_i2s_cfg_t i2s_cfg = {};
+    i2s_cfg.port = I2S_NUM_0;
+    i2s_cfg.rx_handle = rx_;
+    i2s_cfg.tx_handle = tx_;
+    data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
+    if (!data_if_ || !data_port_.attach(data_if_, rx_, tx_) || !prepare_output_codec())
+      return false;
+  }
+  return input_allowed() && prepare_input_codec();
+}
 
+bool K151CodecPort::prepare_output_codec() {
   audio_codec_i2c_cfg_t i2c_cfg = {};
   i2c_cfg.port = static_cast<i2c_port_t>(kI2cPort);
   i2c_cfg.addr = AW88298_CODEC_DEFAULT_ADDR;
@@ -142,23 +185,31 @@ bool K151CodecPort::prepare_codecs() {
   dev_cfg.codec_if = out_codec_;
   dev_cfg.data_if = data_port_.interface();
   out_dev_ = esp_codec_dev_new(&dev_cfg);
-  if (!out_dev_) return false;
+  return out_dev_ != nullptr;
+}
 
+bool K151CodecPort::prepare_input_codec() {
+  audio_codec_i2c_cfg_t i2c_cfg = {};
+  i2c_cfg.port = static_cast<i2c_port_t>(kI2cPort);
+  i2c_cfg.bus_handle = i2c_bus_;
   i2c_cfg.addr = ES7210_CODEC_DEFAULT_ADDR;
   in_ctrl_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
-  if (!in_ctrl_ || !in_control_.attach(in_ctrl_)) return false;
+  if (!in_ctrl_ || !in_control_.attach(in_ctrl_) || !input_allowed()) return false;
   es7210_codec_cfg_t in_cfg = {};
   in_cfg.ctrl_if = in_control_.interface();
   in_cfg.mic_selected = ES7210_SEL_MIC1 | ES7210_SEL_MIC2 | ES7210_SEL_MIC3;
   in_codec_ = es7210_codec_new(&in_cfg);
-  if (!in_codec_ || !in_control_.healthy()) return false;
+  if (!in_codec_ || !in_control_.healthy() || !input_allowed()) return false;
+  esp_codec_dev_cfg_t dev_cfg = {};
   dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_IN;
   dev_cfg.codec_if = in_codec_;
+  dev_cfg.data_if = data_port_.interface();
   in_dev_ = esp_codec_dev_new(&dev_cfg);
   return in_dev_ != nullptr;
 }
 
 bool K151CodecPort::microphone_on() {
+  if (!input_allowed()) return fail();
   if (!prepared() || input_open_ || output_open_) return false;
   esp_codec_dev_sample_info_t fs = {};
   fs.bits_per_sample = 16;
@@ -170,36 +221,48 @@ bool K151CodecPort::microphone_on() {
   // Track it before the call so fail() attempts an independent close.
   input_open_ = true;
   if (esp_codec_dev_open(in_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_IN) ||
-      !in_control_.healthy()) return fail();
+      !in_control_.healthy() || !input_allowed()) return fail();
   if (esp_codec_dev_set_in_channel_gain(
           in_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), kInputGain) != 0 ||
-      !in_control_.healthy()) return fail();
+      !in_control_.healthy() || !input_allowed()) return fail();
   return true;
 }
 
 bool K151CodecPort::microphone_off() {
+  if (close_microphone()) return true;
+  if (microphone_only()) return fail();
+  fault_ = true;
+  return false;
+}
+
+bool K151CodecPort::close_microphone() {
   if (!input_open_) return !in_control_.faulted();
   const int rc = esp_codec_dev_close(in_dev_);
-  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_IN) || !in_control_.healthy()) {
-    fault_ = true; return false;
-  }
+  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_IN) || !in_control_.healthy())
+    return false;
   input_open_ = false;
   return true;
 }
 
 bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
   wipe_pcm(mono);
+  if (!input_allowed()) return fail();
   if (!prepared() || !input_open_ || output_open_ || mono.empty() ||
       mono.size() > kMaxFrames) return false;
   std::array<int16_t, kMaxFrames * 2> interleaved = {};
   ScopedPcmWipe clear{interleaved};
   const int rc = esp_codec_dev_read(in_dev_, interleaved.data(),
                                     static_cast<int>(mono.size() * 2 * sizeof(int16_t)));
-  if (rc != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_IN)) {
+  if (rc != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_IN) || !input_allowed()) {
     wipe_pcm(interleaved);
     return fail();
   }
   if (!extract_k151_mic0(std::span<const int16_t>(interleaved.data(), mono.size() * 2), mono)) {
+    return fail();
+  }
+  if (!input_allowed()) {
+    wipe_pcm(mono);
+    wipe_pcm(interleaved);
     return fail();
   }
   return true;
@@ -210,7 +273,7 @@ bool K151CodecPort::speaker_on_low_volume() {
   // No real reset, mute verification or DMA-drain observer exists in this image.
   if (!kK151PhysicalOutputEnabledInHoldImage ||
       !kK151SafeDmaDrainDriverAvailable) return false;
-  if (!prepared() || input_open_ || output_open_) return false;
+  if (microphone_only() || !prepared() || input_open_ || output_open_) return false;
   esp_codec_dev_sample_info_t fs = {};
   fs.bits_per_sample = 16;
   fs.channel = 1;
@@ -262,7 +325,9 @@ bool K151CodecPort::quiet() {
 
 bool K151CodecPort::shutdown() {
   const bool previously_faulted = faulted();
-  bool ok = quiet();
+  const bool mic_ok = close_microphone();
+  const bool speaker_ok = speaker_off();
+  bool ok = mic_ok && speaker_ok;
   if (in_dev_) { esp_codec_dev_delete(in_dev_); in_dev_ = nullptr; }
   if (out_dev_) { esp_codec_dev_delete(out_dev_); out_dev_ = nullptr; }
   if (in_codec_) { audio_codec_delete_codec_if(in_codec_); in_codec_ = nullptr; }

@@ -16,6 +16,9 @@ class K151BoundedI2s final : private audio_codec_data_if_t {
   K151BoundedI2s(const K151BoundedI2s&) = delete;
   K151BoundedI2s& operator=(const K151BoundedI2s&) = delete;
   bool attach(const audio_codec_data_if_t* base, i2s_chan_handle_t rx, i2s_chan_handle_t tx);
+  // Attach a reserved, disabled and unpaired RX. The owner must configure the
+  // fixed PCM format before exposing the interface to the codec.
+  bool attach_receive_only(i2s_chan_handle_t rx);
   void detach(); // Only after codec devices have been deleted.
   const audio_codec_data_if_t* interface() const { return this; }
   bool faulted() const { return failed_.load(); }
@@ -32,6 +35,7 @@ class K151BoundedI2s final : private audio_codec_data_if_t {
   static int write_data(const audio_codec_data_if_t* h, uint8_t* data, int bytes);
   int transfer(bool output, uint8_t* data, int bytes);
   int fail();
+  bool has_channel(int direction) const;
   const audio_codec_data_if_t* base_ = nullptr;
   i2s_chan_handle_t rx_ = nullptr, tx_ = nullptr;
   std::array<bool, 2> formats_{}, enabled_{};

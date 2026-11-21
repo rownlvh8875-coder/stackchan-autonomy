@@ -10,9 +10,8 @@ class K151MicReader final : public MonoMicReader {
  public:
   explicit K151MicReader(K151CodecPort& codec) : codec_(codec) {}
   bool read_10ms(std::span<int16_t> pcm240) override {
-    // Refuse wrong size, unprepared or faulted hardware before codec I/O.
-    const bool ok = pcm240.size() == 240 && codec_.prepared() &&
-                    codec_.capture_mono_24k(pcm240);
+    // Let capture observe revoked consent and release the receive-only port.
+    const bool ok = pcm240.size() == 240 && codec_.capture_mono_24k(pcm240);
     if (!ok) wipe_pcm(pcm240);
     return ok;
   }
