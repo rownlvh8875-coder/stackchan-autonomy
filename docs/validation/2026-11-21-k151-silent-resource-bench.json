@@ -139,8 +139,12 @@
     "partition_table_and_otadata_equal_prewrite_postbench_postrestore": true,
     "final_flash_boot_reset_command_passed": true,
     "post_reset_com3_present_ok": true,
-    "factory_face_return": "PENDING_FRESH_USER_OBSERVATION",
-    "full16mb_restore_performed": false
+    "factory_face_return": "CONFIRMED_BY_USER_BEFORE_SUBSEQUENT_BOARD_TRIAL",
+    "full16mb_restore_performed": false,
+    "factory_face_followup": {
+      "date": "2026-11-21",
+      "user_message": "정상이야 다음단계진행해"
+    }
   },
   "limits": {
     "real_wake_phrase_recognition_tested": false,

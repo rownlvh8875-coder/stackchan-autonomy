@@ -1,5 +1,18 @@
 # Next steps
 
+## 2026-11-21 실물 후속: 보드 조회·원본 복구 완료
+
+검토한 board_probe를 사용자 승인으로 한 번 실행했다. 실제 getter로ota_1 실행을
+확인했고, 다섯 주소 ACK·PMIC/IO ID·설정·터치 버전을7142µs에 읽었다. 같은 원본
+slot1 전체를 복구·독립 digest 검증하고 table/OTA 세 시점 일치를 확인했다.
+**사용자가 이번 재부팅 뒤 얼굴/메뉴 복귀까지 확인했다.**
+[실측·복구 범위·sanitized 증거](validation/2026-11-21-k151-board-readback-live.md)를 우선한다.
+전압/mute/STOP·실제 호출어·독립 GPT 성공으로 확대하지 않는다. 다음 코드 과제는
+codec1.6.2의1000ms 대기·short count·오류 후 PCM wipe를 보호하는 bounded I/O다.
+코드36c4e98와 문서e13124f의 CI는 각각8/9이며, 후자의 Windows3.11 실패는 STOP
+호출 전 명령 진입 대기1초 timeout이다. 두 실패 시험의 추가 로컬 계측2PASS로
+원인이 해결됐다고 보고하지 않는다. 이하 보드 준비 문구는 설치 전 시점의 이력이다.
+
 ## 2026-11-21 후속 준비: 보드 읽기 전용 진단
 
 기존 probe의 코덱 8비트/7비트 주소 오류를 재현·수정하고, STOP/동의 철회와
@@ -18,7 +31,8 @@ PCM 지움 강화도 실제 mic 활성화 전 해결해야 한다. 아래 실물
 사용자 승인 뒤 기존 어댑터와 embedded pack의 [별도 무음 진단](K151_RESOURCE_BENCH.ko.md)을
 실제ota_1에 한 번 설치했다. 512sample×64 합성 chunk, 최대7.615ms 추론,
 질문384000/TTS960000bytes 동시 PSRAM 배치를 관측했다. 같은 슬롯 원본5177344bytes를
-복구하고 독립 verify/표·OTA 전후 일치를 확인했다. 새 출고 얼굴/메뉴 관찰은 대기 중이다.
+복구하고 독립 verify/표·OTA 전후 일치를 확인했다. 이후 보드 조회 승인 전 사용자가
+출고 얼굴/메뉴 복귀를 확인했다.
 [실물 수치·범위](validation/2026-11-21-k151-silent-resource-bench.md)를 우선한다.
 다음은 기존 운영 bootstrap의 실제 mic/출력 STOP·DMA drain과 TLS 동시 peak 증거다.
 과거 실측으로 현재 readiness를 만들지 않는다. cloud 기본 OFF/운영 HOLD를 유지하며,

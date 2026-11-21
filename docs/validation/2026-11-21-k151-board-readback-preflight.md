@@ -1,5 +1,9 @@
 # K151 board readback 준비 검증 — 실물 미적용
 
+후속: 사용자 승인으로1회 실행·원본 복구·독립 verify와 사용자 얼굴/메뉴 복귀 확인을
+완료했다. [최신 실물 증거](2026-11-21-k151-board-readback-live.md)를 우선한다.
+아래는 설치 전 준비 시점의 기록이며 그때의 미승인/미실행 상태를 보존한다.
+
 2026-11-21. 코드 `36c4e98ed1b41aa04e80c7d662986649f29259e5`, 실제 CI checkout
 `c991ec9523d6a82c6908c9aa4bade5b8fdb62991`, app version `c991ec9523d6`.
 같은 `feat/wakeword-josu` / PR #3. [숫자 기록](2026-11-21-k151-board-readback-preflight.json),
