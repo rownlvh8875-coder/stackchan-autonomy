@@ -2,7 +2,7 @@
 // Execute actual port against pinned codec headers + no-hardware C ABI doubles.
 #include "k151_codec_port.hpp"
 #include "k151_mic_reader.hpp"
-#include "stream_resampler.hpp"
+#include "native_wake_input.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -27,6 +27,20 @@ std::string phase;
 bool base_open=true;
 bool mic_only() { return mode.starts_with("mic_only_"); }
 std::atomic_bool local_owner{true}, local_stop{false};
+struct WakeDetector : NativeWakePort {
+  int chunks = 0;
+  bool ready() const override { return true; }
+  NativeWakeFormat format() const override { return {16000, 512, 1, 16}; }
+  bool reset() override { return true; }
+  NativeWakeResult detect(std::span<int16_t> samples) override {
+    assert(samples.size() == 512);
+    ++chunks;
+    assert(samples[0] == 0);
+    assert(samples[159] > 100 && samples[159] < 160);
+    if (mode == "mic_only_wakenet_late_stop") local_stop = true;
+    return NativeWakeResult::detected;
+  }
+};
 int bus_created=0, channels_created=0, tdm_inits=0;
 bool fail_rx_disable=false;
 bool ctrl_open(const audio_codec_ctrl_if_t* h) {assert(h==&controls[0] || h==&controls[1]);return true;}
@@ -210,6 +224,29 @@ int main(int argc,char** argv) {
       assert(!port.shutdown());return 0;
     }
     assert(port.microphone_on());
+    if(mode=="mic_only_wakenet" || mode=="mic_only_wakenet_late_stop") {
+      K151MicReader reader{port};
+      WakeDetector model;
+      NativeWakeInput input;
+      assert(input.configure(model.format()));
+      bool input_allowed = true;
+      const auto allowed = [&] {
+        return input_allowed && local_owner.load() && !local_stop.load();
+      };
+      assert(input.poll(reader, model, allowed) == NativeWakeResult::none);
+      assert(input.poll(reader, model, allowed) == NativeWakeResult::none);
+      input_allowed = false;
+      assert(input.poll(reader, model, allowed) == NativeWakeResult::error);
+      assert(calls == 2 && model.chunks == 0);
+      input_allowed = true;
+      for(int i=0;i<3;++i)assert(input.poll(reader, model, allowed) == NativeWakeResult::none);
+      assert(model.chunks==0);
+      const auto result=input.poll(reader, model, allowed);
+      assert(calls==6 && model.chunks==1);
+      assert(result==(local_stop?NativeWakeResult::error:NativeWakeResult::detected));
+      assert(port.microphone_off() && !rx.enabled && port.shutdown());
+      return 0;
+    }
     if(mode=="mic_only_close_failure") {
       assert(!port.microphone_off());
       assert(port.faulted() && !rx.alive && rx.deletes==1);
@@ -243,10 +280,6 @@ int main(int argc,char** argv) {
     if(mode=="mic_only_ok") {
       assert(ok && calls==1);
       for(size_t i=0;i<pcm.size();++i)assert(pcm[i]==static_cast<int16_t>(i-100));
-      StreamingPcm24To16 resampler;
-      std::array<int16_t,160> wake_pcm{};
-      assert(resampler.process(pcm,wake_pcm));
-      assert(wake_pcm.back()>100 && wake_pcm.back()<160);
       assert(port.microphone_off() && !rx.enabled && port.shutdown());
     } else {
       assert(!ok && port.faulted() && !rx.enabled);

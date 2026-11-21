@@ -5,6 +5,7 @@
 #include "audio_wipe.hpp"
 #include "audio_memory_admission.hpp"
 #include "local_tls_probe.hpp"
+#include "native_wake_input.hpp"
 #include "wire_memory_probe.hpp"
 #include <driver/usb_serial_jtag.h>
 #include <esp_heap_caps.h>
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <memory>
 #include <new>
 #include <vector>
 using namespace stackchan::standalone;
@@ -58,6 +60,40 @@ struct Pcm {
   explicit Pcm(size_t n):samples(n,0) {}
   ~Pcm() {wipe_pcm(samples);}
 };
+
+class SyntheticSilence final : public MonoMicReader {
+ public:
+  bool read_10ms(std::span<int16_t> pcm) override {
+    if (pcm.size() != 240) return false;
+    std::fill(pcm.begin(), pcm.end(), 0);
+    return true;
+  }
+};
+
+bool probe_wake_input(K151WakeNetPort& wake) {
+  if (!allowed() || !wake.reset() || !allowed()) return false;
+  // Keep the shared 2048-sample buffer off the main task's 8 KiB stack.
+  auto input = std::make_unique<NativeWakeInput>();
+  if (!input->configure(wake.format())) return false;
+  SyntheticSilence source;
+  constexpr unsigned frames = 32;
+  int64_t max_poll_us = 0;
+  for (unsigned i = 0; i < frames; ++i) {
+    const auto before = esp_timer_get_time();
+    if (before < 0 || input->poll(source, wake, allowed) != NativeWakeResult::none)
+      return false;
+    const auto after = esp_timer_get_time();
+    if (after < before) return false;
+    max_poll_us = std::max(max_poll_us, after - before);
+    vTaskDelay(1);
+  }
+  if (!allowed() || !wake.reset() || !allowed()) return false;
+  std::printf("{\"wake_input\":\"SYNTHETIC_24K_COMPLETE\",\"frames_10ms\":%u,"
+              "\"max_poll_us\":%lld,\"operating_admission\":false}\n",
+              frames, static_cast<long long>(max_poll_us));
+  return true;
+}
+
 void measure() {
   K151WakeNetPort wake;
   if(!wake.prepare_embedded(owner,stop,{model_start,static_cast<size_t>(model_end-model_start)})) {
@@ -128,12 +164,18 @@ void measure() {
       vTaskDelay(1);
     }
     snapshot("synthetic_inference");
+    const bool wake_input_ok = !failed && allowed() && completed == 64 &&
+                               probe_wake_input(wake);
+    if (!wake_input_ok && allowed() && !failed && completed == 64)
+      std::puts("{\"wake_input\":\"SYNTHETIC_24K_DENIED\",\"operating_admission\":false}");
     std::printf("{\"result\":\"%s\",\"chunks\":%u,\"max_detect_us\":%lld,"
         "\"over_100ms\":%u,\"synthetic_matches\":%u,\"wire_decoders_exercised\":true,"
         "\"local_tls12_peer_verified\":true,\"tls_measured\":false,"
+        "\"synthetic_24k_input_exercised\":%s,"
         "\"operating_admission\":false}\n",
-        !failed && allowed() && completed==64?"FINITE_BENCH_COMPLETED":"BENCH_STOPPED",
-        completed,static_cast<long long>(max_us),over100ms,matches);
+        wake_input_ok && allowed()?"FINITE_BENCH_COMPLETED":"BENCH_STOPPED",
+        completed,static_cast<long long>(max_us),over100ms,matches,
+        wake_input_ok?"true":"false");
   } catch(const std::bad_alloc&) {
     std::puts("{\"result\":\"BENCH_ALLOCATION_DENIED\"}");
   }

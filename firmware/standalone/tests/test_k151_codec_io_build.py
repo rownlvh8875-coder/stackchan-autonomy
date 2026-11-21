@@ -159,6 +159,8 @@ def _build_port(compiler, binary, app):
         "mic_only_stop_read",
         "mic_only_release_latched",
         "mic_only_close_failure",
+        "mic_only_wakenet",
+        "mic_only_wakenet_late_stop",
         "mic_only_stop_before_read",
     ],
 )
