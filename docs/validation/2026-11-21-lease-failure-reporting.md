@@ -62,3 +62,25 @@ exact head로 연결한다. [기계 판독 기록](2026-11-21-lease-failure-repo
 standalone625PASS5SKIP103.07s/집중66PASS는8a34bc1에서 확인한 그대로이며 이
 후속은 firmware 파일을 바꾸지 않는다. 장치 접근·리셋·flash·실음성·유료 API0,
 HOLD/cloud OFF/물리 출력·drain false와 기존 owner/model/PCM 보호를 유지한다.
+
+## 2026-11-22 워커 완료 뒤 이벤트 루프 지연 재현
+
+내장 모델 연결 `a21385c`의 PR Windows 3.12는 기존 지연 주입 시험 한 건의
+계측 assertion에서 실패했다. 기본 시험 499 통과·1 실패·2 건너뜀이었고,
+가상 soak 단계에 이르기 전이었다. 실패 지점에 도달하기 전에 시험의
+안전 정지, lease 상실, 워커 1회 및 잔류 작업 0 조건은 통과했다.
+[Windows 3.12 job](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/44916950444/job/136884491573)
+
+Windows 3.12에서 장치 없이 8사이클로 제한한 시험에 워커 완료까지의 루프
+지연을 주입해 같은 assertion 실패를 재현했다. 안전 정지와 `renew_timeout`,
+워커 실행 156ms, 최대 루프 지연 167ms를 관측했다. 확인된 계측은
+`lease_check/delivery`와 `lease_renew/pre_submission_deadline`이었다.
+실패 CI 로그에는 해당 실행의 상세 stage 값이 없어 두 작업 순서가 정확히
+같았는지는 확인할 수 없다.
+
+시험은 작업 제출 지점에서 워커의 순서를 제어한다. 첫 경우는 워커가
+실행을 시작한 뒤 루프를 재개하고 실제 기한 중단 기록까지 워커를 붙잡는다.
+두 번째는 워커가 결과를 준비할 때까지 루프를 멈춘다. 두 경우 모두
+lease check 자체의 stage와
+안전 정지, 워커 1회, 클라우드·잔류 작업 0을 검증한다. 운영 코드·timeout·lease
+제한은 바꾸지 않았다. 이 재현은 원래 696460c 가상 soak의 원인 규명과 별개다.

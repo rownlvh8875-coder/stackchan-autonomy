@@ -234,12 +234,24 @@ async def test_soak_opt_in_report_keeps_failures_and_no_monitor_task_leak():
     assert report.cloud_requests == 0
 
 
-async def test_measured_slow_lease_worker_still_fails_closed_without_retry(monkeypatch):
+@pytest.mark.parametrize("stall_delivery", [False, True], ids=["worker_running", "loop_stalled"])
+async def test_measured_slow_lease_worker_still_fails_closed_without_retry(
+    monkeypatch, stall_delivery
+):
     from stackchan_autonomy import soak
     from stackchan_autonomy.control import ControlLease
+    from stackchan_autonomy.timing_diagnostics import StorageTrace, TimingProbe, _label
 
     original_engine = soak.AutonomyEngine
     original_check = ControlLease.check
+    original_advance = StorageTrace.advance
+    original_interruption = TimingProbe.note_interruption
+    loop = asyncio.get_running_loop()
+    original_submit = loop.run_in_executor
+    check_interrupted = threading.Event()
+    check_started = threading.Event()
+    check_ready = threading.Event()
+    submission_observed = False
     calls = 0
 
     def short_test_lease(robot, provider, settings, **kwargs):
@@ -250,11 +262,40 @@ async def test_measured_slow_lease_worker_still_fails_closed_without_retry(monke
     def slow_check(self, handle):
         nonlocal calls
         calls += 1
+        check_started.set()
         time.sleep(0.15)
+        if not stall_delivery:
+            # Keep the trace in the worker until the real lease deadline fires.
+            assert check_interrupted.wait(3), "lease check interruption was not observed"
         return original_check(self, handle)
+
+    def submit_with_check_barrier(executor, operation, *args):
+        nonlocal submission_observed
+        future = original_submit(executor, operation, *args)
+        if _label.get() == "lease_check":
+            # Decide which point the worker reaches before the loop can run
+            # the timeout callback. The submitted operation runs independently.
+            observed = check_ready if stall_delivery else check_started
+            submission_observed = observed.wait(3)
+        return future
+
+    def mark_stage(self, stage):
+        original_advance(self, stage)
+        if self.label == "lease_check" and stage == "delivery":
+            check_ready.set()
+
+    def record_interruption(self, label, stage, elapsed):
+        original_interruption(self, label, stage, elapsed)
+        if label == "lease_check":
+            check_interrupted.set()
 
     monkeypatch.setattr(soak, "AutonomyEngine", short_test_lease)
     monkeypatch.setattr(ControlLease, "check", slow_check)
+    monkeypatch.setattr(loop, "run_in_executor", submit_with_check_barrier)
+    if stall_delivery:
+        monkeypatch.setattr(StorageTrace, "advance", mark_stage)
+    else:
+        monkeypatch.setattr(TimingProbe, "note_interruption", record_interruption)
     report = await soak.run_soak(soak.SoakConfig(cycles=8, warmup_cycles=1, diagnostics=True))
     assert not report.passed and "engine_failure" in report.violations
     assert report.failure.control_loss_reason in {"check_timeout", "renew_timeout"}
@@ -262,4 +303,11 @@ async def test_measured_slow_lease_worker_still_fails_closed_without_retry(monke
     assert calls == 1 and report.cloud_requests == report.remaining_tasks == 0
     timing = report.timing_diagnostics
     assert timing["stages"]["storage_operation"]["max_s"] >= 0.14
-    assert any(r["stage"] in {"operation", "serial_wait"} for r in timing["interruptions"])
+    assert submission_observed
+    expected = {"delivery", "post_delivery_deadline"} if stall_delivery else {"operation"}
+    assert any(
+        record["operation"] == "lease_check" and record["stage"] in expected
+        for record in timing["interruptions"]
+    ), timing["interruptions"]
+    if stall_delivery:
+        assert timing["loop_lag_max_s"] >= 0.04
