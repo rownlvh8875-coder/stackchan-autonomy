@@ -4,6 +4,7 @@
 #include "k151_wakenet_port.hpp"
 #include "audio_wipe.hpp"
 #include "audio_memory_admission.hpp"
+#include "local_tls_probe.hpp"
 #include "wire_memory_probe.hpp"
 #include <driver/usb_serial_jtag.h>
 #include <esp_heap_caps.h>
@@ -72,12 +73,26 @@ void measure() {
     if(!q_external) {
       std::puts("{\"result\":\"ALLOCATOR_PLACEMENT_DENIED\"}");return;
     }
-    const bool wire_ok = probe_wire_memory(
+    if (!allowed()) return;
+    {
+      LocalTlsProbe tls;
+      snapshot("model_question_before_local_tls");
+      if (!tls.run(allowed)) {
+        std::printf("{\"result\":\"%s\",\"local_tls_stage\":\"%s\","
+                    "\"local_tls_handshake_error\":%d}\n",
+                    allowed() ? "LOCAL_TLS_DENIED" : "BENCH_STOPPED",
+                    tls.stage(), tls.handshake_error());
+        return;
+      }
+      if (!allowed()) return;
+      snapshot("model_question_local_tls_established");
+      const bool wire_ok = probe_wire_memory(
         tts.samples, allowed, [&](httpwire::Endpoint endpoint, const auto& raw, const auto& pcm) {
           const bool speech = endpoint == httpwire::Endpoint::speech;
           const bool raw_external = esp_ptr_external_ram(raw.data());
           const bool pcm_external = speech && esp_ptr_external_ram(pcm.data());
-          snapshot(speech ? "model_question_wire_and_decoded_pcm" : "model_question_json_decoded");
+          snapshot(speech ? "model_question_tls_wire_and_decoded_pcm"
+                          : "model_question_tls_json_decoded");
           std::printf("{\"wire_probe\":\"%s\",\"body_bytes\":%u,\"body_capacity_bytes\":%u,"
                       "\"body_in_psram\":%s,\"decoded_pcm_capacity_bytes\":%u,"
                       "\"decoded_pcm_in_psram\":%s}\n",
@@ -88,9 +103,10 @@ void measure() {
           return raw.capacity() <= httpwire::response_cap(endpoint) &&
                  (!speech || (raw_external && pcm_external));
         });
-    if (!wire_ok) {
-      std::puts(allowed() ? "{\"result\":\"WIRE_PROBE_DENIED\"}" : "{\"result\":\"BENCH_STOPPED\"}");
-      return;
+      if (!wire_ok) {
+        std::puts(allowed() ? "{\"result\":\"WIRE_PROBE_DENIED\"}" : "{\"result\":\"BENCH_STOPPED\"}");
+        return;
+      }
     }
     if(!allowed())return;
     Pcm chunk{wake.format().chunk_samples};
@@ -114,12 +130,12 @@ void measure() {
     snapshot("synthetic_inference");
     std::printf("{\"result\":\"%s\",\"chunks\":%u,\"max_detect_us\":%lld,"
         "\"over_100ms\":%u,\"synthetic_matches\":%u,\"wire_decoders_exercised\":true,"
-        "\"tls_measured\":false,"
+        "\"local_tls12_peer_verified\":true,\"tls_measured\":false,"
         "\"operating_admission\":false}\n",
         !failed && allowed() && completed==64?"FINITE_BENCH_COMPLETED":"BENCH_STOPPED",
         completed,static_cast<long long>(max_us),over100ms,matches);
   } catch(const std::bad_alloc&) {
-    std::puts("{\"result\":\"PCM_ALLOCATION_DENIED\"}");
+    std::puts("{\"result\":\"BENCH_ALLOCATION_DENIED\"}");
   }
 }
 }

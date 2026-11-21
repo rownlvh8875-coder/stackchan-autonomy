@@ -41,9 +41,22 @@ codec/DMA 동시 부하는 **미측정**, operating_admission은 항상false다.
 watermark다. 모든 입력은 메모리에서 생성한 합성 데이터이고 USB에는 수치만 출력한다.
 기존 64chunk 합성 추론에는 디코딩 PCM과 질문 버퍼를 계속 유지한다.
 
-새 자원 진단은 HTTP 본문 처리만 실행한다. TLS handshake/certificate chain,
-network stack과 실제 codec/DMA의 동시 peak는 별도 측정 대상이다.
-운영 admission 플래그는 계속 false이며 이번 빌드의 실물 실행은 별도 승인 범위다.
+실물 검증한 `f4878fa` 이미지는 HTTP 본문 처리까지 실행했다. 이후 TLS 후속은
+고정 SDK의 Mbed TLS 1.2 클라이언트와 서버를 각각 1KiB의 메모리 FIFO로
+연결한다. 실행 때만 존재하는 PSA CA와 leaf를 사용해 인증서 체인과
+`bench.stackchan.invalid` 이름을 검증한다. 작은 암호화 레코드 수신을 확인한
+뒤 두 TLS 객체가 살아 있는 동안 기존 합성 JSON·PCM 진단을 실행한다.
+HTTP 합성 본문은 메모리에서 기존 receiver로 공급한다.
+
+`model_question_before_local_tls`와 `model_question_local_tls_established`는
+모델과 질문을 고정한 상태에서 연결 전후를 기록한다.
+`model_question_tls_wire_and_decoded_pcm`에서는 speech 원본과 변환 PCM
+및 두 TLS 객체가 함께 살아 있다. minimum 값은 해당 측정 단계까지의 누적
+watermark다. 이 결과에는 인프로세스 서버와 FIFO 비용도 들어간다.
+운영 CA bundle, 실제 피어의 인증서 체인, Wi-Fi와 OS 소켓, 실제 codec/DMA는
+별도 측정 대상이다. `local_tls12_peer_verified`와 `tls_measured`를 별도 필드로
+기록하고 운영 admission은 false로 보고한다. 후속 이미지의 실물 실행은 승인
+이후 수행한다.
 
 ## 산출물과 변경 범위
 
