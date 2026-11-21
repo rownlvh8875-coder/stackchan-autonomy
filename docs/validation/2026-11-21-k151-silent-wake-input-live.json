@@ -1,0 +1,175 @@
+{
+  "status": "SYNTHETIC_WAKE_INPUT_INCOMPLETE_FACTORY_SLOT_RESTORED",
+  "date": "2026-11-21",
+  "timezone": "Asia/Seoul",
+  "code_head": "731bb2af103819113f97c53200e5d7fae450a696",
+  "actual_ci_checkout": "70c2150f987a4412324a9ad84982b3bd42d4c1b0",
+  "scope": "ONE_SYNTHETIC_WAKE_INPUT_BENCH_AND_OTA1_RESTORE",
+  "scope_consumed": true,
+  "port": "COM3",
+  "backup_a_b_sha256_match": true,
+  "backup_bytes_each": 16777216,
+  "prewrite": {
+    "same_chip": true,
+    "metadata_matches": true,
+    "original_slot_verified": true,
+    "chip": "ESP32-S3",
+    "revision": "0.2",
+    "flash_bytes": 16777216,
+    "secure_boot_enabled": false,
+    "flash_encryption_enabled": false
+  },
+  "diagnostic_image": {
+    "sha256": "edc4af1a0d13cee269cf9b3eb798a4af41c051c0af97b81bb30a9f556e703b18",
+    "offset": 5308416,
+    "write_bytes": 789376,
+    "erase_bytes": 790528,
+    "write_elapsed_s": 13.683,
+    "independent_verify_elapsed_s": 2.054
+  },
+  "trial": {
+    "kind": "APPROVED_ONE_SYNTHETIC_WAKE_INPUT_BENCH",
+    "port": "COM3",
+    "fresh_nonce_observed": true,
+    "start_commands": 1,
+    "stop_commands": 1,
+    "observed_hold": false,
+    "events": [
+      {
+        "stage": "baseline",
+        "psram_free": 8385164,
+        "internal_min": 306072,
+        "internal_free": 370803,
+        "psram_largest": 8257536,
+        "internal_largest": 245760,
+        "psram_min": 8385164
+      },
+      {
+        "stage": "model_resident",
+        "psram_free": 8047576,
+        "internal_min": 345635,
+        "internal_free": 353659,
+        "psram_largest": 7995392,
+        "internal_largest": 237568,
+        "psram_min": 8046228
+      },
+      {
+        "stage": "model_question_before_local_tls",
+        "psram_free": 7662548,
+        "internal_min": 345635,
+        "internal_free": 353659,
+        "psram_largest": 7602176,
+        "internal_largest": 237568,
+        "psram_min": 7662548
+      },
+      {
+        "stage": "model_question_local_tls_established",
+        "psram_free": 7657168,
+        "internal_min": 298699,
+        "internal_free": 307899,
+        "psram_largest": 7602176,
+        "internal_largest": 196608,
+        "psram_min": 7657168
+      },
+      {
+        "stage": "model_question_tls_json_decoded",
+        "psram_free": 7395020,
+        "internal_min": 298699,
+        "internal_free": 307899,
+        "psram_largest": 7077888,
+        "internal_largest": 196608,
+        "psram_min": 6862532
+      },
+      {
+        "wire_probe": "json",
+        "decoded_pcm_capacity_bytes": 0,
+        "body_capacity_bytes": 262144,
+        "body_bytes": 262144,
+        "decoded_pcm_in_psram": false,
+        "body_in_psram": true
+      },
+      {
+        "stage": "model_question_tls_wire_and_decoded_pcm",
+        "psram_free": 5723848,
+        "internal_min": 298699,
+        "internal_free": 307899,
+        "psram_largest": 5636096,
+        "internal_largest": 196608,
+        "psram_min": 5723848
+      },
+      {
+        "wire_probe": "speech",
+        "decoded_pcm_capacity_bytes": 960000,
+        "body_capacity_bytes": 960000,
+        "body_bytes": 960000,
+        "decoded_pcm_in_psram": true,
+        "body_in_psram": true
+      },
+      {
+        "stage": "model_question_tts",
+        "psram_free": 6694860,
+        "internal_min": 298699,
+        "internal_free": 352279,
+        "psram_largest": 6684672,
+        "internal_largest": 196608,
+        "psram_min": 5723848
+      },
+      {
+        "chunk_samples": 512,
+        "question_bytes": 384000,
+        "tts_bytes": 960000,
+        "question_in_psram": true,
+        "tts_in_psram": true
+      },
+      {
+        "stage": "synthetic_inference",
+        "psram_free": 6694860,
+        "internal_min": 298699,
+        "internal_free": 352279,
+        "psram_largest": 6684672,
+        "internal_largest": 196608,
+        "psram_min": 5723848
+      }
+    ],
+    "raw_serial_saved": false,
+    "real_audio_captured": false,
+    "paid_api_requests": 0,
+    "status": "RECEIVE_ABORTED",
+    "error_type": "RuntimeError",
+    "error_code": "DUPLICATE_BOOT_OR_NONCE",
+    "elapsed_s": 5.4604,
+    "ignored_lines": 114,
+    "synthetic_24k_completion_observed": false,
+    "reset_reason_observed": false,
+    "root_cause": "unresolved",
+    "trial_retried": false
+  },
+  "restore": {
+    "sha256": "39280cbec8d01362c559cedce7d8cd088d951096a5d8f045ead27fe6bf9038fb",
+    "metadata_matches": true,
+    "independent_verify_passed": true,
+    "offset": 5308416,
+    "bytes": 5177344,
+    "write_elapsed_s": 86.286,
+    "independent_verify_elapsed_s": 9.638,
+    "factory_boot_requested": true,
+    "usb_pnp_com3_observed_after_reset": true,
+    "factory_ui_status": "awaiting_user_observation"
+  },
+  "metadata": {
+    "stages": [
+      "prewrite",
+      "postbench",
+      "postrestore"
+    ],
+    "partition_table_bytes_each": 4096,
+    "ota_bytes_each": 8192,
+    "each_snapshot_matches_original": true
+  },
+  "flash_write_operations": 2,
+  "planned_reset_requests": 4,
+  "real_audio_capture_or_upload": false,
+  "paid_api_requests": 0,
+  "executed_code_ci_pass": 9,
+  "executed_code_ci_total": 9
+}

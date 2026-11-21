@@ -1,5 +1,14 @@
 # Next steps
 
+## 2026-11-21 K151 무음 WakeNet 입력 실물 진단 중단
+
+승인한 `731bb2a` 이미지를 한 번 실행했다. `synthetic_inference` 기록 뒤
+두 번째 시작 대기 메시지가 들어와 수신기가 STOP을 보냈다. 합성 24kHz
+32프레임 완료는 관측되지 않았다. 원본 `ota_1` 전체를 복구하고 독립
+digest 및 표·OTA 세 시점 일치를 확인했다. 출고 재부팅을 요청한 뒤
+COM3 복귀를 확인했다. 추가 시험은 원인을 좁힐 reset reason 및 단계
+기록을 준비한 뒤 검토한다. [실물 진단 기록](validation/2026-11-21-k151-silent-wake-input-live.md)
+
 ## 2026-11-21 코드 후속 — 무음 진단의 WakeNet 입력 연결
 
 운영 컨트롤러와 무음 진단이 동일한 24kHz→16kHz FIR·chunk 누적 코드를
