@@ -90,5 +90,17 @@ runtime/lease/deadline/SQLite 내구성·검사와 실패 CI 재실행은 변경
 
 최종 로컬 전체 검증은 root495PASS2SKIP115.99s, 선택 의존성을 포함한
 standalone586PASS5SKIP113.43s다. 최적화/assertions ON 컴파일러와 Git checkout
-회귀를 포함한다. Ruff/format356files·diff 검사도 통과했다. 실제 S3 target과
+회귀를 포함한다. Ruff/format356files와 자체 작성 파일의 diff 검사를 통과했다.
+원문 SDK audio_codec_if.h의 trailing space는 archive SHA 보존을 위해 유지한다.
+staging 뒤 확인한 이 원문 공백과 생성 provenance JSON의 CRLF를 전체 diff PASS로
+표현하지 않는다. 생성 JSON만 LF로 정리했고 원문 SDK는 변경하지 않았다. 실제 S3 target과
 현재 commit의 CI 결과는 별도로 확인하며 이 로컬 통과로 green을 선언하지 않는다.
+
+후속: 초기5cd310f CI는 **4/9**였다. 실제 S3 세 앱은 PASS였고, Linux4개는
+위 최적화 검증기가 literal0 store만 인식해 각2FAIL/548PASS/41SKIP였다.
+GCC의 zeroed-register store도 확인하도록 별칭/zero-bit 추적을 추가했고 nonzero·
+덮어쓴·무관한·부분 byte register를 거부하는 회귀를 유지했다. 보강 뒤 로컬
+standalone **592PASS5SKIP90.79s**, 최적화 집중9PASS다. GNU 실제 CI는 후속에서
+확인한다. [검증 기록](validation/2026-11-21-k151-bounded-audio-io.md)을 함께 본다.
+PR Windows3.11은 별도0.1초 시험 lease의 acquire_timeout으로 주입한 check 전에
+실패했다. 해당 기대값을 넓히거나 TTL을 늘리지 않았으며 원인 미확정으로 보존한다.
