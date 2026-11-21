@@ -64,6 +64,7 @@ def _build_port(compiler, binary, app):
         BASE / "tests/k151_codec_io_test.cpp",
         app / "k151_codec_port.cpp",
         app / "k151_bounded_i2s.cpp",
+        app / "k151_mic_wake_trial.cpp",
     ]
     command = [
         compiler,
@@ -162,6 +163,27 @@ def _build_port(compiler, binary, app):
         "mic_only_wakenet",
         "mic_only_wakenet_late_stop",
         "mic_only_stop_before_read",
+        "mic_only_trial_ok",
+        "mic_only_trial_evidence",
+        "mic_only_trial_owner",
+        "mic_only_trial_format",
+        "mic_only_trial_stop_before",
+        "mic_only_trial_reset_fail",
+        "mic_only_trial_stop_on_reset",
+        "mic_only_trial_stop_on_open",
+        "mic_only_trial_stop_in_read",
+        "mic_only_trial_stop_in_detect",
+        "mic_only_trial_revoke_in_detect",
+        "mic_only_trial_stop_on_close",
+        "mic_only_trial_stop_on_drop",
+        "mic_only_trial_short",
+        "mic_only_trial_clock_backwards",
+        "mic_only_trial_slow_detect",
+        "mic_only_trial_model_error",
+        "mic_only_trial_close_fail",
+        "mic_only_trial_delete_fail",
+        "mic_only_trial_wall",
+        "mic_only_trial_frame_cap",
     ],
 )
 def test_actual_port_fault_boundaries(port_binary, mode):
@@ -184,6 +206,8 @@ def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
         "k151_bounded_i2s.hpp",
         "k151_codec_control.hpp",
         "k151_mic_reader.hpp",
+        "k151_mic_wake_trial.hpp",
+        "k151_mic_wake_trial.cpp",
         "k151_contract.hpp",
     ]:
         shutil.copyfile(BASE / "esp_app/main" / name, app / name)

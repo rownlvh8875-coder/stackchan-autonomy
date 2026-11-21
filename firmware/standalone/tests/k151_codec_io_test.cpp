@@ -2,10 +2,12 @@
 // Execute actual port against pinned codec headers + no-hardware C ABI doubles.
 #include "k151_codec_port.hpp"
 #include "k151_mic_reader.hpp"
+#include "k151_mic_wake_trial.hpp"
 #include "native_wake_input.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <memory>
 #include <string>
 using namespace stackchan::standalone;
 struct i2s_channel_obj { bool enabled=false; bool alive=true; int disables=0,deletes=0; };
@@ -23,10 +25,46 @@ audio_codec_if_t codecs[2]{};
 Dev devices[2];
 int created=0, deleted=0, data_deletes=0, calls=0, legacy_calls=0, timer_calls=0, gains=0, formats=0;
 int controls_created=0, controls_deleted=0;
+int bus_created=0, channels_created=0, tdm_inits=0;
 std::string phase;
 bool base_open=true;
 bool mic_only() { return mode.starts_with("mic_only_"); }
 std::atomic_bool local_owner{true}, local_stop{false};
+bool mic_wake_trial() { return mode.starts_with("mic_only_trial_"); }
+int trial_resets=0, trial_chunks=0, trial_model_drops=0;
+int64_t trial_time_us=1000;
+struct TrialDetector : NativeWakePort {
+  ~TrialDetector() override {
+    assert(!rx.enabled);
+    if (bus_created) assert(!bus.alive);
+    if (mode == "mic_only_trial_stop_on_drop") local_stop = true;
+    ++trial_model_drops;
+  }
+  bool ready() const override { return true; }
+  NativeWakeFormat format() const override {
+    return {16000, mode == "mic_only_trial_format" ? 159u : 512u, 1, 16};
+  }
+  bool reset() override {
+    ++trial_resets;
+    assert(bus_created == 0);
+    if (mode == "mic_only_trial_stop_on_reset") local_stop = true;
+    return mode != "mic_only_trial_reset_fail";
+  }
+  NativeWakeResult detect(std::span<int16_t> samples) override {
+    assert(samples.size() == 512 && rx.enabled);
+    if (++trial_chunks == 1) {
+      assert(samples[0] == 0);
+      assert(samples[159] > 100 && samples[159] < 160);
+    }
+    if (mode == "mic_only_trial_stop_in_detect") local_stop = true;
+    if (mode == "mic_only_trial_revoke_in_detect") local_owner = false;
+    if (mode == "mic_only_trial_slow_detect") trial_time_us += 100001;
+    if (mode == "mic_only_trial_model_error") return NativeWakeResult::error;
+    if (mode == "mic_only_trial_wall" || mode == "mic_only_trial_frame_cap")
+      return NativeWakeResult::none;
+    return NativeWakeResult::detected;
+  }
+};
 struct WakeDetector : NativeWakePort {
   int chunks = 0;
   bool ready() const override { return true; }
@@ -41,7 +79,6 @@ struct WakeDetector : NativeWakePort {
     return NativeWakeResult::detected;
   }
 };
-int bus_created=0, channels_created=0, tdm_inits=0;
 bool fail_rx_disable=false;
 bool ctrl_open(const audio_codec_ctrl_if_t* h) {assert(h==&controls[0] || h==&controls[1]);return true;}
 int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,bool write) {
@@ -61,7 +98,8 @@ void codec_operation(int i,const char* step) {
   const bool out=i==0;const int reg=out?0x06:0x43,size=out?2:1;
   // ES7210 update_reg_bit discards read error; SDK gain/close discard codec rc.
   (void)c->read_reg(c,reg,1,value.data(),size);
-  if(mode=="mic_only_stop_open" && phase=="open")local_stop=true;
+  if((mode=="mic_only_stop_open" || mode=="mic_only_trial_stop_on_open") && phase=="open")local_stop=true;
+  if(mode=="mic_only_trial_stop_on_close" && phase=="close")local_stop=true;
   if(out){value[0]^=0xa5;value[1]^=0x5a;}
   (void)c->write_reg(c,reg,1,value.data(),size);assert(value[2]==0x5a);
 }
@@ -90,6 +128,7 @@ void zero(std::span<const int16_t> pcm) { for(auto sample:pcm)assert(sample==0);
 }
 extern "C" int64_t esp_timer_get_time() {
   ++timer_calls;
+  if(mic_wake_trial())return trial_time_us;
   if(mode=="clock_negative")return -1;
   if(timer_calls==1)return 1000;
   if(mode=="clock_backwards")return 999;
@@ -126,7 +165,8 @@ extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
   assert(h->alive);++h->disables;
   if(h==&rx && fail_rx_disable)return ESP_FAIL;
   const bool fail_rx=h==&rx && (mode=="release_rx" || mode=="release_both" ||
-                               mode=="release_rx_info" || mode=="mic_only_close_failure");
+                               mode=="release_rx_info" || mode=="mic_only_close_failure" ||
+                               mode=="mic_only_trial_close_fail");
   const bool fail_tx=h==&tx && (mode=="release_tx" || mode=="release_both");
   if((fail_rx || fail_tx) && h->disables==1)return ESP_FAIL;
   if(!h->enabled)return ESP_ERR_INVALID_STATE;
@@ -141,7 +181,12 @@ extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
 extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){assert(h->alive);if(mode=="info_fail" || (mode=="release_rx_info" && h==&rx))return ESP_FAIL;info->is_enabled=h->enabled;info->pair_chan=mode=="mic_only_peer"?&tx:nullptr;return 0;}
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
-  *bytes=(mode=="short" || mode=="mic_only_short"?n-4:mode=="overcount"?n+4:n);
+  *bytes=(mode=="short" || mode=="mic_only_short" || mode=="mic_only_trial_short"?n-4:mode=="overcount"?n+4:n);
+  if(mic_wake_trial()) {
+    trial_time_us+=mode=="mic_only_trial_wall"?20000:mode=="mic_only_trial_frame_cap"?1000:10000;
+    if(mode=="mic_only_trial_stop_in_read")local_stop=true;
+    if(mode=="mic_only_trial_clock_backwards")trial_time_us=-1;
+  }
   auto* pcm=static_cast<int16_t*>(p);
   for(size_t i=0;i<std::min(*bytes,n)/4;++i){pcm[2*i]=static_cast<int16_t>(i-100);pcm[2*i+1]=900;}
   if(mode=="base_lost")base_open=false;
@@ -191,12 +236,64 @@ extern "C" int esp_codec_dev_set_out_vol(esp_codec_dev_handle_t,int){return 0;}
 extern "C" int esp_codec_dev_read(esp_codec_dev_handle_t h,void* p,int n){auto* d=static_cast<Dev*>(h);return d->data->read(d->data,static_cast<uint8_t*>(p),n);}
 extern "C" int esp_codec_dev_write(esp_codec_dev_handle_t h,void* p,int n){auto* d=static_cast<Dev*>(h);return d->data->write(d->data,static_cast<uint8_t*>(p),n);}
 extern "C" void esp_codec_dev_delete(esp_codec_dev_handle_t h){assert(!static_cast<Dev*>(h)->open);++deleted;}
-extern "C" int audio_codec_delete_codec_if(const audio_codec_if_t* c){assert(deleted==created);codec_operation(c==&codecs[0]?0:1,"delete");return 0;}
+extern "C" int audio_codec_delete_codec_if(const audio_codec_if_t* c) {
+  assert(deleted==created);
+  codec_operation(c==&codecs[0]?0:1,"delete");
+  return mode=="mic_only_trial_delete_fail"?ESP_CODEC_DEV_INVALID_ARG:ESP_CODEC_DEV_OK;
+}
 extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t* c){assert(c==&controls[0] || c==&controls[1]);++controls_deleted;return 0;}
 extern "C" int audio_codec_delete_gpio_if(const audio_codec_gpio_if_t*){return 0;}
 extern "C" int audio_codec_delete_data_if(const audio_codec_data_if_t* h){assert(h==&base && deleted==created);++data_deletes;return 0;}
 int main(int argc,char** argv) {
   assert(argc==2);mode=argv[1];
+  if(mic_wake_trial()) {
+    using Outcome = K151MicWakeTrialResult;
+    K151MicWakeTrial trial;
+    const bool missing = mode == "mic_only_trial_evidence";
+    const bool no_owner = mode == "mic_only_trial_owner";
+    const bool bad_format = mode == "mic_only_trial_format";
+    const bool stop_before = mode == "mic_only_trial_stop_before";
+    const bool reset_fail = mode == "mic_only_trial_reset_fail";
+    const bool stop_on_reset = mode == "mic_only_trial_stop_on_reset";
+    const bool stop_on_open = mode == "mic_only_trial_stop_on_open";
+    const bool stop_in_read = mode == "mic_only_trial_stop_in_read";
+    const bool wall = mode == "mic_only_trial_wall";
+    const bool cap = mode == "mic_only_trial_frame_cap";
+    local_owner = !no_owner;
+    local_stop = stop_before;
+    const K151MicOnlyEvidence evidence{true,true,!missing,true};
+    const auto outcome = trial.run(local_owner,local_stop,evidence,std::make_unique<TrialDetector>());
+    assert(trial_model_drops == 1);
+    if (missing || no_owner || stop_before || bad_format || reset_fail || stop_on_reset) {
+      const auto expected = stop_before || stop_on_reset ? Outcome::stopped :
+                            bad_format || reset_fail ? Outcome::fault : Outcome::denied;
+      assert(outcome == expected);
+      assert(calls == 0 && trial_chunks == 0 && bus_created == 0);
+      assert(trial_resets == (reset_fail || stop_on_reset ? 1 : 0));
+      return 0;
+    }
+    assert(trial_resets == 1 && bus_created == 1 && rx.deletes == 1 && tx.deletes == 0 && created == 1);
+    assert(controls_deleted == 1 && bus.deletes == 1 && deleted == 1 && data_deletes == 0);
+    if (wall || cap) {
+      assert(outcome == Outcome::not_detected);
+      assert(calls == (wall ? 250 : 500));
+      assert(trial_chunks == (wall ? 78 : 156));
+    } else if (mode == "mic_only_trial_ok") {
+      assert(outcome == Outcome::detected && calls == 4 && trial_chunks == 1);
+    } else {
+      const bool stop_after = mode == "mic_only_trial_stop_in_detect" ||
+                              mode == "mic_only_trial_revoke_in_detect" ||
+                              mode == "mic_only_trial_stop_on_close" ||
+                              mode == "mic_only_trial_stop_on_drop";
+      const bool read_error = mode == "mic_only_trial_short" || mode == "mic_only_trial_clock_backwards";
+      assert(outcome == (stop_after ? Outcome::stopped : Outcome::fault));
+      assert(calls == (stop_on_open ? 0 : stop_in_read || read_error ? 1 : 4));
+      assert(trial_chunks == (stop_on_open || stop_in_read || read_error ? 0 : 1));
+    }
+    assert(trial.run(local_owner,local_stop,evidence,std::make_unique<TrialDetector>()) == Outcome::denied);
+    assert(trial_model_drops == 2 && bus_created == 1 && trial_resets == 1);
+    return 0;
+  }
   K151CodecPort port;std::array<int16_t,240> pcm;pcm.fill(123);
   if(mic_only()) {
     const K151MicOnlyEvidence verified{true,true,true,true};

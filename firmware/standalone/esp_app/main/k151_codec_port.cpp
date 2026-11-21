@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <utility>
 #include <driver/i2c_master.h>
 #include <esp_log.h>
 
@@ -48,10 +49,7 @@ K151CodecPort::~K151CodecPort() { (void)shutdown(); }
 bool K151CodecPort::prepare_microphone_only(const std::atomic_bool& owner,
                                             const std::atomic_bool& stop,
                                             const K151MicOnlyEvidence& evidence) {
-  if (attempted_ || !owner.load() || stop.load() || !evidence.exact_board_verified ||
-      !evidence.microphone_supply_and_clock_pins_verified ||
-      !evidence.amplifier_isolation_with_input_clocks_verified ||
-      !evidence.exclusive_i2s0_owner_verified) return false;
+  if (attempted_ || !owner.load() || stop.load() || !evidence.verified()) return false;
   mic_owner_ = &owner;
   mic_stop_ = &stop;
   return prepare_hardware();
@@ -330,17 +328,23 @@ bool K151CodecPort::shutdown() {
   bool ok = mic_ok && speaker_ok;
   if (in_dev_) { esp_codec_dev_delete(in_dev_); in_dev_ = nullptr; }
   if (out_dev_) { esp_codec_dev_delete(out_dev_); out_dev_ = nullptr; }
-  if (in_codec_) { audio_codec_delete_codec_if(in_codec_); in_codec_ = nullptr; }
-  if (out_codec_) { audio_codec_delete_codec_if(out_codec_); out_codec_ = nullptr; }
+  if (in_codec_ && audio_codec_delete_codec_if(std::exchange(in_codec_, nullptr)) != ESP_CODEC_DEV_OK)
+    ok = false;
+  if (out_codec_ && audio_codec_delete_codec_if(std::exchange(out_codec_, nullptr)) != ESP_CODEC_DEV_OK)
+    ok = false;
   // Codec destruction can itself issue register operations whose errors the
   // SDK drops. Observe before detaching/freeing either original control object.
   if (in_control_.faulted() || out_control_.faulted()) ok = false;
   in_control_.detach(); out_control_.detach();
-  if (in_ctrl_) { audio_codec_delete_ctrl_if(in_ctrl_); in_ctrl_ = nullptr; }
-  if (out_ctrl_) { audio_codec_delete_ctrl_if(out_ctrl_); out_ctrl_ = nullptr; }
-  if (gpio_if_) { audio_codec_delete_gpio_if(gpio_if_); gpio_if_ = nullptr; }
+  if (in_ctrl_ && audio_codec_delete_ctrl_if(std::exchange(in_ctrl_, nullptr)) != ESP_CODEC_DEV_OK)
+    ok = false;
+  if (out_ctrl_ && audio_codec_delete_ctrl_if(std::exchange(out_ctrl_, nullptr)) != ESP_CODEC_DEV_OK)
+    ok = false;
+  if (gpio_if_ && audio_codec_delete_gpio_if(std::exchange(gpio_if_, nullptr)) != ESP_CODEC_DEV_OK)
+    ok = false;
   data_port_.detach();
-  if (data_if_) { audio_codec_delete_data_if(data_if_); data_if_ = nullptr; }
+  if (data_if_ && audio_codec_delete_data_if(std::exchange(data_if_, nullptr)) != ESP_CODEC_DEV_OK)
+    ok = false;
   if (rx_) {
     if (!disable_owned_channel(rx_)) ok = false;
     if (i2s_del_channel(rx_) != ESP_OK) ok = false;
