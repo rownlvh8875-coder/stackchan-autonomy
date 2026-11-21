@@ -56,7 +56,8 @@ watermark다. 이 결과에는 인프로세스 서버와 FIFO 비용도 들어�
 운영 CA bundle, 실제 피어의 인증서 체인, Wi-Fi와 OS 소켓, 실제 codec/DMA는
 별도 측정 대상이다. `local_tls12_peer_verified`와 `tls_measured`를 별도 필드로
 기록하고 운영 admission은 false로 보고한다. 후속 이미지의 실물 실행은 승인
-이후 수행한다.
+이후 한 번 완료했고 [메모리 TLS 실측과 원본 복구](validation/2026-11-21-k151-local-tls-live.md)에
+범위와 수치를 기록했다.
 
 ## 산출물과 변경 범위
 

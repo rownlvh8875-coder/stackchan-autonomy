@@ -1,0 +1,188 @@
+{
+  "kind": "K151_IN_MEMORY_TLS_WIRE_MEMORY_LIVE",
+  "date_kst": "2026-11-21",
+  "source_head": "1c19894c3715f62c5e414defe86d0c181446a0ee",
+  "actual_ci_checkout": "9012a5dc9cd5151d892703dd59b79c8742dbed8a",
+  "image": {
+    "sha256": "6f84e4d0f876c3ab18cdc129db31cd5eed5b2b6e3b3d80f52b9740543589afd0",
+    "bytes": 786688,
+    "write_offset": "0x510000",
+    "write_exclusive_end": "0x5D0100",
+    "erase_exclusive_end": "0x5D1000",
+    "erase_bytes": 790528,
+    "write_seconds": 13.516,
+    "independent_verify": true
+  },
+  "restore": {
+    "sha256": "39280cbec8d01362c559cedce7d8cd088d951096a5d8f045ead27fe6bf9038fb",
+    "bytes": 5177344,
+    "span": "[0x510000,0xA00000)",
+    "write_seconds": 84.656,
+    "independent_verify": true,
+    "three_point_partition_table_and_ota_digest_match": true,
+    "factory_boot_requested": true,
+    "factory_ui_status": "PENDING_USER_UI_CONFIRMATION",
+    "usb_pnp_after_reboot": {
+      "port": "COM3",
+      "status": "OK"
+    }
+  },
+  "backups": {
+    "matching_full_copies": 3,
+    "each_bytes": 16777216,
+    "sha256": "c1241a7c87145ee8b9569cfbcfbb1f8c289641856f9b9b5ddf2ccd565019543e"
+  },
+  "scope": {
+    "flash_write_commands": 2,
+    "commanded_resets": 4,
+    "local_starts": 1,
+    "memory_tls_pair_verified": true,
+    "wifi_started": false,
+    "serial_body_saved": false,
+    "real_audio_captured": false,
+    "paid_api_requests": 0
+  },
+  "heap": {
+    "speech_overlap_vs_model_resident_psram_used": 2323728,
+    "established_tls_delta_internal": 45760,
+    "established_tls_delta_psram": 5380,
+    "samples": [
+      {
+        "stage": "baseline",
+        "psram_largest": 8257536,
+        "internal_largest": 245760,
+        "internal_free": 370803,
+        "psram_free": 8385164,
+        "internal_min": 306072,
+        "psram_min": 8385164
+      },
+      {
+        "stage": "model_resident",
+        "psram_largest": 7995392,
+        "internal_largest": 237568,
+        "internal_free": 353659,
+        "psram_free": 8047576,
+        "internal_min": 345635,
+        "psram_min": 8046228
+      },
+      {
+        "stage": "model_question_before_local_tls",
+        "psram_largest": 7602176,
+        "internal_largest": 237568,
+        "internal_free": 353659,
+        "psram_free": 7662548,
+        "internal_min": 345635,
+        "psram_min": 7662548
+      },
+      {
+        "stage": "model_question_local_tls_established",
+        "psram_largest": 7602176,
+        "internal_largest": 196608,
+        "internal_free": 307899,
+        "psram_free": 7657168,
+        "internal_min": 298695,
+        "psram_min": 7657168
+      },
+      {
+        "stage": "model_question_tls_json_decoded",
+        "psram_largest": 7077888,
+        "internal_largest": 196608,
+        "internal_free": 307899,
+        "psram_free": 7395020,
+        "internal_min": 298695,
+        "psram_min": 6862532
+      },
+      {
+        "wire_probe": "json",
+        "decoded_pcm_capacity_bytes": 0,
+        "body_bytes": 262144,
+        "body_capacity_bytes": 262144,
+        "body_in_psram": true,
+        "decoded_pcm_in_psram": false
+      },
+      {
+        "stage": "model_question_tls_wire_and_decoded_pcm",
+        "psram_largest": 5636096,
+        "internal_largest": 196608,
+        "internal_free": 307899,
+        "psram_free": 5723848,
+        "internal_min": 298695,
+        "psram_min": 5723848
+      },
+      {
+        "wire_probe": "speech",
+        "decoded_pcm_capacity_bytes": 960000,
+        "body_bytes": 960000,
+        "body_capacity_bytes": 960000,
+        "body_in_psram": true,
+        "decoded_pcm_in_psram": true
+      },
+      {
+        "stage": "model_question_tts",
+        "psram_largest": 6684672,
+        "internal_largest": 196608,
+        "internal_free": 352279,
+        "psram_free": 6694860,
+        "internal_min": 298695,
+        "psram_min": 5723848
+      },
+      {
+        "question_bytes": 384000,
+        "tts_bytes": 960000,
+        "chunk_samples": 512,
+        "tts_in_psram": true,
+        "question_in_psram": true
+      },
+      {
+        "stage": "synthetic_inference",
+        "psram_largest": 6684672,
+        "internal_largest": 196608,
+        "internal_free": 352279,
+        "psram_free": 6694860,
+        "internal_min": 298695,
+        "psram_min": 5723848
+      },
+      {
+        "result": "FINITE_BENCH_COMPLETED",
+        "max_detect_us": 7247,
+        "chunks": 64,
+        "synthetic_matches": 0,
+        "over_100ms": 0,
+        "wire_decoders_exercised": true,
+        "local_tls12_peer_verified": true,
+        "tls_measured": false,
+        "operating_admission": false
+      },
+      {
+        "stage": "after_cleanup",
+        "psram_largest": 8257536,
+        "internal_largest": 196608,
+        "internal_free": 369335,
+        "psram_free": 8385136,
+        "internal_min": 298695,
+        "psram_min": 5723848
+      },
+      {
+        "bench": "HOLD_UNTIL_RESET",
+        "operating_admission": false
+      }
+    ]
+  },
+  "limits": {
+    "tls_measured": false,
+    "physical_audio_measured": false,
+    "physical_stop_measured": false,
+    "actual_wake_recognition_measured": false,
+    "standalone_gpt_turn_measured": false,
+    "operating_admission": false,
+    "production_tls_chain_and_network_measured": false
+  },
+  "firmware_source_ci": {
+    "head": "1c19894c3715f62c5e414defe86d0c181446a0ee",
+    "status": "9/9",
+    "target": "PASS",
+    "push_run": 44867512284,
+    "pr_run": 44867515525,
+    "target_run": 44867515518
+  }
+}
