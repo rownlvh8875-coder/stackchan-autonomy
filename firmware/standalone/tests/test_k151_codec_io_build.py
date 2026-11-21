@@ -184,6 +184,11 @@ def _build_port(compiler, binary, app):
         "mic_only_trial_delete_fail",
         "mic_only_trial_wall",
         "mic_only_trial_frame_cap",
+        "mic_only_trial_live_low_memory",
+        "mic_only_trial_live_fragmented",
+        "mic_only_trial_live_bad_metrics",
+        "mic_only_trial_stop_during_memory_check",
+        "mic_only_trial_revoke_during_memory_check",
     ],
 )
 def test_actual_port_fault_boundaries(port_binary, mode):
@@ -209,6 +214,7 @@ def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
         "k151_mic_only_evidence.hpp",
         "k151_mic_wake_trial.hpp",
         "k151_mic_wake_trial.cpp",
+        "k151_mic_wake_memory.hpp",
         "k151_contract.hpp",
     ]:
         shutil.copyfile(BASE / "esp_app/main" / name, app / name)

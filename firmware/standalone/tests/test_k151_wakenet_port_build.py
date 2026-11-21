@@ -27,6 +27,8 @@ def compiled(tmp_path_factory):
             "-I",
             str(BASE / "tests/idf_partition_doubles"),
             "-I",
+            str(BASE / "tests/codec_io_doubles"),
+            "-I",
             str(BASE / "tests/sdk_esp_sr_2_4_7"),
             "-I",
             str(BASE / "core"),
@@ -130,6 +132,9 @@ def compiled(tmp_path_factory):
         "mic_trial_bad_hash",
         "mic_trial_revoke_hash",
         "mic_trial_stop_create",
+        "mic_trial_low_memory",
+        "mic_trial_fragmented",
+        "mic_trial_stop_during_memory_check",
     ],
 )
 def test_sdk_wake_case(compiled, case):

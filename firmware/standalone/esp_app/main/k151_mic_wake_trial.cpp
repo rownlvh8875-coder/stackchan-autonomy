@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "k151_mic_wake_trial.hpp"
+#include "k151_mic_wake_memory.hpp"
 #include "k151_mic_reader.hpp"
 #include <esp_timer.h>
 #include <utility>
@@ -62,6 +63,11 @@ K151MicWakeTrialResult K151MicWakeTrial::run_prepared(const std::atomic_bool& ow
   if (!allowed()) return Result::stopped;
   if (!model->reset() || !input_.matches(*model)) return Result::fault;
   if (!allowed()) return Result::stopped;
+  const bool resident_headroom = k151_mic_wake_internal_heap_available();
+  if (!resident_headroom || !allowed()) {
+    model.reset();
+    return allowed() ? Result::memory_denied : Result::stopped;
+  }
 
   K151CodecPort codec;
   const bool prepared = codec.prepare_microphone_only(owner, stop, evidence);

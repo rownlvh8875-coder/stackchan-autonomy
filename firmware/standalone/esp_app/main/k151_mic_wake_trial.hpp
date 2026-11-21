@@ -9,7 +9,7 @@
 
 namespace stackchan::standalone {
 
-enum class K151MicWakeTrialResult { denied, stopped, not_detected, detected, fault };
+enum class K151MicWakeTrialResult { denied, stopped, not_detected, detected, fault, memory_denied };
 
 // Dormant diagnostic, one synchronous run per instance across both entry points.
 // Keep the input buffer off small task stacks. STOP and ownership loss must latch

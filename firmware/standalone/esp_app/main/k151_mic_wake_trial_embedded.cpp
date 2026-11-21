@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "k151_mic_wake_trial.hpp"
+#include "k151_mic_wake_memory.hpp"
 #include "k151_wakenet_port.hpp"
 #include <new>
 #include <utility>
@@ -11,12 +12,15 @@ K151MicWakeTrialResult K151MicWakeTrial::run_embedded(const std::atomic_bool& ow
                                                      const K151MicOnlyEvidence& evidence,
                                                      std::span<const uint8_t> pack) {
   if (const auto denied = begin(owner, stop, evidence)) return *denied;
+  const auto allowed = [&] { return owner.load() && !stop.load(); };
 
+  const bool baseline_available = k151_mic_wake_internal_heap_available();
+  if (!allowed()) return K151MicWakeTrialResult::stopped;
+  if (!baseline_available) return K151MicWakeTrialResult::memory_denied;
   std::unique_ptr<K151WakeNetPort> model{new (std::nothrow) K151WakeNetPort};
   if (!model || !model->prepare_embedded(owner, stop, pack)) {
     model.reset();
-    return stop.load() || !owner.load() ? K151MicWakeTrialResult::stopped
-                                        : K151MicWakeTrialResult::fault;
+    return allowed() ? K151MicWakeTrialResult::fault : K151MicWakeTrialResult::stopped;
   }
   return run_prepared(owner, stop, evidence, std::move(model));
 }

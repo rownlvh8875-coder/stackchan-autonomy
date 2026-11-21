@@ -5,6 +5,7 @@
 #include "k151_mic_wake_trial.hpp"
 #include "k151_model_assets.hpp"
 #include "synthetic_wake_probe.hpp"
+#include <esp_heap_caps.h>
 #include <esp_partition.h>
 #include <psa/crypto.h>
 #include <array>
@@ -49,7 +50,7 @@ int detects=0,cleans=0,creates=0,ret=0;
 srmodel_list_t* shared=nullptr;
 std::atomic_bool owner{true},stop{false};
 int finds=0,hashes=0;
-int mic_trial_handoffs=0;
+int mic_trial_handoffs=0, heap_checks=0;
 std::array<uint8_t,292607> embedded{};
 esp_partition_t partition{};
 model_iface_data_t* create(const void* n,det_mode_t mode) {
@@ -110,6 +111,14 @@ void destroy(model_iface_data_t* d) {
 }
 extern "C" bool esp_ptr_external_ram(const void*) {return scenario=="embedded_psram";}
 extern "C" bool esp_ptr_in_drom(const void*) {return scenario!="embedded_mutable";}
+extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
+  assert(caps==(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  assert(++heap_checks==1 && hashes==0 && events.empty());
+  *info={128*1024,32*1024};
+  if (scenario=="mic_trial_low_memory") --info->total_free_bytes;
+  if (scenario=="mic_trial_fragmented") --info->largest_free_block;
+  if (scenario=="mic_trial_stop_during_memory_check") stop=true;
+}
 extern "C" psa_status_t psa_crypto_init() {
   if(scenario=="embedded_crypto_revoke_init")owner=false;
   return scenario=="embedded_crypto_init_error"?-1:PSA_SUCCESS;
@@ -186,13 +195,19 @@ int main(int argc,char** argv) {
     const auto input=scenario=="mic_trial_bad_size"?std::span(embedded).first(10):std::span(embedded);
     K151MicWakeTrial trial;
     const auto r=trial.run_embedded(owner,stop,evidence,input);
+    const bool denied_before_memory=scenario=="mic_trial_no_owner" ||
+        scenario=="mic_trial_stopped" || scenario=="mic_trial_no_evidence";
+    assert(heap_checks==(denied_before_memory?0:1));
     if (scenario=="mic_trial_ok") {
       assert(r==Result::detected && mic_trial_handoffs==1 && hashes==1 && events=="efhcdb");
     } else {
       assert(mic_trial_handoffs==0);
       if(scenario=="mic_trial_bad_hash" || scenario=="mic_trial_bad_size")assert(r==Result::fault);
+      else if(scenario=="mic_trial_low_memory" || scenario=="mic_trial_fragmented")
+        assert(r==Result::memory_denied);
       else if(scenario=="mic_trial_stopped" || scenario=="mic_trial_revoke_hash" ||
-              scenario=="mic_trial_stop_create")assert(r==Result::stopped);
+              scenario=="mic_trial_stop_create" || scenario=="mic_trial_stop_during_memory_check")
+        assert(r==Result::stopped);
       else assert(r==Result::denied);
       assert(hashes==(scenario=="mic_trial_bad_hash" || scenario=="mic_trial_revoke_hash" ||
                       scenario=="mic_trial_stop_create"?1:0));
@@ -203,6 +218,7 @@ int main(int argc,char** argv) {
     owner=true;stop=false;
     assert(trial.run_embedded(owner,stop,{true,true,true,true},embedded)==Result::denied);
     assert(hashes==hash_count && events==before && !active_data && !shared && finds==0);
+    assert(heap_checks==(denied_before_memory?0:1));
     return 0;
   }
   if(scenario=="bench_reset_bridge") {

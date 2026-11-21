@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <esp_heap_caps.h>
 #include <memory>
 #include <string>
 using namespace stackchan::standalone;
@@ -32,6 +33,7 @@ bool mic_only() { return mode.starts_with("mic_only_"); }
 std::atomic_bool local_owner{true}, local_stop{false};
 bool mic_wake_trial() { return mode.starts_with("mic_only_trial_"); }
 int trial_resets=0, trial_chunks=0, trial_model_drops=0;
+int heap_checks=0;
 int64_t trial_time_us=1000;
 struct TrialDetector : NativeWakePort {
   ~TrialDetector() override {
@@ -133,6 +135,16 @@ extern "C" int64_t esp_timer_get_time() {
   if(timer_calls==1)return 1000;
   if(mode=="clock_backwards")return 999;
   return mode=="deadline" || mode=="write_deadline" ? 41001 : mode=="boundary" ? 41000 : 2000;
+}
+extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
+  assert(caps==(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  assert(++heap_checks==1 && trial_resets==1 && bus_created==0 && !local_stop && local_owner);
+  *info={128*1024,32*1024};
+  if (mode=="mic_only_trial_live_low_memory") --info->total_free_bytes;
+  if (mode=="mic_only_trial_live_fragmented") --info->largest_free_block;
+  if (mode=="mic_only_trial_live_bad_metrics") info->largest_free_block=info->total_free_bytes+1;
+  if (mode=="mic_only_trial_revoke_during_memory_check") local_owner=false;
+  if (mode=="mic_only_trial_stop_during_memory_check") local_stop=true;
 }
 extern "C" esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t*,i2c_master_bus_handle_t* h){++bus_created;*h=&bus;return 0;}
 extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){
@@ -269,7 +281,17 @@ int main(int argc,char** argv) {
                             bad_format || reset_fail ? Outcome::fault : Outcome::denied;
       assert(outcome == expected);
       assert(calls == 0 && trial_chunks == 0 && bus_created == 0);
+      assert(heap_checks == 0);
       assert(trial_resets == (reset_fail || stop_on_reset ? 1 : 0));
+      return 0;
+    }
+    assert(heap_checks == 1);
+    if (mode.starts_with("mic_only_trial_live_") ||
+        mode.find("_during_memory_check") != std::string::npos) {
+      assert(outcome == (local_owner && !local_stop ? Outcome::memory_denied : Outcome::stopped));
+      assert(calls == 0 && trial_chunks == 0 && trial_resets == 1 && bus_created == 0);
+      assert(trial.run(local_owner,local_stop,evidence,std::make_unique<TrialDetector>()) == Outcome::denied);
+      assert(heap_checks == 1 && trial_resets == 1);
       return 0;
     }
     assert(trial_resets == 1 && bus_created == 1 && rx.deletes == 1 && tx.deletes == 0 && created == 1);
