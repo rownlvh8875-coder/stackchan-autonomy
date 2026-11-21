@@ -54,6 +54,13 @@ FIR과 chunk 누적을 사용하며, 입력 단계 최대 처리 시간과 완�
 않았다. 같은 슬롯을 복구·검증했고 사용자가 출고 얼굴·메뉴의 복귀를 확인했다.
 [실물 중단·복구 기록](validation/2026-11-21-k151-silent-wake-input-live.md)
 
+후속 계측은 시작 메시지에 ESP-IDF reset reason을 넣고, 모델 reset과
+입력 버퍼 준비, 첫 poll·detect 및 마지막 reset의 경계를 기록한다.
+첫 detect의 checkpoint 출력 비용은 `max_poll_us`에 포함되며, 결과의
+`checkpoint_latency_included` 필드로 표시한다. 기존 직결 64개 모델 chunk의
+`max_detect_us`는 해당 checkpoint의 영향을 받지 않는다.
+[reset 계측과 수신기 범위](validation/2026-11-21-k151-wake-reset-telemetry.md)
+
 실물 검증한 `f4878fa` 이미지는 HTTP 본문 처리까지 실행했다. 이후 TLS 후속은
 고정 SDK의 Mbed TLS 1.2 클라이언트와 서버를 각각 1KiB의 메모리 FIFO로
 연결한다. 실행 때만 존재하는 PSA CA와 leaf를 사용해 인증서 체인과

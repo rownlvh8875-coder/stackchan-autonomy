@@ -1,5 +1,14 @@
 # Next steps
 
+## 2026-11-21 무음 WakeNet 중단 지점 계측
+
+기존 시작 메시지에 ESP-IDF reset reason을 추가했다. 무음 진단만 모델
+reset, 버퍼 준비, 첫 poll·detect 및 마지막 reset 경계를 고정 필드로
+남긴다. 수신기는 두 번째 시작 메시지에서 원인 값과 nonce 변경 여부를
+보존하고 추가 START 없이 STOP한다. 실제 중단 원인은 다음에 승인할
+이미지의 계측 결과가 필요하다.
+[계측과 오프라인 검증](validation/2026-11-21-k151-wake-reset-telemetry.md)
+
 ## 2026-11-21 K151 무음 WakeNet 입력 실물 진단 중단
 
 승인한 `731bb2a` 이미지를 한 번 실행했다. `synthetic_inference` 기록 뒤

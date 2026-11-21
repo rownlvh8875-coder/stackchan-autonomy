@@ -5,19 +5,19 @@
 #include "audio_wipe.hpp"
 #include "audio_memory_admission.hpp"
 #include "local_tls_probe.hpp"
-#include "native_wake_input.hpp"
+#include "synthetic_wake_probe.hpp"
 #include "wire_memory_probe.hpp"
 #include <driver/usb_serial_jtag.h>
 #include <esp_heap_caps.h>
 #include <esp_memory_utils.h>
 #include <esp_random.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
-#include <memory>
 #include <new>
 #include <vector>
 using namespace stackchan::standalone;
@@ -28,6 +28,7 @@ std::atomic_bool owner{false},stop{false},reader_done{false};
 constexpr auto internal_caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
 constexpr auto external_caps=MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT;
 bool allowed() {return owner.load() && !stop.load();}
+static_assert(ESP_RST_UNKNOWN == 0 && ESP_RST_CPU_LOCKUP == 15);
 void snapshot(const char* stage) {
   std::printf("{\"stage\":\"%s\",\"internal_free\":%u,\"internal_largest\":%u,"
       "\"psram_free\":%u,\"psram_largest\":%u,\"internal_min\":%u,\"psram_min\":%u}\n",
@@ -41,8 +42,10 @@ void snapshot(const char* stage) {
 void reader(void*) {
   const uint32_t nonce=esp_random();
   BenchGate gate{nonce,esp_timer_get_time()/1000};
-  std::printf("{\"bench\":\"WAIT_LOCAL_START\",\"nonce\":\"%08lX\",\"wait_ms\":60000}\n",
-              static_cast<unsigned long>(nonce));
+  std::printf("{\"bench\":\"WAIT_LOCAL_START\",\"nonce\":\"%08lX\","
+              "\"wait_ms\":60000,\"reset_reason\":%d}\n",
+              static_cast<unsigned long>(nonce), static_cast<int>(esp_reset_reason()));
+  (void)std::fflush(stdout);
   while(!gate.stopped() && !reader_done.load()) {
     char c{};
     const int count=usb_serial_jtag_read_bytes(&c,1,pdMS_TO_TICKS(20));
@@ -61,36 +64,19 @@ struct Pcm {
   ~Pcm() {wipe_pcm(samples);}
 };
 
-class SyntheticSilence final : public MonoMicReader {
- public:
-  bool read_10ms(std::span<int16_t> pcm) override {
-    if (pcm.size() != 240) return false;
-    std::fill(pcm.begin(), pcm.end(), 0);
-    return true;
-  }
-};
-
 bool probe_wake_input(K151WakeNetPort& wake) {
-  if (!allowed() || !wake.reset() || !allowed()) return false;
-  // Keep the shared 2048-sample buffer off the main task's 8 KiB stack.
-  auto input = std::make_unique<NativeWakeInput>();
-  if (!input->configure(wake.format())) return false;
-  SyntheticSilence source;
-  constexpr unsigned frames = 32;
-  int64_t max_poll_us = 0;
-  for (unsigned i = 0; i < frames; ++i) {
-    const auto before = esp_timer_get_time();
-    if (before < 0 || input->poll(source, wake, allowed) != NativeWakeResult::none)
-      return false;
-    const auto after = esp_timer_get_time();
-    if (after < before) return false;
-    max_poll_us = std::max(max_poll_us, after - before);
-    vTaskDelay(1);
-  }
-  if (!allowed() || !wake.reset() || !allowed()) return false;
+  const auto max_poll_us = probe_synthetic_wake_input(
+      wake, allowed, esp_timer_get_time, [] { vTaskDelay(1); },
+      [](std::string_view checkpoint) {
+        return std::printf("{\"wake_checkpoint\":\"%.*s\",\"operating_admission\":false}\n",
+                           static_cast<int>(checkpoint.size()), checkpoint.data()) > 0 &&
+               std::fflush(stdout) == 0;
+      });
+  if (!max_poll_us || !allowed()) return false;
   std::printf("{\"wake_input\":\"SYNTHETIC_24K_COMPLETE\",\"frames_10ms\":%u,"
-              "\"max_poll_us\":%lld,\"operating_admission\":false}\n",
-              frames, static_cast<long long>(max_poll_us));
+              "\"max_poll_us\":%lld,\"checkpoint_latency_included\":true,"
+              "\"operating_admission\":false}\n",
+              kSyntheticWakeFrames, static_cast<long long>(*max_poll_us));
   return true;
 }
 
