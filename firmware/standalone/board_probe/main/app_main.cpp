@@ -37,20 +37,24 @@ void report(const k151::ReadOnlyEvidence& e, int64_t elapsed) {
   std::printf("{\"probe\":\"READBACK_COMPLETED\",\"elapsed_us\":%lld,"
       "\"ack\":[%u,%u,%u,%u,%u],\"pmic_id_valid\":%u,\"pmic_id\":%u,"
       "\"pmic_ldo_valid\":%u,\"pmic_regs\":[144,148,149,151,153],"
+      "\"pmic_aldo12_valid\":%u,\"pmic_aldo12_values\":[%u,%u],"
       "\"pmic_values\":[%u,%u,%u,%u,%u],\"aw_id_valid\":%u,\"aw_id\":%u,"
       "\"aw_outputs_valid\":%u,\"aw_outputs\":[%u,%u],"
       "\"aw_directions_valid\":%u,\"aw_directions\":[%u,%u],"
+      "\"aw_p0_mode_valid\":%u,\"aw_p0_mode\":%u,"
       "\"touch_valid\":%u,\"touch_version\":[%u,%u,%u,%u,%u,%u],"
       "\"operating_admission\":false}\n",
       static_cast<long long>(elapsed),
       unsigned(e.acknowledged[0]), unsigned(e.acknowledged[1]), unsigned(e.acknowledged[2]),
       unsigned(e.acknowledged[3]), unsigned(e.acknowledged[4]),
       unsigned(e.pmic_id_read), unsigned(e.pmic_id), unsigned(e.pmic_ldo_read),
+      unsigned(e.pmic_aldo12_read), unsigned(e.pmic_aldo12[0]), unsigned(e.pmic_aldo12[1]),
       unsigned(e.pmic_ldo[0]), unsigned(e.pmic_ldo[1]), unsigned(e.pmic_ldo[2]),
       unsigned(e.pmic_ldo[3]), unsigned(e.pmic_ldo[4]),
       unsigned(e.aw9523_id_read), unsigned(e.aw9523_id), unsigned(e.aw9523_outputs_read),
       unsigned(e.aw9523_outputs[0]), unsigned(e.aw9523_outputs[1]),
       unsigned(e.aw9523_directions_read), unsigned(e.aw9523_directions[0]), unsigned(e.aw9523_directions[1]),
+      unsigned(e.aw9523_p0_mode_read), unsigned(e.aw9523_p0_mode),
       unsigned(e.touch_version_read), unsigned(e.touch_version[0]), unsigned(e.touch_version[1]),
       unsigned(e.touch_version[2]), unsigned(e.touch_version[3]), unsigned(e.touch_version[4]),
       unsigned(e.touch_version[5]));

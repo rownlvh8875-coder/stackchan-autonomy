@@ -50,7 +50,7 @@ def test_actual_probe(probe_binary, mode):
 
 
 @pytest.mark.parametrize("mode", ["stop", "revoke", "fail"])
-@pytest.mark.parametrize("at", range(23))
+@pytest.mark.parametrize("at", range(26))
 def test_every_sdk_boundary(probe_binary, mode, at):
     run = subprocess.run(
         [str(probe_binary), mode, str(at)], capture_output=True, text=True, timeout=10

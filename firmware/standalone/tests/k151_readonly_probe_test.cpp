@@ -32,10 +32,12 @@ void cleared(const k151::ReadOnlyEvidence& e) {
   assert(!e.bus_opened && !e.finished_without_bus_error);
   for (bool a : e.acknowledged) assert(!a);
   assert(!e.touch_version_read && !e.pmic_id_read && !e.pmic_ldo_read);
+  assert(!e.pmic_aldo12_read && !e.aw9523_p0_mode_read && e.aw9523_p0_mode == 0);
   assert(!e.aw9523_id_read && !e.aw9523_outputs_read && !e.aw9523_directions_read);
   assert(e.pmic_id == 0 && e.aw9523_id == 0);
   for (auto a : e.touch_version) assert(a == 0);
   for (auto a : e.pmic_ldo) assert(a == 0);
+  for (auto a : e.pmic_aldo12) assert(a == 0);
   for (auto a : e.aw9523_outputs) assert(a == 0);
   for (auto a : e.aw9523_directions) assert(a == 0);
 }
@@ -73,8 +75,9 @@ extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t d,
     const uint8_t* tx, size_t tn, uint8_t* rx, size_t rn, int ms) {
   assert(d == &dev && dev_live && tn == 1 && ms == 30);
   assert((device_address == 0x34 && rn == 1 &&
-          (*tx == 0x03 || *tx == 0x90 || *tx == 0x94 || *tx == 0x95 || *tx == 0x97 || *tx == 0x99)) ||
-         (device_address == 0x58 && ((*tx == 0x10 && rn == 1) ||
+          (*tx == 0x03 || *tx == 0x90 || *tx == 0x92 || *tx == 0x93 ||
+           *tx == 0x94 || *tx == 0x95 || *tx == 0x97 || *tx == 0x99)) ||
+         (device_address == 0x58 && (((*tx == 0x10 || *tx == 0x12) && rn == 1) ||
           ((*tx == 0x02 || *tx == 0x04) && rn == 2))) ||
          (device_address == 0x38 && *tx == 0xA3 && rn == 6));
   reads.emplace_back(device_address, *tx);
@@ -91,6 +94,8 @@ int main(int argc, char** argv) {
   k151::ReadOnlyEvidence e;
   e.bus_opened = e.pmic_id_read = e.finished_without_bus_error = true;
   e.pmic_id = 255; e.touch_version.fill(255);
+  e.pmic_aldo12_read = e.aw9523_p0_mode_read = true;
+  e.pmic_aldo12.fill(255); e.aw9523_p0_mode = 255;
   const bool ok = p.observe_once(owner, stop, e);
   if (mode == "denied" || mode == "stopped") {
     assert(!ok && calls == 0); cleared(e); return 0;
@@ -105,15 +110,22 @@ int main(int argc, char** argv) {
   assert(e.bus_opened && e.finished_without_bus_error);
   if (absent) {
     assert(reads.empty() && adds == 0 && !e.pmic_id_read && !e.touch_version_read);
+    assert(!e.pmic_aldo12_read && !e.aw9523_p0_mode_read);
     for (bool a : e.acknowledged) assert(!a);
     return 0;
   }
-  assert(calls == 23 && adds == 3 && removes == 3 && reads.size() == 10);
+  assert(calls == 26 && adds == 3 && removes == 3);
+  assert((reads == std::vector<std::pair<uint16_t, uint8_t>>{
+      {0x34, 0x03}, {0x34, 0x90}, {0x34, 0x94}, {0x34, 0x95}, {0x34, 0x97},
+      {0x34, 0x99}, {0x34, 0x92}, {0x34, 0x93}, {0x58, 0x10}, {0x58, 0x02},
+      {0x58, 0x04}, {0x58, 0x12}, {0x38, 0xA3}}));
   assert(e.pmic_id_read && e.pmic_ldo_read && e.aw9523_id_read &&
          e.aw9523_outputs_read && e.aw9523_directions_read && e.touch_version_read);
   assert(e.pmic_id == (0x34 ^ 0x03) && e.aw9523_id == (0x58 ^ 0x10));
   assert((e.pmic_ldo == std::array<uint8_t, 5>{0xA4, 0xA0, 0xA1, 0xA3, 0xAD}));
+  assert((e.pmic_aldo12_read && e.pmic_aldo12 == std::array<uint8_t, 2>{0xA6, 0xA7}));
   assert((e.aw9523_outputs == std::array<uint8_t, 2>{0x5A, 0x5B}));
   assert((e.aw9523_directions == std::array<uint8_t, 2>{0x5C, 0x5D}));
+  assert(e.aw9523_p0_mode_read && e.aw9523_p0_mode == 0x4A);
   assert((e.touch_version == std::array<uint8_t, 6>{0x9B, 0x9C, 0x9D, 0x9E, 0x9F, 0x90}));
 }

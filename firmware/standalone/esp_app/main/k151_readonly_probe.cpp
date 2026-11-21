@@ -79,6 +79,11 @@ bool K151ReadOnlyProbe::observe_once(const std::atomic_bool& owner,
       if (!read(dev, k151::kPmicLdoRegisters[i], &candidate.pmic_ldo[i], 1)) return false;
     }
     candidate.pmic_ldo_read = true;
+    for (size_t i = 0; i < k151::kPmicAldo12Registers.size(); ++i) {
+      if (!read(dev, k151::kPmicAldo12Registers[i], &candidate.pmic_aldo12[i], 1))
+        return false;
+    }
+    candidate.pmic_aldo12_read = true;
     return true;
   });
   with_device(k151::Device::io_aw9523, [&](auto dev) {
@@ -87,7 +92,10 @@ bool K151ReadOnlyProbe::observe_once(const std::atomic_bool& owner,
     candidate.aw9523_outputs_read = read(dev, 0x02, candidate.aw9523_outputs.data(), 2);
     if (!candidate.aw9523_outputs_read) return false;
     candidate.aw9523_directions_read = read(dev, 0x04, candidate.aw9523_directions.data(), 2);
-    return candidate.aw9523_directions_read;
+    if (!candidate.aw9523_directions_read) return false;
+    candidate.aw9523_p0_mode_read =
+        read(dev, k151::kAw9523P0ModeRegister, &candidate.aw9523_p0_mode, 1);
+    return candidate.aw9523_p0_mode_read;
   });
   with_device(k151::Device::touch_ft6336, [&](auto dev) {
     candidate.touch_version_read = read(dev, kTouchVersionReg, candidate.touch_version.data(), 6);

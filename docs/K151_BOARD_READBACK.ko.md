@@ -30,6 +30,11 @@
 | FT6336 / `0x38` | 기존 version `0xa3..a8` 6byte; work-mode 설정 없음 |
 | ES7210 / `0x40`, AW88298 / `0x36` | ACK 조회만 |
 
+마이크 전기 확인 후속은 PMIC `0x92/0x93`과 AW9523B `0x12`를 각각
+한 바이트씩 더 읽고, 기존 보고 필드와 함께 별도 유효성 및 값을 출력한다.
+읽은 값의 해석과 실제 측정 범위는 [마이크 전기 확인 기록](validation/2026-11-21-k151-mic-electrical-preflight.md)에 있다.
+위 표와 앞선 실물 기록은 그때 실행한 이미지의 범위를 나타낸다.
+
 전송은 1byte register pointer와 repeated-start read뿐이다. 레지스터 설정값,
 PMIC 전원 변경, AW9523 reset/출력 변경, touch mode 설정은 보내지 않는다.
 마이크/I2S·스피커/코덱·모델·NVS·Wi-Fi·TLS·유료 API는 시작하지 않는다.

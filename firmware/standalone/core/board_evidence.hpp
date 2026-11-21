@@ -24,6 +24,9 @@ enum class PanelHint { unknown, ili9342e_candidate };
 constexpr std::array<std::uint16_t, 5> kProbeAddresses{0x34, 0x58, 0x38, 0x40, 0x36};
 // Only known configuration registers, not interrupt/input/clear-on-read state.
 constexpr std::array<std::uint8_t, 5> kPmicLdoRegisters{0x90, 0x94, 0x95, 0x97, 0x99};
+// The CoreS3 drawing routes ALDO1/2 to VDD_1V8/VDDA_3V3.
+constexpr std::array<std::uint8_t, 2> kPmicAldo12Registers{0x92, 0x93};
+constexpr std::uint8_t kAw9523P0ModeRegister = 0x12;
 
 // Dedicated diagnostic scope, never a board identity or audio authorization.
 constexpr bool board_probe_location_allowed(std::uint32_t address, std::size_t bytes,
@@ -40,12 +43,16 @@ struct ReadOnlyEvidence {
   std::uint8_t pmic_id = 0;
   bool pmic_ldo_read = false;
   std::array<std::uint8_t, 5> pmic_ldo{};
+  bool pmic_aldo12_read = false;
+  std::array<std::uint8_t, 2> pmic_aldo12{};
   bool aw9523_id_read = false;
   std::uint8_t aw9523_id = 0;
   bool aw9523_outputs_read = false;
   std::array<std::uint8_t, 2> aw9523_outputs{};
   bool aw9523_directions_read = false;
   std::array<std::uint8_t, 2> aw9523_directions{};
+  bool aw9523_p0_mode_read = false;
+  std::uint8_t aw9523_p0_mode = 0;
   bool finished_without_bus_error = false;
 };
 

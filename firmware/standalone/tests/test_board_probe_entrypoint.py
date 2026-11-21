@@ -1,4 +1,4 @@
-"""Execute the actual diagnostic entry point: wrong location never opens USB/I2C."""
+"""Execute the actual diagnostic entry point against host SDK doubles."""
 
 import json
 import shutil
@@ -24,6 +24,7 @@ def entrypoint(tmp_path_factory):
             "-Wall",
             "-Wextra",
             "-Werror",
+            "-pthread",
             "-I",
             str(BASE / "tests/board_probe_doubles"),
             "-I",
@@ -59,3 +60,26 @@ def test_denial_preserves_actual_location(entrypoint, kind):
     )
     assert identity["running_size"] == (None if kind == "missing" else 0x4F0000)
     assert records[-1] == {"result": "RUNNING_LOCATION_OR_CHIP_DENIED"}
+
+
+def test_report_retains_old_fields_and_includes_audio_registers(entrypoint):
+    result = subprocess.run([str(entrypoint), "report"], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    records = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+    report = next(record for record in records if record.get("probe") == "READBACK_COMPLETED")
+    assert report["ack"] == [1, 1, 1, 0, 1]
+    assert report["pmic_id_valid"] == 1 and report["pmic_id"] == 0x4A
+    assert report["pmic_ldo_valid"] == 1
+    assert report["pmic_regs"] == [0x90, 0x94, 0x95, 0x97, 0x99]
+    assert report["pmic_values"] == [0xBF, 0x1C, 0x1C, 0x1C, 0x1A]
+    assert report["pmic_aldo12_valid"] == 1
+    assert report["pmic_aldo12_values"] == [0x0D, 0x1C]
+    assert report["aw_id_valid"] == 1 and report["aw_id"] == 0x23
+    assert report["aw_outputs_valid"] == 1 and report["aw_outputs"] == [0x07, 0x83]
+    assert report["aw_directions_valid"] == 1 and report["aw_directions"] == [0x18, 0x0C]
+    assert report["aw_p0_mode_valid"] == 1
+    assert report["aw_p0_mode"] == 0xFD
+    assert report["touch_valid"] == 1
+    assert report["touch_version"] == [0x64, 0x01, 0x01, 0x12, 0x00, 0x11]
+    assert report["operating_admission"] is False
+    assert records[-1] == {"probe": "HOLD_UNTIL_RESET", "operating_admission": False}
