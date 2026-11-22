@@ -81,6 +81,63 @@ bool K151CodecPort::prepare_hardware() {
   return true;
 }
 
+bool K151CodecPort::prepare_microphone_board() {
+  constexpr int timeout_ms = 30;
+  constexpr uint8_t audio_ldo_enable_bits = 0x03; // CoreS3 ALDO1/ALDO2.
+  constexpr uint8_t amp_reset = 1 << 2; // AW9523 P0_2 -> AW88298 RSTN.
+  constexpr uint8_t p0_output = 0x02;
+  constexpr uint8_t p0_direction = 0x04;
+  const auto read = [&](i2c_master_dev_handle_t dev, uint8_t reg, uint8_t& value) {
+    return input_allowed() &&
+           i2c_master_transmit_receive(dev, &reg, 1, &value, 1, timeout_ms) == ESP_OK &&
+           input_allowed();
+  };
+  const auto with_device = [&](k151::Device device, const auto& operation) {
+    if (!input_allowed()) return false;
+    i2c_device_config_t cfg{};
+    cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    cfg.device_address = k151::kProbeAddresses[k151::index(device)];
+    cfg.scl_speed_hz = 100000;
+    if (i2c_master_bus_add_device(i2c_bus_, &cfg, &board_device_) != ESP_OK)
+      return false;
+    const bool checked = operation(board_device_);
+    const bool removed = release_board_device();
+    return checked && removed && input_allowed();
+  };
+
+  // Reject unfamiliar or disabled rails without changing the PMIC.
+  if (!with_device(k151::Device::pmic_axp2101, [&](auto dev) {
+        uint8_t id{}, enable{};
+        return read(dev, 0x03, id) && id == 0x4a &&
+               read(dev, k151::kPmicLdoRegisters.front(), enable) &&
+               (enable & audio_ldo_enable_bits) == audio_ldo_enable_bits;
+      })) return false;
+
+  // Keep RSTN asserted even on teardown. Factory initialization will release
+  // it after restore/reboot. Do not change the mode or direction of any pin.
+  return with_device(k151::Device::io_aw9523, [&](auto dev) {
+    uint8_t id{}, mode{}, direction{}, output{};
+    if (!read(dev, 0x10, id) || id != 0x23 ||
+        !read(dev, k151::kAw9523P0ModeRegister, mode) || !(mode & amp_reset) ||
+        !read(dev, p0_direction, direction) || (direction & amp_reset) ||
+        !read(dev, p0_output, output)) return false;
+    const uint8_t held = output & ~amp_reset;
+    const uint8_t command[]{p0_output, held};
+    if (output != held &&
+        (!input_allowed() ||
+         i2c_master_transmit(dev, command, sizeof(command), timeout_ms) != ESP_OK))
+      return false;
+    return read(dev, p0_output, output) && output == held;
+  });
+}
+
+bool K151CodecPort::release_board_device() {
+  const auto result = i2c_master_bus_rm_device(board_device_);
+  // Pinned IDF rejects a busy device before unlinking or freeing it.
+  if (result != ESP_ERR_INVALID_STATE) board_device_ = nullptr;
+  return result == ESP_OK;
+}
+
 bool K151CodecPort::prepare_i2s() {
   i2c_master_bus_config_t bus_cfg = {};
   bus_cfg.i2c_port = static_cast<i2c_port_t>(kI2cPort);
@@ -90,6 +147,7 @@ bool K151CodecPort::prepare_i2s() {
   bus_cfg.glitch_ignore_cnt = 7;
   bus_cfg.flags.enable_internal_pullup = 1;
   if (i2c_new_master_bus(&bus_cfg, &i2c_bus_) != ESP_OK) return false;
+  if (microphone_only() && !prepare_microphone_board()) return false;
 
   i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   chan.dma_desc_num = 6;
@@ -355,7 +413,8 @@ bool K151CodecPort::shutdown() {
     if (i2s_del_channel(tx_) != ESP_OK) ok = false;
     else tx_ = nullptr;
   }
-  if (i2c_bus_) {
+  if (board_device_ && !release_board_device()) ok = false;
+  if (i2c_bus_ && !board_device_) {
     if (i2c_del_master_bus(i2c_bus_) != ESP_OK) ok = false;
     // Pinned IDF can report pin-deinit error after freeing the bus wrapper.
     // Never retry this ambiguous pointer. Fault remains; reclamation/mute is

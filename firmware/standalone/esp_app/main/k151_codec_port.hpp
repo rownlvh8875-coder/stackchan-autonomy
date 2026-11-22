@@ -57,6 +57,8 @@ class K151CodecPort final {
   }
   bool fail();
   bool prepare_hardware();
+  bool prepare_microphone_board();
+  bool release_board_device();
   bool prepare_i2s();
   bool prepare_i2s_tx();
   bool prepare_codecs();
@@ -66,6 +68,7 @@ class K151CodecPort final {
   const std::atomic_bool* mic_owner_ = nullptr;
   const std::atomic_bool* mic_stop_ = nullptr;
   i2c_master_bus_handle_t i2c_bus_ = nullptr;
+  i2c_master_dev_handle_t board_device_ = nullptr;
   i2s_chan_handle_t tx_ = nullptr;
   i2s_chan_handle_t rx_ = nullptr;
   const audio_codec_data_if_t* data_if_ = nullptr;

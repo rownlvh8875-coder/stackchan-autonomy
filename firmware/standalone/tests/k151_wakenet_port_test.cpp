@@ -197,7 +197,7 @@ std::string run_mic_trial_with_embedded_model_double(
   const bool stopped=scenario=="mic_only_trial_chain_stop_in_detect";
   if (stopped) chain_stop=&local_stop;
   ret=WAKENET_DETECTED;
-  const K151MicOnlyEvidence evidence{true,true,true,true}; // Host driver test only.
+  const K151MicOnlyEvidence evidence{true,true}; // Host driver test only.
   K151MicWakeTrial trial;
   const auto result=trial.run_embedded(local_owner,local_stop,evidence,embedded);
   chain_stop=nullptr;
@@ -233,7 +233,7 @@ int main(int argc,char** argv) {
     using Result = K151MicWakeTrialResult;
     owner=scenario!="mic_trial_no_owner";
     stop=scenario=="mic_trial_stopped";
-    const K151MicOnlyEvidence evidence{true,true,scenario!="mic_trial_no_evidence",true};
+    const K151MicOnlyEvidence evidence{true,scenario!="mic_trial_no_evidence"};
     const auto input=scenario=="mic_trial_bad_size"?std::span(embedded).first(10):std::span(embedded);
     K151MicWakeTrial trial;
     const auto r=trial.run_embedded(owner,stop,evidence,input);
@@ -258,7 +258,7 @@ int main(int argc,char** argv) {
     const auto before=events;
     const auto hash_count=hashes;
     owner=true;stop=false;
-    assert(trial.run_embedded(owner,stop,{true,true,true,true},embedded)==Result::denied);
+    assert(trial.run_embedded(owner,stop,{true,true},embedded)==Result::denied);
     assert(hashes==hash_count && events==before && !active_data && !shared && finds==0);
     assert(heap_checks==(denied_before_memory?0:1));
     return 0;

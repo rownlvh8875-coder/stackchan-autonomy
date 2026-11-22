@@ -32,8 +32,8 @@ class K151MicWakeTrial final {
  public:
   static const char* compiled_link_marker();
 
-  // The local owner supplies current electrical evidence and the whole linked
-  // model pack. The trial verifies it before giving the mic path a model.
+  // The local owner supplies current board/I2S ownership evidence and the
+  // whole linked model pack. The codec checks live board registers separately.
   K151MicWakeTrialResult run_embedded(const std::atomic_bool& owner, const std::atomic_bool& stop,
                                      const K151MicOnlyEvidence& evidence,
                                      std::span<const uint8_t> pack);

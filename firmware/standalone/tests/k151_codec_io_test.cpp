@@ -16,11 +16,16 @@
 using namespace stackchan::standalone;
 struct i2s_channel_obj { bool enabled=false; bool alive=true; int disables=0,deletes=0; };
 struct i2c_master_bus_t { bool alive=true; int deletes=0; };
+struct i2c_master_dev_t { uint16_t address; bool open=false; };
 struct Dev { const audio_codec_data_if_t* data{}; esp_codec_dev_type_t type{}; bool open=false; };
 namespace {
 std::string mode;
 i2s_channel_obj tx,rx;
 i2c_master_bus_t bus;
+i2c_master_dev_t pmic{0x34}, expander{0x58};
+int reset_writes=0, expander_removes=0;
+uint8_t output_latch=0xa7;
+bool reset_read_back=false;
 audio_codec_data_if_t base{};
 audio_codec_ctrl_if_t controls[2]{};
 const audio_codec_ctrl_if_t* codec_controls[2]{};
@@ -161,11 +166,67 @@ extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
 extern "C" esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t*,i2c_master_bus_handle_t* h){++bus_created;*h=&bus;return 0;}
 extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){
   assert(h==&bus && h->alive);++h->deletes;
+  if(pmic.open || expander.open)return ESP_ERR_INVALID_STATE;
   if(mode=="release_bus_live_error")return ESP_ERR_INVALID_STATE;
   h->alive=false;return mode=="release_bus_freed_error"?ESP_FAIL:ESP_OK;
 }
+extern "C" esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t h,
+                                               const i2c_device_config_t* cfg,
+                                               i2c_master_dev_handle_t* out) {
+  assert(h==&bus && h->alive && mic_only() && channels_created==0);
+  assert(cfg->scl_speed_hz==100000 && cfg->dev_addr_length==I2C_ADDR_BIT_LEN_7);
+  assert(cfg->device_address==pmic.address || cfg->device_address==expander.address);
+  auto& dev=cfg->device_address==pmic.address ? pmic : expander;
+  assert(!dev.open);
+  dev.open=true;
+  *out=&dev;
+  return ESP_OK;
+}
+extern "C" esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev) {
+  assert(dev->open);
+  if(dev==&expander && ++expander_removes==1 && mode=="mic_only_board_cleanup_busy")
+    return ESP_ERR_INVALID_STATE;
+  dev->open=false;
+  return mode=="mic_only_board_cleanup" && dev==&expander ? ESP_FAIL : ESP_OK;
+}
+extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
+                                                 const uint8_t* reg,size_t n,
+                                                 uint8_t* value,size_t bytes,int ms) {
+  assert(dev->open && n==1 && bytes==1 && ms==30 && channels_created==0);
+  if(dev==&pmic) {
+    assert(*reg==0x03 || *reg==0x90);
+    *value=*reg==0x03 ? (mode=="mic_only_board_bad_pmic" ? 0 : 0x4a)
+                     : (mode=="mic_only_board_rails_off" ? 0x01 : 0xbf);
+  } else {
+    assert(dev==&expander);
+    switch(*reg) {
+      case 0x10: *value=mode=="mic_only_board_bad_expander" ? 0 : 0x23; break;
+      case 0x04: *value=mode=="mic_only_board_input_pin" ? 0x1c : 0x18; break;
+      case 0x12: *value=mode=="mic_only_board_led_mode" ? 0xfb : 0xff; break;
+      case 0x02:
+        if(mode=="mic_only_board_read_error")return ESP_FAIL;
+        *value=output_latch;
+        if(reset_writes && mode=="mic_only_board_bad_readback")*value^=0x04;
+        reset_read_back=((*value & 0x04)==0);
+        break;
+      default: assert(false);
+    }
+  }
+  return ESP_OK;
+}
+extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev,const uint8_t* data,
+                                         size_t size,int ms) {
+  assert(dev==&expander && dev->open && size==2 && ms==30 && channels_created==0);
+  assert(data[0]==0x02 && data[1]==0xa3 && output_latch==0xa7 && reset_writes==0);
+  ++reset_writes;
+  if(mode=="mic_only_board_write_error")return ESP_FAIL;
+  output_latch=data[1];
+  if(mode=="mic_only_board_stop_on_write")local_stop=true;
+  return ESP_OK;
+}
 extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_t* t,i2s_chan_handle_t* r){
   assert(c->dma_frame_num==240 && r);assert((t==nullptr)==mic_only());
+  if(mic_only())assert(reset_read_back && output_latch==0xa3 && !pmic.open && !expander.open);
   ++channels_created;
   if(t)*t=&tx;
   *r=&rx;return 0;
@@ -334,7 +395,7 @@ int main(int argc,char** argv) {
     const bool cap = mode == "mic_only_trial_frame_cap";
     local_owner = !no_owner;
     local_stop = stop_before;
-    const K151MicOnlyEvidence evidence{true,true,!missing,true};
+    const K151MicOnlyEvidence evidence{true,!missing};
     const auto outcome = trial.run(local_owner,local_stop,evidence,std::make_unique<TrialDetector>());
     if (mode == "mic_only_trial_unread_counts_after_denial") {
       assert(outcome == Outcome::detected && calls == 4);
@@ -401,12 +462,29 @@ int main(int argc,char** argv) {
   }
   K151CodecPort port;std::array<int16_t,240> pcm;pcm.fill(123);
   if(mic_only()) {
-    const K151MicOnlyEvidence verified{true,true,true,true};
+    const K151MicOnlyEvidence verified{true,true};
+    if(mode.starts_with("mic_only_board_") && mode!="mic_only_board_already_held") {
+      assert(!port.prepare_microphone_only(local_owner,local_stop,verified));
+      assert(port.faulted() && !port.shutdown());
+      assert(channels_created==0 && calls==0 && bus_created==1 && bus.deletes==1);
+      assert(!pmic.open && !expander.open);
+      const bool needs_write=mode=="mic_only_board_write_error" ||
+          mode=="mic_only_board_bad_readback" || mode=="mic_only_board_stop_on_write" ||
+          mode=="mic_only_board_cleanup" || mode=="mic_only_board_cleanup_busy";
+      assert(reset_writes==int(needs_write));
+      if(mode=="mic_only_board_cleanup_busy")assert(expander_removes==2 && !bus.alive);
+      assert(!port.prepare_microphone_only(local_owner,local_stop,verified));
+      return 0;
+    }
+    if(mode=="mic_only_board_already_held") {
+      output_latch=0xa3;
+      assert(port.prepare_microphone_only(local_owner,local_stop,verified));
+      assert(reset_read_back && reset_writes==0 && port.shutdown());
+      return 0;
+    }
     if(mode=="mic_only_gates") {
-      assert(!port.prepare_microphone_only(local_owner,local_stop,{false,true,true,true}));
-      assert(!port.prepare_microphone_only(local_owner,local_stop,{true,false,true,true}));
-      assert(!port.prepare_microphone_only(local_owner,local_stop,{true,true,false,true}));
-      assert(!port.prepare_microphone_only(local_owner,local_stop,{true,true,true,false}));
+      assert(!port.prepare_microphone_only(local_owner,local_stop,{false,true}));
+      assert(!port.prepare_microphone_only(local_owner,local_stop,{true,false}));
       local_owner=false;
       assert(!port.prepare_microphone_only(local_owner,local_stop,verified));
       local_owner=true;local_stop=true;
