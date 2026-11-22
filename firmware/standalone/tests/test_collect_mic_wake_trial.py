@@ -50,6 +50,22 @@ def test_single_start_and_only_allowlisted_report(receiver):
     assert prompts == [True]
 
 
+def test_lost_challenge_request_and_duplicate_reply_still_send_one_start(receiver):
+    port = FakeSerial([WAIT, WAIT, LISTEN, REPORT, HOLD])
+    port.input.appendleft(b"")
+    now = 0.0
+    original = port.read_until
+
+    def read_until(expected, size):
+        nonlocal now
+        now += 0.6
+        return original(expected, size)
+
+    port.read_until = read_until
+    assert receiver.receive_once(port, lambda: None, clock=lambda: now) == REPORT
+    assert port.writes == [b"HELLO\n", b"HELLO\n", b"START 1234ABCD\n"]
+
+
 @pytest.mark.parametrize(
     "records,start_sent",
     [

@@ -13,14 +13,20 @@ WIRE_LIMIT = 512
 
 
 def receive_once(port, announce, *, before_start=lambda: None, clock=time.monotonic):
-    deadline = clock() + 15
+    next_hello = clock()
+    deadline = next_hello + 15
+    waiting_replies = 0
+    accepted_nonce = None
     started = listening = complete = False
     report = None
     pending = bytearray()
     try:
-        if port.write(b"HELLO\n") != len(b"HELLO\n"):
-            raise ValueError("Incomplete challenge request")
         while clock() < deadline:
+            if not started and clock() >= next_hello:
+                if port.write(b"HELLO\n") != len(b"HELLO\n"):
+                    raise ValueError("Incomplete challenge request")
+                waiting_replies += 1
+                next_hello = clock() + 0.5
             pending.extend(port.read_until(expected=b"\n", size=WIRE_LIMIT))
             if len(pending) > WIRE_LIMIT or (
                 len(pending) == WIRE_LIMIT and not pending.endswith(b"\n")
@@ -40,7 +46,7 @@ def receive_once(port, announce, *, before_start=lambda: None, clock=time.monoto
             if marker == "WAIT_LOCAL_START":
                 nonce = record.get("nonce")
                 if (
-                    started
+                    not waiting_replies
                     or set(record) != {"mic_trial", "nonce", "wait_ms"}
                     or record.get("wait_ms") != 60000
                     or not isinstance(nonce, str)
@@ -48,8 +54,14 @@ def receive_once(port, announce, *, before_start=lambda: None, clock=time.monoto
                     or nonce == "00000000"
                 ):
                     raise ValueError("Invalid or repeated local challenge")
+                waiting_replies -= 1
+                if started:
+                    if nonce != accepted_nonce:
+                        raise ValueError("Diagnostic restarted after START")
+                    continue
                 start = f"START {nonce}\n".encode("ascii")
                 before_start()
+                accepted_nonce = nonce
                 started = True
                 if port.write(start) != len(start):
                     raise ValueError("Incomplete START")
