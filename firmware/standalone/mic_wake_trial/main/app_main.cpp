@@ -21,6 +21,35 @@ namespace {
 using namespace stackchan::standalone;
 std::atomic_bool owner{false}, stop{false}, reader_done{false};
 
+#ifdef STACKCHAN_K151_QUESTION_TRIAL
+constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_QUESTION_TRIAL_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_QUESTION_LOCAL_START";
+
+void announce_question() {
+  std::puts("{\"mic_trial\":\"QUESTION_NOW\",\"operating_admission\":false}");
+  (void)std::fflush(stdout);
+}
+
+const char* question_result_name(K151QuestionTrialResult result) {
+  switch (result) {
+    case K151QuestionTrialResult::not_run: return "not_run";
+    case K151QuestionTrialResult::stopped: return "stopped";
+    case K151QuestionTrialResult::memory_denied: return "memory_denied";
+    case K151QuestionTrialResult::prepare_failed: return "prepare_failed";
+    case K151QuestionTrialResult::open_failed: return "open_failed";
+    case K151QuestionTrialResult::clock_fault: return "clock_fault";
+    case K151QuestionTrialResult::read_failed: return "read_failed";
+    case K151QuestionTrialResult::no_endpoint: return "no_endpoint";
+    case K151QuestionTrialResult::endpoint: return "endpoint";
+    case K151QuestionTrialResult::release_failed: return "release_failed";
+  }
+  return nullptr;
+}
+#else
+constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_WAKE_TRIAL_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_LOCAL_START";
+#endif
+
 void announce_listening() {
   std::puts("{\"mic_trial\":\"LISTEN_NOW\",\"operating_admission\":false}");
   (void)std::fflush(stdout);
@@ -36,8 +65,8 @@ void reader(void*) {
     if (count < 0) break;
     if (count == 1) {
       if (gate.feed(c, now)) {
-        std::printf("{\"mic_trial\":\"WAIT_LOCAL_START\",\"nonce\":\"%08lX\",\"wait_ms\":60000}\n",
-                    static_cast<unsigned long>(nonce));
+        std::printf("{\"mic_trial\":\"%s\",\"nonce\":\"%08lX\",\"wait_ms\":60000}\n",
+                    kChallengeMarker, static_cast<unsigned long>(nonce));
         (void)std::fflush(stdout);
       }
     } else {
@@ -60,7 +89,7 @@ void hold() {
 }
 
 extern "C" void app_main() {
-  std::puts("K151_RECEIVE_ONLY_WAKE_TRIAL_NOT_OPERATIONAL");
+  std::puts(kBootMarker);
   esp_chip_info_t chip{};
   esp_chip_info(&chip);
   const auto* slot = esp_ota_get_running_partition();
@@ -87,11 +116,23 @@ extern "C" void app_main() {
     // This app has one I2S caller, using the port's exclusive RX allocation.
     // It still checks the two board chips live before opening any channel.
     const K151MicOnlyEvidence evidence{expected_location, true};
+#ifdef STACKCHAN_K151_QUESTION_TRIAL
+    static K151MicWakeTrial trial{announce_listening, announce_question};
+#else
     static K151MicWakeTrial trial{announce_listening};
+#endif
     const auto result = trial.run_embedded(owner, stop, evidence, linked_mic_trial_model());
     std::array<char, 256> report{};
     if (format_k151_mic_wake_report(result, trial.diagnostic(), trial.take_input_counts(), report) != 0)
       std::fputs(report.data(), stdout);
+#ifdef STACKCHAN_K151_QUESTION_TRIAL
+    const auto question = trial.question_diagnostic();
+    if (const char* name = question_result_name(question.result)) {
+      std::printf("{\"mic_question_trial\":\"MIC_QUESTION_TRIAL_V1\",\"result\":\"%s\","
+                  "\"codec_cleanup_unverified\":%s,\"operating_admission\":false}\n",
+                  name, question.codec_cleanup_unverified ? "true" : "false");
+    }
+#endif
   }
   hold();
 }

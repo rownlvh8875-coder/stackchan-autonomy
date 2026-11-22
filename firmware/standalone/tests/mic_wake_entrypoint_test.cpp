@@ -83,6 +83,11 @@ K151MicWakeTrialResult K151MicWakeTrial::run_embedded(
   assert((scenario == "detect" || scenario == "stop_during") && owner.load() && !stop.load());
   assert(evidence.verified() && pack.size() == 2 && pack.front() == 1);
   assert(++sessions == 1 && on_listen_);
+#ifdef STACKCHAN_K151_QUESTION_TRIAL
+  assert(on_question_);
+#else
+  assert(!on_question_);
+#endif
   on_listen_();
   if (scenario == "stop_during") {
     listening = true;
@@ -93,6 +98,10 @@ K151MicWakeTrialResult K151MicWakeTrial::run_embedded(
   }
   diagnostic_.stage = K151MicWakeStage::complete;
   input_counts_ = {4, 0, 0};
+  if (on_question_) {
+    on_question_();
+    question_diagnostic_.result = K151QuestionTrialResult::endpoint;
+  }
   return K151MicWakeTrialResult::detected;
 }
 

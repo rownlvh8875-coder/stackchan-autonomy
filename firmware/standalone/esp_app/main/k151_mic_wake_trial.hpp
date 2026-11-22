@@ -13,6 +13,16 @@ namespace stackchan::standalone {
 enum class K151MicWakeTrialResult { denied, stopped, not_detected, detected, fault, memory_denied };
 inline constexpr uint32_t kK151MicWakeTrialFrameLimit = 500;
 
+enum class K151QuestionTrialResult {
+  not_run, stopped, memory_denied, prepare_failed, open_failed, clock_fault,
+  read_failed, no_endpoint, endpoint, release_failed,
+};
+
+struct K151QuestionTrialDiagnostic {
+  K151QuestionTrialResult result = K151QuestionTrialResult::not_run;
+  bool codec_cleanup_unverified = false;
+};
+
 struct K151MicWakeInputCounts {
   uint32_t frames_read = 0;
   uint32_t all_zero_frames = 0;
@@ -40,7 +50,10 @@ class K151MicWakeTrial final {
  public:
   static const char* compiled_link_marker();
   using ListenStarted = void (*)();
-  explicit K151MicWakeTrial(ListenStarted on_listen = nullptr) : on_listen_(on_listen) {}
+  // A question cue opts into a distinct receive-only question capture after wake.
+  explicit K151MicWakeTrial(ListenStarted on_listen = nullptr,
+                           ListenStarted on_question = nullptr)
+      : on_listen_(on_listen), on_question_(on_question) {}
 
   // The local owner supplies current board/I2S ownership evidence and the
   // whole linked model pack. The codec checks live board registers separately.
@@ -58,6 +71,7 @@ class K151MicWakeTrial final {
   // completion. An attempt that stops, faults or is denied leaves no counts.
   std::optional<K151MicWakeInputCounts> take_input_counts();
   K151MicWakeDiagnostic diagnostic() const { return diagnostic_; }
+  K151QuestionTrialDiagnostic question_diagnostic() const { return question_diagnostic_; }
 
  private:
   std::optional<K151MicWakeTrialResult> begin(const std::atomic_bool& owner,
@@ -65,6 +79,7 @@ class K151MicWakeTrial final {
                                              const K151MicOnlyEvidence& evidence) {
     input_counts_.reset();
     diagnostic_ = {};
+    question_diagnostic_ = {};
     if (attempted_) return K151MicWakeTrialResult::denied;
     attempted_ = true;
     if (stop.load()) return K151MicWakeTrialResult::stopped;
@@ -78,7 +93,9 @@ class K151MicWakeTrial final {
   NativeWakeInput input_;
   std::optional<K151MicWakeInputCounts> input_counts_;
   K151MicWakeDiagnostic diagnostic_;
+  K151QuestionTrialDiagnostic question_diagnostic_;
   ListenStarted on_listen_;
+  ListenStarted on_question_;
   bool attempted_ = false;
 };
 

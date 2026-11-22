@@ -123,6 +123,22 @@ jobs:
           cp -r firmware/standalone/board_probe/review-notices "$TRIAL/review-notices"
           cp firmware/standalone/tests/sdk_esp_sr_2_4_7/LICENSE "$TRIAL/review-notices/ESP-SR-LICENSE"
           cp firmware/standalone/tests/sdk_esp_codec_dev_1_6_2/LICENSE "$TRIAL/review-notices/ESP-CODEC-DEV-LICENSE"
+      - name: Build one-shot question capture trial (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          TRIAL=firmware/standalone/mic_wake_trial
+          OUT="$TRIAL/build-question"
+          idf.py -C "$TRIAL" -B "$GITHUB_WORKSPACE/$OUT" -DK151_QUESTION_TRIAL=ON -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_mic_wake_image.py --question \
+            --elf "$OUT/k151_mic_question_trial.elf" --bin "$OUT/k151_mic_question_trial.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
       - name: Publish SHA/size proof only (NO firmware binary)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -163,6 +179,18 @@ jobs:
             firmware/standalone/mic_wake_trial/build/k151_mic_wake_trial.elf
             firmware/standalone/mic_wake_trial/validation-manifest.json
             firmware/standalone/mic_wake_trial/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/mic_wake_trial/review-notices/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish question trial for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-mic-question-trial-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/mic_wake_trial/build-question/k151_mic_question_trial.bin
+            firmware/standalone/mic_wake_trial/build-question/k151_mic_question_trial.elf
+            firmware/standalone/mic_wake_trial/build-question/validation-manifest.json
+            firmware/standalone/mic_wake_trial/build-question/BUILT-PARTITIONS-NEVER-FLASH.csv
             firmware/standalone/mic_wake_trial/review-notices/
           if-no-files-found: error
           retention-days: 14

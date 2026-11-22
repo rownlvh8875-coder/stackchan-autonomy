@@ -12,3 +12,6 @@ idf_component_register(
     EMBED_FILES "srmodels.bin"
 )
 target_compile_features(${COMPONENT_LIB} PRIVATE cxx_std_20)
+if(K151_QUESTION_TRIAL)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE STACKCHAN_K151_QUESTION_TRIAL=1)
+endif()

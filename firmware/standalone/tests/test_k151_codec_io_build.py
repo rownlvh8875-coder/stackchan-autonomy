@@ -87,12 +87,16 @@ def _build_port(compiler, binary, app, *, embedded_trial=False):
         "-DCONFIG_CODEC_AW88298_SUPPORT=1",
     ]
     command += ["-isystem", str(SDK)]  # Unmodified vendor C anonymous unions.
-    for directory in [BASE / "tests/codec_io_doubles", BASE / "core", app]:
+    for directory in [
+        BASE / "tests/codec_io_doubles",
+        BASE / "tests/idf_partition_doubles",
+        BASE / "core",
+        app,
+    ]:
         command += ["-I", str(directory)]
     if embedded_trial:
         command += ["-DSTACKCHAN_TEST_EMBEDDED_MIC_TRIAL=1"]
-        for directory in ("idf_partition_doubles", "sdk_esp_sr_2_4_7"):
-            command += ["-I", str(BASE / "tests" / directory)]
+        command += ["-I", str(BASE / "tests/sdk_esp_sr_2_4_7")]
         command += ["-I", str(BASE / "resource_bench/main")]
         sources += [
             BASE / "tests/k151_wakenet_port_test.cpp",
@@ -340,6 +344,32 @@ def test_mic_trial_attributes_primary_and_cleanup(
     assert "frames_read" not in report
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        "endpoint",
+        "no_wake",
+        "no_memory",
+        "bad_placement",
+        "wall",
+        "frame_cap",
+        "stop_at_cue",
+        "revoke",
+        "short",
+        "clock",
+        "release_fail",
+    ],
+)
+def test_question_after_verified_wake(port_binary, case):
+    attempt = subprocess.run(
+        [str(port_binary), "mic_only_trial_question_" + case],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert attempt.returncode == 0, attempt.stderr
+
+
 @pytest.mark.parametrize("operation", ["read_reg", "write_reg"])
 def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
     """An actual one-byte truncation must fail the real-port AW88298 boundary."""
@@ -359,6 +389,7 @@ def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
         "k151_mic_wake_trial.hpp",
         "k151_mic_wake_trial.cpp",
         "k151_mic_wake_memory.hpp",
+        "k151_question_pcm.hpp",
         "k151_contract.hpp",
     ]:
         shutil.copyfile(BASE / "esp_app/main" / name, app / name)

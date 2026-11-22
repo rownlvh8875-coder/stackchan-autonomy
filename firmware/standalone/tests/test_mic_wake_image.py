@@ -31,6 +31,22 @@ def test_receive_only_scope(model_fixture):
     assert manifest["install_authorized"] is False
 
 
+def test_question_trial_requires_separate_project_and_scope(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    app = image(model_fixture, project=b"k151_mic_question_trial")
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV, question=True)
+    assert manifest["kind"] == "RECEIVE_ONLY_MIC_QUESTION_TRIAL_NOT_OPERATIONAL"
+    assert manifest["question_capture_deadline_ms"] == 8000
+    assert manifest["combined_start_window_ms"] == 10000
+    assert manifest["usb_exports_pcm"] is False
+    assert manifest["install_authorized"] is False
+    with pytest.raises(ValueError):
+        inspect_image(app, ELF_SHA, SLOT_CSV)
+    with pytest.raises(ValueError):
+        inspect_image(image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, question=True)
+
+
 @pytest.mark.parametrize("failure", ["other_project", "other_slot", "dup_pack", "ram_pack"])
 def test_deny_other_app_or_invalid_pack(model_fixture, failure):
     from check_mic_wake_image import inspect_image

@@ -45,6 +45,17 @@ bool embedded_trial_chain() { return mode.starts_with("mic_only_trial_chain_"); 
 int trial_resets=0, trial_chunks=0, trial_model_drops=0;
 int heap_checks=0;
 int64_t trial_time_us=1000;
+bool question_trial() { return mode.starts_with("mic_only_trial_question_"); }
+int question_reads=0, question_cues=0;
+std::array<int16_t, QuestionCapture::kMaxSamples> question_pcm{};
+bool question_allocated=false, question_freed=false;
+void announce_question() {
+  assert(trial_model_drops==1 && question_allocated && !question_freed);
+  assert(bus_created==2 && bus.deletes==1 && channels_created==2 && rx.deletes==1);
+  assert(rx.enabled && reset_writes==1 && output_latch==0xa3);
+  ++question_cues;
+  if (mode=="mic_only_trial_question_stop_at_cue") local_stop=true;
+}
 struct TrialDetector : NativeWakePort {
   ~TrialDetector() override {
     assert(!rx.enabled);
@@ -73,7 +84,8 @@ struct TrialDetector : NativeWakePort {
     if (mode == "mic_only_trial_revoke_in_detect") local_owner = false;
     if (mode == "mic_only_trial_slow_detect") trial_time_us += 100001;
     if (mode == "mic_only_trial_model_error") return NativeWakeResult::error;
-    if (mode == "mic_only_trial_wall" || mode == "mic_only_trial_frame_cap")
+    if (mode == "mic_only_trial_wall" || mode == "mic_only_trial_frame_cap" ||
+        mode == "mic_only_trial_question_no_wake")
       return NativeWakeResult::none;
     return NativeWakeResult::detected;
   }
@@ -151,6 +163,36 @@ extern "C" int64_t esp_timer_get_time() {
   if(mode=="clock_backwards")return 999;
   return mode=="deadline" || mode=="write_deadline" ? 41001 : mode=="boundary" ? 41000 : 2000;
 }
+extern "C" void* heap_caps_malloc(size_t size,uint32_t caps) {
+  assert(question_trial() && size==question_pcm.size()*sizeof(int16_t));
+  assert(caps==(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  assert(trial_model_drops==1 && bus_created==1 && !bus.alive && !rx.alive);
+  assert(!question_allocated);
+  question_allocated=true;
+  if (mode=="mic_only_trial_question_no_memory") return nullptr;
+  question_pcm.fill(12345);
+  return question_pcm.data();
+}
+extern "C" void heap_caps_free(void* pcm) {
+  assert(pcm==question_pcm.data() && question_allocated && !question_freed);
+  question_freed=true;
+  const auto samples=QuestionCapture::kFrame*static_cast<size_t>(question_reads/2);
+  if (mode=="mic_only_trial_question_endpoint" || mode=="mic_only_trial_question_release_fail") {
+    zero(std::span(question_pcm).first(samples));
+    assert(question_pcm[samples]==12345);
+  }
+  if (mode=="mic_only_trial_question_revoke" || mode=="mic_only_trial_question_short") {
+    assert(question_reads==9);
+    zero(std::span(question_pcm).first(samples));
+  }
+}
+#ifndef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
+extern "C" bool esp_ptr_external_ram(const void* ptr) {
+  return question_trial() && (ptr==question_pcm.data() || ptr==&question_pcm.back()) &&
+      mode!="mic_only_trial_question_bad_placement";
+}
+#endif
+
 extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
   assert(caps==(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   ++heap_checks;
@@ -170,6 +212,10 @@ extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
 }
 extern "C" esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t*,i2c_master_bus_handle_t* h){
   if(mode=="mic_only_i2c_bus_fail")return ESP_FAIL;
+  if(bus_created) {
+    assert(question_trial() && !bus.alive && bus.deletes==1);
+    bus.alive=true;
+  }
   ++bus_created;
   *h=&bus;return 0;
 }
@@ -182,7 +228,7 @@ extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){
 extern "C" esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t h,
                                                const i2c_device_config_t* cfg,
                                                i2c_master_dev_handle_t* out) {
-  assert(h==&bus && h->alive && mic_only() && channels_created==0);
+  assert(h==&bus && h->alive && mic_only() && channels_created==bus_created-1);
   assert(cfg->scl_speed_hz==100000 && cfg->dev_addr_length==I2C_ADDR_BIT_LEN_7);
   assert(cfg->device_address==pmic.address || cfg->device_address==expander.address);
   auto& dev=cfg->device_address==pmic.address ? pmic : expander;
@@ -201,7 +247,7 @@ extern "C" esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev) {
 extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
                                                  const uint8_t* reg,size_t n,
                                                  uint8_t* value,size_t bytes,int ms) {
-  assert(dev->open && n==1 && bytes==1 && ms==30 && channels_created==0);
+  assert(dev->open && n==1 && bytes==1 && ms==30 && channels_created==bus_created-1);
   if(dev==&pmic) {
     assert(*reg==0x03 || *reg==0x90);
     *value=*reg==0x03 ? (mode=="mic_only_board_bad_pmic" ? 0 : 0x4a)
@@ -236,6 +282,10 @@ extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev,const uint8
 extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_t* t,i2s_chan_handle_t* r){
   assert(c->dma_frame_num==240 && r);assert((t==nullptr)==mic_only());
   if(mic_only())assert(reset_read_back && output_latch==0xa3 && !pmic.open && !expander.open);
+  if(channels_created) {
+    assert(question_trial() && !rx.alive && rx.deletes==1);
+    rx.alive=true;
+  }
   ++channels_created;
   if(t)*t=&tx;
   *r=&rx;return 0;
@@ -275,6 +325,24 @@ extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
 extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){assert(h->alive);if(mode=="info_fail" || (mode=="release_rx_info" && h==&rx))return ESP_FAIL;info->is_enabled=h->enabled;info->pair_chan=mode=="mic_only_peer"?&tx:nullptr;return 0;}
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
+  if(channels_created==2) {
+    assert(question_trial() && question_cues==1);
+    ++question_reads;
+    if(mode=="mic_only_trial_question_wall") trial_time_us+=30000;
+    else if(mode=="mic_only_trial_question_frame_cap") trial_time_us+=1000;
+    else trial_time_us+=10000;
+    if(question_reads==9 && mode=="mic_only_trial_question_revoke") local_owner=false;
+    if(question_reads==9 && mode=="mic_only_trial_question_clock") trial_time_us=-1;
+    *bytes=(question_reads==9 && mode=="mic_only_trial_question_short")?n-4:n;
+    auto* pcm=static_cast<int16_t*>(p);
+    const bool voice=mode=="mic_only_trial_question_wall" ||
+                     mode=="mic_only_trial_question_frame_cap" || question_reads<=8;
+    for(size_t i=0;i<*bytes/4;++i) {
+      pcm[2*i]=voice?1800:0;
+      pcm[2*i+1]=900;
+    }
+    return ESP_OK;
+  }
   const bool short_read=mode=="short" || mode=="mic_only_short" || mode=="mic_only_trial_short" ||
                         mode=="mic_only_trial_short_cleanup_bad" ||
                         mode=="mic_only_trial_chain_short_read";
@@ -346,10 +414,16 @@ extern "C" void esp_codec_dev_delete(esp_codec_dev_handle_t h){assert(!static_ca
 extern "C" int audio_codec_delete_codec_if(const audio_codec_if_t* c) {
   assert(deleted==created);
   codec_operation(c==&codecs[0]?0:1,"delete");
-  return mode=="mic_only_trial_delete_fail" || mode=="mic_only_trial_short_cleanup_bad"
+  return mode=="mic_only_trial_delete_fail" || mode=="mic_only_trial_short_cleanup_bad" ||
+         (mode=="mic_only_trial_question_release_fail" && channels_created==2)
       ?ESP_CODEC_DEV_INVALID_ARG:ESP_CODEC_DEV_OK;
 }
-extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t* c){assert(c==&controls[0] || c==&controls[1]);++controls_deleted;return 0;}
+extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t* c) {
+  assert(c==&controls[0] || c==&controls[1]);
+  ++controls_deleted;
+  if(question_trial()) controls[c==&controls[0]?0:1]={};
+  return 0;
+}
 extern "C" int audio_codec_delete_gpio_if(const audio_codec_gpio_if_t*){return 0;}
 extern "C" int audio_codec_delete_data_if(const audio_codec_data_if_t* h){assert(h==&base && deleted==created);++data_deletes;return 0;}
 #ifdef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
@@ -411,6 +485,49 @@ int main(int argc,char** argv) {
       assert(size!=0 && json[size-1]=='\n' && json[size]=='\0');
       std::printf("%s", json.data());
     }
+    return 0;
+  }
+  if(question_trial()) {
+    using Result=K151QuestionTrialResult;
+    const auto test=std::string_view(mode).substr(std::string_view("mic_only_trial_question_").size());
+    K151MicWakeTrial trial{nullptr,announce_question};
+    const auto wake=trial.run(local_owner,local_stop,{true,true},std::make_unique<TrialDetector>());
+    const auto question=trial.question_diagnostic();
+    if(test=="no_wake") {
+      assert(wake==K151MicWakeTrialResult::not_detected);
+      assert(question.result==Result::not_run && !question_allocated);
+      assert(question_cues==0 && question_reads==0 && bus_created==1);
+      return 0;
+    }
+    assert(wake==K151MicWakeTrialResult::detected && trial.take_input_counts()->frames_read==4);
+    assert(trial_model_drops==1 && question_allocated && !bus.alive && !rx.alive);
+    assert(tx.deletes==0 && data_deletes==0 && legacy_calls==0);
+    if(test=="no_memory" || test=="bad_placement") {
+      assert(question.result==Result::memory_denied && question_cues==0 && question_reads==0);
+      assert(question_freed==(test=="bad_placement") && bus_created==1);
+      return 0;
+    }
+    assert(question_freed && question_cues==1 && bus_created==2 && bus.deletes==2 && rx.deletes==2);
+    assert(question.codec_cleanup_unverified==(test=="release_fail"));
+    if(test=="endpoint" || test=="release_fail") {
+      assert(question_reads==58);
+      assert(question.result==(test=="endpoint"?Result::endpoint:Result::release_failed));
+    } else if(test=="wall") {
+      assert(trial_time_us==8'081'000 && question_reads==268);
+      assert(question.result==Result::no_endpoint);
+    } else if(test=="frame_cap") {
+      assert(question_reads==2*static_cast<int>(QuestionCapture::kMaxFrames));
+      zero(question_pcm);
+      assert(question.result==Result::no_endpoint);
+    } else if(test=="stop_at_cue") {
+      assert(question.result==Result::stopped && question_reads==0);
+    } else if(test=="revoke") {
+      assert(question.result==Result::stopped && question_reads==9);
+    } else if(test=="short") {
+      assert(question.result==Result::read_failed && question_reads==9);
+    } else if(test=="clock") {
+      assert(question.result==Result::clock_fault && question_reads==9);
+    } else assert(false);
     return 0;
   }
   if(mic_wake_trial()) {
