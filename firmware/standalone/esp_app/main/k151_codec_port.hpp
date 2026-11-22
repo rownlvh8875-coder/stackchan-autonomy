@@ -35,6 +35,8 @@ class K151CodecPort final {
                                const K151MicOnlyEvidence& evidence);
   bool microphone_on();
   bool microphone_off();
+  bool capture_idle() const;  // Check physical I2S idle before the next capture.
+  bool start_fresh_capture(); // Open duplex RX and discard its first complete PCM block.
   bool capture_mono_24k(std::span<int16_t> mono);  // <= 10ms PCM; 20ms driver wait + 40ms postcheck.
   bool playback_available() const;
   bool speaker_on_low_volume(const std::atomic_bool& consent);
@@ -72,6 +74,7 @@ class K151CodecPort final {
   bool prepare_i2s();
   bool prepare_i2s_tx();
   bool prepare_codecs();
+  bool quiesce_duplex_channels();
   bool prepare_output_codec();
   bool prepare_input_codec();
   bool close_microphone(bool* driver_closed = nullptr); // Does not initiate nested cleanup.

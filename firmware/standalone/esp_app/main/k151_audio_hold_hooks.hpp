@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Explicitly dormant AudioGuard ↔ K151CodecPort hooks, never used by app_main.
-// Output hardware and capture flush still require device verification.
+// Owner-task AudioGuard hooks. The HOLD app does not construct them.
 #pragma once
 
 #include "audio_guard.hpp"
@@ -8,16 +7,15 @@
 
 namespace stackchan::standalone {
 
-// Returning success from a missing physical operation would be unsafe.
-// AudioGuard initialization fails closed in the HOLD build.
-inline AudioHooks k151_unapproved_audio_hooks(K151CodecPort& codec,
-                                             const std::atomic_bool& consent) {
+inline AudioHooks k151_audio_hooks(K151CodecPort& codec, std::atomic_bool& owner,
+                                  std::atomic_bool& stop, const std::atomic_bool& consent,
+                                  K151AudioBoardEvidence evidence) {
   return AudioHooks{
       [&codec]() { return codec.microphone_off(); },
       [&codec]() { return codec.speaker_off(); },
-      []() { return false; }, // No validated power/reset/init transaction.
-      [&codec]() { return codec.microphone_on(); },
-      []() { return false; }, // Mic FIFO flush not measured on hardware.
+      [&codec, &owner, &stop, evidence]() { return codec.prepare(owner, stop, evidence); },
+      [&codec]() { return codec.start_fresh_capture(); },
+      [&codec]() { return codec.capture_idle(); },
       [&codec, &consent]() { return codec.speaker_on_low_volume(consent); },
       [&codec]() { return codec.drain_output_before_mute(); },
   };

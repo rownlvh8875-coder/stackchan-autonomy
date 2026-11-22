@@ -1,5 +1,17 @@
 # Next steps
 
+## 2026-11-23 오프라인 후속 — 듀플렉스 마이크 준비와 종료
+
+앰프 준비 중 TX만 켜고, 초기화와 마이크 종료 때 실제 I2S
+채널 두 개가 정지했는지 조회한다. esp_codec_dev는 수신 클록을 공급하기 위해
+재생을 열지 않은 상태에서도 TX를 켤 수 있다. 운영 AudioGuard는
+앰프 대기를 확인하고 RX를 다시 시작한다. 고정 IDF가 다시 열린
+RX 큐를 초기화한 뒤 첫 10ms 블록을 RAM에서 버리고 지운다.
+모의 코덱으로 연속 수신, STOP, 짧은 초기 읽기와 채널 정지 실패를
+검증했다. 운영 부팅과 실물 채널 검증은 후속 단계다.
+[esp_codec_dev의 수신 클록 설정](https://github.com/espressif/esp-adf/blob/af7b72fb2b73d4f513d3cede01c13518ab216735/components/esp_codec_dev/platform/audio_codec_data_i2s.c#L391).
+[고정 ESP-IDF의 RX 큐 초기화](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_driver_i2s/i2s_common.c#L1392).
+
 ## 2026-11-23 오프라인 후속 — 저음량 앰프 재생 시작
 
 I2S 수신 정지와 송신 활성 상태를 확인한 뒤 AW88298을 음소거

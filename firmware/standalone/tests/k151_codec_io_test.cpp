@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Execute actual port against pinned codec headers + no-hardware C ABI doubles.
 #include "bench_gate.hpp"
+#include "k151_audio_hold_hooks.hpp"
 #include "k151_codec_port.hpp"
 #include "k151_mic_reader.hpp"
 #include "k151_mic_wake_trial.hpp"
@@ -40,7 +41,9 @@ int bus_created=0, channels_created=0, tdm_inits=0;
 int tx_callbacks_registered=0;
 std::string phase;
 bool base_open=true;
+bool exercise_release_faults=false;
 bool mic_only() { return mode.starts_with("mic_only_"); }
+bool duplex_runtime() { return mode.starts_with("duplex_runtime_"); }
 bool report_trial=false;
 std::atomic_bool local_owner{true}, local_stop{false};
 bool mic_wake_trial() { return report_trial || mode.starts_with("mic_only_trial_"); }
@@ -199,6 +202,9 @@ int sdk_format(const audio_codec_data_if_t* h,esp_codec_dev_type_t type,esp_code
   assert(h==&base);++formats;
   // SDK format callback disables the selected channel before reconfiguration.
   (void)i2s_channel_disable(type==ESP_CODEC_DEV_TYPE_IN?&rx:&tx);
+  // esp_codec_dev 1.6.2 can enable the paired TX to supply RX master clocks.
+  if (duplex_runtime() && type == ESP_CODEC_DEV_TYPE_IN && !tx.enabled)
+    assert(i2s_channel_enable(&tx) == ESP_OK);
   return mode=="format_fail"?ESP_FAIL:ESP_OK;
 }
 int legacy_read(const audio_codec_data_if_t*,uint8_t* p,int n) {
@@ -383,10 +389,10 @@ extern "C" esp_err_t i2s_channel_register_event_callback(i2s_chan_handle_t h,
 void vTaskDelay(unsigned ticks) {
   assert(!mic_only());
   if (reset_waits == 0) {
-    assert(ticks == 11 && output_latch == 0xa3 && tx.enabled && rx.enabled);
+    assert(ticks == 11 && output_latch == 0xa3 && tx.enabled && !rx.enabled);
     if (mode == "duplex_board_stop_in_reset") local_stop = true;
   } else {
-    assert(reset_waits == 1 && ticks == 51 && output_latch == 0xa7);
+    assert(reset_waits == 1 && ticks == 51 && output_latch == 0xa7 && tx.enabled && !rx.enabled);
     if (mode == "duplex_board_stop_after_release") local_stop = true;
   }
   ++reset_waits;
@@ -409,10 +415,16 @@ extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
   assert(h->alive);++h->disables;
   if(h==&rx && fail_rx_disable)return ESP_FAIL;
   const bool fail_rx=h==&rx && (mode=="release_rx" || mode=="release_both" ||
-                               mode=="release_rx_info" || mode=="mic_only_close_failure" ||
-                               mode=="mic_only_trial_close_fail");
+                               mode=="release_rx_info");
   const bool fail_tx=h==&tx && (mode=="release_tx" || mode=="release_both");
-  if((fail_rx || fail_tx) && h->disables==1)return ESP_FAIL;
+  if(exercise_release_faults && (fail_rx || fail_tx) && h->disables==(h==&tx?2:1))
+    return ESP_FAIL;
+  if(h==&rx && h->disables==1 &&
+     (mode=="mic_only_close_failure" || mode=="mic_only_trial_close_fail"))return ESP_FAIL;
+  if(mode=="duplex_runtime_prepare_disable_failure" && h==&tx && h->disables==1)
+    return ESP_FAIL;
+  if(mode=="duplex_runtime_close_tx_failure" && h==&tx && calls>0 && h->disables==2)
+    return ESP_FAIL;
   if(!h->enabled)return ESP_ERR_INVALID_STATE;
   h->enabled=false;
   return 0;
@@ -422,9 +434,18 @@ extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
   if(h->enabled)return ESP_ERR_INVALID_STATE; // Pinned IDF refuses BEFORE free.
   h->alive=false;return 0;
 }
-extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){assert(h->alive);if(mode=="info_fail" || (mode=="release_rx_info" && h==&rx))return ESP_FAIL;info->is_enabled=h->enabled;info->pair_chan=mode=="mic_only_peer"?&tx:nullptr;return 0;}
+extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){assert(h->alive);if(exercise_release_faults && (mode=="info_fail" || (mode=="release_rx_info" && h==&rx)))return ESP_FAIL;info->is_enabled=h->enabled;info->pair_chan=mode=="mic_only_peer"?&tx:nullptr;return 0;}
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
+  if (duplex_runtime()) {
+    assert(rx.enabled && tx.enabled && n==960);
+    const bool priming = calls % 2 != 0;
+    auto* samples = static_cast<int16_t*>(p);
+    std::fill_n(samples, n / sizeof(*samples), priming ? 22222 : 284);
+    *bytes = priming && mode == "duplex_runtime_short_prime" ? n - 4 : n;
+    if (priming && mode == "duplex_runtime_stop_at_prime") local_stop = true;
+    return ESP_OK;
+  }
   if(channels_created == (direct_question() ? 1 : 2)) {
     assert(question_trial());
     const auto test=question_case();
@@ -1022,12 +1043,68 @@ int main(int argc,char** argv) {
     assert(!port.capture_mono_24k(pcm));zero(pcm);assert(calls==0);
     assert(!port.shutdown());assert(controls_deleted==controls_created);return 0;
   }
+  if (duplex_runtime() && mode != "duplex_runtime_prepared_idle") {
+    const bool valid_board = mode != "duplex_runtime_wrong_evidence";
+    const bool prepare_fault = mode == "duplex_runtime_prepare_disable_failure";
+    const bool hold_playback = mode == "duplex_runtime_hold_playback";
+    std::atomic_bool paid_consent{hold_playback};
+    AudioGuard audio{k151_audio_hooks(port, local_owner, local_stop, paid_consent,
+                                      {valid_board, true})};
+    assert(audio.initialize(true, true) == (valid_board && !prepare_fault));
+    assert(!rx.enabled && !tx.enabled && calls == 0);
+    if (!valid_board || prepare_fault) {
+      assert(audio.state() == AudioState::fault);
+      assert(bus_created == int(prepare_fault) && !port.prepared());
+      if (prepare_fault) assert(!rx.alive && !tx.alive && output_latch == 0xa3);
+      return 0;
+    }
+    assert(audio.state() == AudioState::idle);
+    if (hold_playback) {
+      assert(!audio.playback_begin() && audio.stopped());
+      assert(!rx.enabled && !tx.enabled && calls == 0);
+      return 0;
+    }
+    const bool primed = mode != "duplex_runtime_short_prime" &&
+                        mode != "duplex_runtime_stop_at_prime";
+    assert(audio.capture_begin() == primed);
+    assert(calls == 1);
+    if (!primed) {
+      assert(audio.state() == AudioState::fault && !rx.enabled && !tx.enabled);
+      assert(!port.capture_mono_24k(pcm)); zero(pcm);
+      return 0;
+    }
+    assert(rx.enabled && tx.enabled && port.capture_mono_24k(pcm));
+    for (const auto sample : pcm) assert(sample == 284);
+    const bool clean_close = mode != "duplex_runtime_close_tx_failure";
+    assert(audio.capture_end() == clean_close);
+    assert(!rx.enabled && !tx.enabled);
+    if (!clean_close) {
+      assert(audio.state() == AudioState::fault && !rx.alive && !tx.alive);
+      return 0;
+    }
+    audio.stop();
+    assert(audio.state() == AudioState::stopped && audio.manual_resume());
+    assert(audio.capture_begin() && calls == 3 && rx.enabled && tx.enabled);
+    assert(port.capture_mono_24k(pcm));
+    for (const auto sample : pcm) assert(sample == 284);
+    audio.stop();
+    assert(audio.state() == AudioState::stopped && !rx.enabled && !tx.enabled);
+    assert(port.shutdown());
+    return 0;
+  }
   assert(port.prepare(local_owner,local_stop,{true,true}));
+  if (mode == "duplex_runtime_prepared_idle") {
+    assert(!rx.enabled && !tx.enabled && calls == 0);
+    assert(port.shutdown());
+    return 0;
+  }
   assert(reset_writes==2 && output_latch==0xa7);
   assert(tx_callbacks_registered == 1);
   const auto* api=devices[1].data;
   if(mode.starts_with("release_")) {
     const bool bus_error=mode.starts_with("release_bus_");
+    exercise_release_faults=true;
+    if(!bus_error) { rx.enabled=true;tx.enabled=true; }
     assert(!port.shutdown());assert(port.faulted() && !port.prepared());
     assert(!port.capture_mono_24k(pcm));zero(pcm);assert(calls==0);
     assert(!port.microphone_on());assert(!port.prepare(local_owner,local_stop,{true,true}));
@@ -1057,6 +1134,7 @@ int main(int argc,char** argv) {
     assert(calls==0 && formats==0);assert(!port.faulted());assert(port.shutdown());return 0;
   }
   if(mode=="info_fail") {
+    exercise_release_faults=true;
     assert(!port.shutdown());assert(port.faulted() && !port.prepared());
     assert(!tx.enabled && !rx.enabled);assert(!port.shutdown());return 0;
   }

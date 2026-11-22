@@ -164,6 +164,14 @@ def _build_port(compiler, binary, app, *, embedded_trial=False):
         "duplex_board_wrong_amp",
         "duplex_board_unmuted",
         "duplex_board_switch_active",
+        "duplex_runtime_prepared_idle",
+        "duplex_runtime_prepare_disable_failure",
+        "duplex_runtime_wrong_evidence",
+        "duplex_runtime_ok",
+        "duplex_runtime_short_prime",
+        "duplex_runtime_stop_at_prime",
+        "duplex_runtime_close_tx_failure",
+        "duplex_runtime_hold_playback",
         "ctrl_out_init_read",
         "ctrl_out_init_write",
         "ctrl_in_init_read",
@@ -473,6 +481,7 @@ def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
     app = tmp_path / "app"
     app.mkdir()
     for name in [
+        "k151_audio_hold_hooks.hpp",
         "k151_codec_port.cpp",
         "k151_codec_port.hpp",
         "k151_bounded_i2s.cpp",
