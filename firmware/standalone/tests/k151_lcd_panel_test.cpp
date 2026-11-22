@@ -95,10 +95,13 @@ class K151ScpsUsbPort {
     return setup.poll_pairing_review(now, locked);
   }
 };
-bool K151InstallHold::device_activation_allowed() { return scenario != "hold"; }
-bool K151CodecPort::is_registered_board_bus(i2c_master_bus_handle_t input) {
-  return input == &bus;
+bool K151InstallHold::display_activation_allowed() { return scenario != "hold"; }
 }
+
+extern "C" esp_err_t i2c_master_get_bus_handle(i2c_port_t port, i2c_master_bus_handle_t* out) {
+  assert(port == I2C_NUM_1);
+  *out = &bus;
+  return ESP_OK;
 }
 
 extern "C" esp_err_t i2c_master_bus_add_device(

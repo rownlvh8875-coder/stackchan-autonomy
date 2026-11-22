@@ -1,4 +1,4 @@
-"""Validate a separate read-only board probe for review; never access a device."""
+"""Validate a separate board or panel probe for review; never access a device."""
 
 import argparse
 import csv
@@ -66,15 +66,33 @@ def validate_slot(partition_csv: str, write_offset: int, erase_bytes: int) -> di
     }
 
 
-def inspect_image(app: bytes, elf_sha256: str, *, write_offset: int, partition_csv: str) -> dict:
-    envelope, _ = inspect_envelope(app, elf_sha256, b"k151_board_probe")
+def inspect_image(
+    app: bytes, elf_sha256: str, *, write_offset: int, partition_csv: str, panel: bool = False
+) -> dict:
+    project = b"k151_panel_probe" if panel else b"k151_board_probe"
+    envelope, _ = inspect_envelope(app, elf_sha256, project)
+    scope = (
+        {
+            "kind": "PANEL_HEAD_STOP_PROBE_NOT_OPERATIONAL",
+            "device_configuration_writes": True,
+            "volatile_scope": "LCD and backlight, FT6336U and Si12T, AW9523B IRQ and GPIO21",
+            "physical_panel_head_stop_verified": False,
+            "accepts_credentials": False,
+            "paid_api_called": False,
+            "maximum_trial_ms": 10000,
+        }
+        if panel
+        else {
+            "kind": "READONLY_BOARD_PROBE_NOT_OPERATIONAL",
+            "device_configuration_writes": False,
+            "hardware_readback_validated": False,
+        }
+    )
     return {
         **envelope,
         **validate_slot(partition_csv, write_offset, envelope["erase_span_bytes"]),
-        "kind": "READONLY_BOARD_PROBE_NOT_OPERATIONAL",
-        "device_configuration_writes": False,
+        **scope,
         "gpio_mux_changes_after_start": True,
-        "hardware_readback_validated": False,
         "power_mute_or_audio_readiness_proven": False,
     }
 
@@ -88,6 +106,7 @@ def main():
     parser.add_argument("--write-offset", required=True, type=lambda v: int(v, 0))
     parser.add_argument("--partition-csv", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--panel", action="store_true")
     args = parser.parse_args()
     validate_source_head(args.source_head)
     base = validate(args.elf, args.bin, args.idf_head)
@@ -96,6 +115,7 @@ def main():
         base["elf"]["sha256"],
         write_offset=args.write_offset,
         partition_csv=args.partition_csv.read_text(encoding="utf-8"),
+        panel=args.panel,
     )
     result.update(
         idf_commit=base["idf_commit"],

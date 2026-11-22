@@ -2,7 +2,7 @@
 #include "k151_lcd_panel.hpp"
 
 #include "board_evidence.hpp"
-#include "k151_codec_port.hpp"
+#include "k151_board_bus.hpp"
 #include "k151_contract.hpp"
 #include "k151_install_hold.hpp"
 #include <array>
@@ -274,8 +274,8 @@ bool K151LcdPanel::initialize_controller() {
 
 bool K151LcdPanel::start(i2c_master_bus_handle_t bus, bool local_display_requested) {
   if (attempted_ || stop_.load() || !local_display_requested ||
-      !K151InstallHold::device_activation_allowed() || !lv_is_initialized() ||
-      !K151CodecPort::is_registered_board_bus(bus))
+      !K151InstallHold::display_activation_allowed() || !lv_is_initialized() ||
+      !k151::is_registered_board_bus(bus))
     return false;
   attempted_ = true;
   board_bus_ = bus;

@@ -2,7 +2,7 @@
 #include "k151_display_stop.hpp"
 
 #include "board_evidence.hpp"
-#include "k151_codec_port.hpp"
+#include "k151_board_bus.hpp"
 #include "k151_lcd_panel.hpp"
 #include <array>
 #include <driver/gpio.h>
@@ -137,7 +137,7 @@ const std::atomic_bool& K151DisplayStop::flag() { return latched; }
 
 K151DisplayStop::ArmResult K151DisplayStop::arm(i2c_master_bus_handle_t board_bus,
                                                K151LcdPanel& panel) {
-  if (attempted || latched.load() || !K151CodecPort::is_registered_board_bus(board_bus))
+  if (attempted || latched.load() || !k151::is_registered_board_bus(board_bus))
     return ArmResult::unavailable;
   attempted = true;
   const bool armed = panel.handoff_stop_input(board_bus, latched) &&

@@ -278,6 +278,13 @@ extern "C" esp_err_t nvs_commit(nvs_handle_t handle) {
 }
 extern "C" void nvs_close(nvs_handle_t handle) { assert(handle == 1 || handle == 2); }
 
+extern "C" esp_err_t i2c_master_get_bus_handle(i2c_port_t port, i2c_master_bus_handle_t* out) {
+  assert(port == I2C_NUM_1);
+  if (!board_bus_registered) return ESP_ERR_INVALID_STATE;
+  *out = &menu_bus;
+  return ESP_OK;
+}
+
 namespace stackchan::standalone {
 bool K151InstallHold::device_activation_allowed() { return scenario != "bootstrap_hold"; }
 K151LcdPanel::~K151LcdPanel() = default;

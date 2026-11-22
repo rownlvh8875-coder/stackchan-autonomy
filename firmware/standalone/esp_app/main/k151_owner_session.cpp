@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "k151_owner_session.hpp"
 
-#include "k151_contract.hpp"
+#include "k151_board_bus.hpp"
 #include "k151_display_stop.hpp"
 #include "k151_install_hold.hpp"
 #include <esp_timer.h>
@@ -32,14 +32,7 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
   if (!task_) return false;
   core_ = xPortGetCoreID();
 
-  i2c_master_bus_config_t cfg{};
-  cfg.i2c_port = I2C_NUM_1;
-  cfg.sda_io_num = static_cast<gpio_num_t>(k151::kI2cSda);
-  cfg.scl_io_num = static_cast<gpio_num_t>(k151::kI2cScl);
-  cfg.clk_source = I2C_CLK_SRC_DEFAULT;
-  cfg.glitch_ignore_cnt = 7;
-  cfg.flags.enable_internal_pullup = 1;
-  if (i2c_new_master_bus(&cfg, &bus_) == ESP_OK && !stop_.load()) {
+  if (k151::open_board_bus(bus_) && !stop_.load()) {
     lv_init();
     owns_lvgl_ = lv_is_initialized();
     if (owns_lvgl_ && panel_.start(bus_, true) &&

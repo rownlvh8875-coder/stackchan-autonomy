@@ -4,6 +4,7 @@
 // xiaozhi-esp32@49b4380/main/boards/m5stack/core-s3/cores3_audio_codec.cc.
 // Nothing invokes hardware operations from app_main.
 #include "k151_codec_port.hpp"
+#include "k151_board_bus.hpp"
 #include "k151_contract.hpp"
 #include "pcm_frame.hpp"
 #include "k151_output_evidence.hpp"
@@ -104,8 +105,7 @@ bool K151CodecPort::fail() {
 }
 
 bool K151CodecPort::is_registered_board_bus(i2c_master_bus_handle_t bus) {
-  i2c_master_bus_handle_t registered = nullptr;
-  return bus && i2c_master_get_bus_handle(I2C_NUM_1, &registered) == ESP_OK && bus == registered;
+  return k151::is_registered_board_bus(bus);
 }
 
 bool K151CodecPort::prepare(const std::atomic_bool& owner, const std::atomic_bool& stop,
@@ -215,14 +215,7 @@ bool K151CodecPort::release_board_device() {
 bool K151CodecPort::prepare_i2s() {
   prepare_stage_ = K151MicWakeStage::i2c_bus;
   if (!i2c_bus_) {
-    i2c_master_bus_config_t bus_cfg = {};
-    bus_cfg.i2c_port = static_cast<i2c_port_t>(kI2cPort);
-    bus_cfg.sda_io_num = static_cast<gpio_num_t>(k151::kI2cSda);
-    bus_cfg.scl_io_num = static_cast<gpio_num_t>(k151::kI2cScl);
-    bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
-    bus_cfg.glitch_ignore_cnt = 7;
-    bus_cfg.flags.enable_internal_pullup = 1;
-    if (i2c_new_master_bus(&bus_cfg, &i2c_bus_) != ESP_OK) return false;
+    if (!k151::open_board_bus(i2c_bus_)) return false;
     owns_i2c_bus_ = true;
   }
   if (!prepare_board()) return false;
