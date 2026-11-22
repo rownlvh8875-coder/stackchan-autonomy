@@ -266,8 +266,11 @@ PROGRESS_V4 = {
 def test_mic_wake_v4_requires_deadline_progress_only_for_window_overrun():
     record = DEADLINE_V4 | {"deadline_progress": PROGRESS_V4}
     assert parse_mic_wake_trial_report(record) == record
-    for rejected in (DEADLINE_V4, record | {"clock_reason": "poll_duration_exceeded"},
-                     record | {"mic_wake_trial": "MIC_WAKE_TRIAL_V3"}):
+    for rejected in (
+        DEADLINE_V4,
+        record | {"clock_reason": "poll_duration_exceeded"},
+        record | {"mic_wake_trial": "MIC_WAKE_TRIAL_V3"},
+    ):
         with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
             parse_mic_wake_trial_report(rejected)
 
