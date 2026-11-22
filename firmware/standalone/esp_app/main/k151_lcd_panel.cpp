@@ -178,24 +178,27 @@ bool K151LcdPanel::locate_panel(i2c_master_bus_handle_t bus) {
   return matched && !stop_.load();
 }
 
+bool K151LcdPanel::read_contact_count(uint8_t& count) const {
+  constexpr uint8_t status_register = 0x02;
+  std::array<uint8_t, 6> touch_status{};
+  if (!ready() || !touch_ || stop_input_handed_off_ ||
+      i2c_master_transmit_receive(touch_, &status_register, 1,
+                                  touch_status.data(), touch_status.size(),
+                                  kI2cTimeoutMs) != ESP_OK || stop_.load()) return false;
+  count = touch_status[0] & 0x0f;
+  return count <= 2;
+}
+
 bool K151LcdPanel::handoff_stop_input(i2c_master_bus_handle_t bus,
                                       const std::atomic_bool& expected_stop) {
-  if (!ready() || bus != board_bus_ || &stop_ != &expected_stop) return false;
-  const auto idle = [&] {
-    constexpr uint8_t status_register = 0x02;
-    std::array<uint8_t, 6> touch_status{};
-    return !stop_.load() &&
-           i2c_master_transmit_receive(touch_, &status_register, 1,
-                                       touch_status.data(), touch_status.size(),
-                                       kI2cTimeoutMs) == ESP_OK &&
-           !(touch_status[0] & 0x0f) && !stop_.load();
-  };
-
+  if (stop_input_handed_off_ || bus != board_bus_ || &stop_ != &expected_stop) return false;
   // Acknowledge the UI's release event before the STOP monitor owns INTN.
   // Both AW9523B input registers can carry pending events.
-  uint8_t ignored{};
-  return idle() && read_register(expander_, 0x00, ignored) && !stop_.load() &&
-         read_register(expander_, 0x01, ignored) && idle();
+  uint8_t count{}, ignored{};
+  stop_input_handed_off_ = read_contact_count(count) && count == 0 &&
+      read_register(expander_, 0x00, ignored) && !stop_.load() &&
+      read_register(expander_, 0x01, ignored) && read_contact_count(count) && count == 0;
+  return stop_input_handed_off_;
 }
 
 bool K151LcdPanel::open_display() {

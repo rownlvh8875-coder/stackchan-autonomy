@@ -43,13 +43,13 @@ def run_pairing(
         ssid = text_input("Wi-Fi SSID (visible): ").encode("utf-8")
         password = hidden_input("Wi-Fi password (hidden): ")
         api_key = hidden_input("OpenAI API key (hidden): ")
-        # The PC reference validates inputs, then encrypts. The device must
-        # independently require a second 3s physical head-touch gesture.
+        # The device requires its own on-screen comparison and final head hold.
         sealed = pc.seal(ssid, password, api_key, observed, reviewed_locally=True)
         write_one(port, Frame(Op.SEALED, sealed))
         expect(port, Op.PENDING_TOUCH, 20)
 
-        say("On the K151, hold head touch for 3 seconds and release to approve.")
+        say("If all 8 digits match, hold the K151 screen for 1 second and release.")
+        say("At FINAL APPROVAL, hold the K151 head for 3 seconds and release.")
         expect(port, Op.COMPLETED, 120)
         say("Device reports one-time RAM setup complete. No credential file was saved.")
         return True

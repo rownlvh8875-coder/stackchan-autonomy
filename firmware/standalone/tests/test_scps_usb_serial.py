@@ -102,6 +102,11 @@ def test_full_encrypted_pairing_and_no_secret_echo():
     assert password not in repr(port.writes)
     assert api not in repr(port.writes)
     assert not any(password in m or api in m for m in messages)
+    screen = next(
+        index for index, message in enumerate(messages) if "hold the K151 screen" in message
+    )
+    head = next(index for index, message in enumerate(messages) if "hold the K151 head" in message)
+    assert screen < head
 
 
 def test_wrong_sas_never_sends_credentials():

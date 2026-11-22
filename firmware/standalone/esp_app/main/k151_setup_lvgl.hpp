@@ -33,12 +33,23 @@ class K151SetupLvgl final {
   bool attached() const;
 
  private:
+  friend class K151ScpsUsbPort;
+  enum class PairingReview : uint8_t { waiting, approved, fault };
+  enum class ReviewPhase : uint8_t { idle, wait_clear, wait_press, holding, wait_release, closed };
+  bool begin_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
+  PairingReview poll_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
+  bool show_final_touch_prompt();
+
   const std::atomic_bool& stop_;
   K151LcdPanel* panel_ = nullptr;
   lv_obj_t* root_ = nullptr;
   lv_obj_t* title_ = nullptr;
   lv_obj_t* first_ = nullptr;
   lv_obj_t* second_ = nullptr;
+  uint64_t last_review_ms_ = 0;
+  uint64_t hold_since_ms_ = 0;
+  ReviewPhase review_ = ReviewPhase::idle;
+  bool sas_visible_ = false;
   bool attempted_ = false;
 };
 } // namespace stackchan::standalone

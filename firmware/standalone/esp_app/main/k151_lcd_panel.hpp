@@ -10,6 +10,7 @@
 namespace stackchan::standalone {
 
 class K151DisplayStop;
+class K151SetupLvgl;
 
 // Single board/LVGL owner task. LVGL and the borrowed I2C1 bus must outlive
 // the panel. Shut down voice and its IRQ monitor before releasing display
@@ -31,6 +32,8 @@ class K151LcdPanel final {
 
  private:
   friend class K151DisplayStop;
+  friend class K151SetupLvgl;
+  bool read_contact_count(uint8_t& count) const;
   bool handoff_stop_input(i2c_master_bus_handle_t bus, const std::atomic_bool& expected_stop);
   bool locate_panel(i2c_master_bus_handle_t bus);
   bool prepare_touch_pins();
@@ -60,6 +63,7 @@ class K151LcdPanel final {
   bool touch_irq_changed_ = false;
   bool touch_reset_changed_ = false;
   bool p0_drive_changed_ = false;
+  bool stop_input_handed_off_ = false;
   bool fault_ = false;
 };
 

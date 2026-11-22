@@ -45,6 +45,7 @@ uint8_t expander_p0 = 0x07, p0_direction = 0x18, p1_direction = 0x0c, p0_drive =
 uint8_t initial_p0{}, initial_p1{}, initial_drive{}, initial_irq_direction{}, initial_ldo_enable{};
 bool release_failed_once = false;
 unsigned ft_contact_reads = 0, irq_ack_reads = 0;
+uint8_t screen_contacts = 0;
 bool spi_open = false, lcd_open = false, lv_open = false, display_on = false;
 bool sd_cs_driven = false;
 uint32_t sd_cs_level = 0;
@@ -84,6 +85,16 @@ class K151DisplayStop {
     return panel.handoff_stop_input(bus, flag);
   }
 };
+class K151ScpsUsbPort {
+ public:
+  using Review = K151SetupLvgl::PairingReview;
+  static bool begin(K151SetupLvgl& setup, uint64_t now, bool locked = true) {
+    return setup.begin_pairing_review(now, locked);
+  }
+  static Review poll(K151SetupLvgl& setup, uint64_t now, bool locked = true) {
+    return setup.poll_pairing_review(now, locked);
+  }
+};
 bool K151InstallHold::device_activation_allowed() { return scenario != "hold"; }
 bool K151CodecPort::is_registered_board_bus(i2c_master_bus_handle_t input) {
   return input == &bus;
@@ -119,9 +130,13 @@ extern "C" esp_err_t i2c_master_transmit_receive(
   if (device == &touch) {
     assert(size == 6);
     if (*reg == 0x02) {
-      assert(scenario.starts_with("handoff_"));
+      assert(scenario.starts_with("handoff_") || scenario.starts_with("review_"));
       ++ft_contact_reads;
       std::fill_n(data, size, 0);
+      if (scenario.starts_with("review_")) {
+        if (scenario == "review_i2c_error") return ESP_FAIL;
+        data[0] = screen_contacts;
+      }
       if (scenario == "handoff_touch_held" ||
           (scenario == "handoff_late_press" && ft_contact_reads == 2))
         data[0] = 1;
@@ -356,6 +371,8 @@ extern "C" void lv_refr_now(lv_display_t* disp) {
   ++frames;
   transmitted_rows = 0;
   const int limit = scenario == "short_frame" || (scenario == "sas_short_frame" && frames == 3)
+                     || (scenario == "review_short_frame" && frames == 4)
+                     || (scenario == "review_final_short_frame" && frames == 5)
                  ? 230 : 240;
   for (int y = 0; y < limit; y += 10) {
     lv_area_t area{11, y, 318, y + 9};
@@ -421,8 +438,9 @@ int main(int argc, char** argv) {
   const bool cold_ok = scenario == "cold_start" || scenario == "cold_restore_retry" ||
                        scenario == "cold_restore_with_foreign_output";
   const bool handoff_case = scenario.starts_with("handoff_");
+  const bool review_case = scenario.starts_with("review_");
   const bool start_ok = scenario == "ok" || cold_ok || handoff_case || scenario.starts_with("sas_") ||
-                        scenario == "stop_after_start";
+                        scenario == "stop_after_start" || review_case;
   auto* handle = scenario == "wrong_bus" ? &other_bus : &bus;
   assert(panel.start(handle, scenario != "not_requested") == start_ok);
   if (!start_ok) {
@@ -463,6 +481,61 @@ int main(int argc, char** argv) {
     const bool rechecked = acked && scenario != "handoff_i2c_error";
     assert(irq_ack_reads == (acked ? 2u : 0u));
     assert(ft_contact_reads == (rechecked ? 2u : stopped ? 0u : 1u));
+    if (scenario == "handoff_idle") {
+      assert(!K151DisplayStop::handoff(panel, &bus, stop));
+      assert(!K151DisplayStop::handoff(panel, &bus, stop));
+      assert(irq_ack_reads == 2 && ft_contact_reads == 2);
+    }
+  } else if (review_case) {
+    using Review = K151ScpsUsbPort::Review;
+    const unsigned no_reads = ft_contact_reads;
+    assert(!K151ScpsUsbPort::begin(setup, 1000));
+    assert(K151ScpsUsbPort::poll(setup, 1000) == Review::fault);
+    assert(ft_contact_reads == no_reads);
+    assert(setup.present_pairing_sas("12345678", true, true, true));
+    assert(!K151ScpsUsbPort::begin(setup, 1000, false));
+    if (scenario == "review_short_frame") {
+      assert(!K151ScpsUsbPort::begin(setup, 1000) && !setup.attached());
+      assert(K151ScpsUsbPort::poll(setup, 1000) == Review::fault);
+      assert(frames == 4 && ft_contact_reads == no_reads);
+      assert(setup.detach(true) && panel.shutdown());
+      check_released();
+      return 0;
+    }
+    assert(K151ScpsUsbPort::begin(setup, 1000));
+    assert(frames == 4 && !K151ScpsUsbPort::begin(setup, 1000));
+    const auto poll = [&](uint64_t ms, uint8_t contacts, bool locked = true) {
+      screen_contacts = contacts;
+      return K151ScpsUsbPort::poll(setup, ms, locked);
+    };
+    if (scenario == "review_ok" || scenario == "review_final_short_frame") {
+      assert(poll(1000, 0) == Review::waiting);
+      for (uint64_t ms = 1100; ms <= 2100; ms += 100) assert(poll(ms, 1) == Review::waiting);
+      const auto expected = scenario == "review_ok" ? Review::approved : Review::fault;
+      assert(poll(2200, 0) == expected && frames == 5);
+      assert(poll(2300, 0) == Review::fault);
+    } else if (scenario == "review_held_early") {
+      for (uint64_t ms = 1000; ms <= 2100; ms += 100) assert(poll(ms, 1) == Review::waiting);
+      assert(poll(2200, 0) == Review::waiting);
+      for (uint64_t ms = 2300; ms <= 3300; ms += 100) assert(poll(ms, 1) == Review::waiting);
+      assert(poll(3400, 0) == Review::approved);
+    } else if (scenario == "review_brief_or_multiple") {
+      assert(poll(1000, 0) == Review::waiting);
+      assert(poll(1100, 1) == Review::waiting);
+      assert(poll(1200, 0) == Review::waiting);
+      for (uint64_t ms = 1300; ms <= 2300; ms += 100) assert(poll(ms, 2) == Review::waiting);
+      assert(poll(2400, 0) == Review::waiting && frames == 4);
+    } else if (scenario == "review_prompt_replaced") {
+      assert(setup.present(TouchConsentPhase::hold, OwnerSetupPhase::hold, false, false, true));
+      assert(poll(1000, 0) == Review::fault);
+    } else {
+      const auto when = scenario == "review_gap" ? 1251U :
+                        scenario == "review_clock_back" ? 999U : 1000U;
+      if (scenario == "review_stop") stop = true;
+      assert(poll(when, scenario == "review_invalid_count" ? 15 : 0,
+                  scenario != "review_lost_lock") == Review::fault);
+      assert(frames == 4);
+    }
   } else if (scenario == "stop_after_start") {
     stop = true;
     assert(!setup.attached() && !setup.present_pairing_sas("12345678", true, true, true));

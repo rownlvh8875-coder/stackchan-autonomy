@@ -36,9 +36,6 @@ class K151ScpsUsbPort final {
   // PC hello is processed. False means no display update and a hard fault.
   bool poll_once(uint64_t now_ms,bool lvgl_lock_held);
 
-  // NEVER called from received USB frames. Only a trusted *local* screen
-  // controller, after human SAS comparison, may begin the second hold.
-  bool arm_second_touch(uint64_t now_ms,bool local_ui_reviewed);
   // Only the owner task calls this after polling Si12T and consuming a real
   // 3-second head-touch gesture. Sole path to RAM-only credential commit.
   bool finalize_after_touch(uint64_t now_ms);

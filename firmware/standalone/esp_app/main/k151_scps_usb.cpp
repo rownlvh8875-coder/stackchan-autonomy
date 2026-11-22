@@ -47,6 +47,8 @@ bool K151ScpsUsbPort::start(uint64_t now,bool exact_board_verified,
   if(attempted_ || stop_.load() || !exact_board_verified ||
      !trusted_lcd_verified || !uart_console_verified ||
      !usb_exclusively_owned || !display_.attached() ||
+     &stop_!=&touch_.stop_ || &stop_!=&display_.stop_ || &stop_!=&setup_.stop_ ||
+     &touch_.owner_mode_!=&setup_.owner_ ||
      !touch_.owner_window_open(now))return false;
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
   // Never multiplex console, SCFG and secret setup over the same USB bytes.
@@ -91,6 +93,7 @@ bool K151ScpsUsbPort::process(const scpswire::Frame& f,uint64_t now,
   if(state_==State::wait_sealed && f.kind==scpswire::Op::sealed_credentials) {
     if(!pending_.empty() || f.payload.size()>K151SecurePcSetup::kMaxSealedBytes)
       return fault();
+    if(!display_.begin_pairing_review(now,lvgl_lock_held))return fault();
     pending_=f.payload; // ciphertext only; validated later via AES-GCM.
     state_=State::pending_local_review;
     return send(scpswire::Op::pending_touch) || fault();
@@ -122,18 +125,14 @@ bool K151ScpsUsbPort::poll_once(uint64_t now,bool lvgl_lock_held) {
       if(!accepted)return false;
     }
   }
-  return true;
-}
-
-bool K151ScpsUsbPort::arm_second_touch(
-    uint64_t now,bool local_ui_reviewed) {
-  if(!running_ || stop_.load() || !local_ui_reviewed ||
-     !trusted_lcd_ || !display_.attached() ||
-     state_!=State::pending_local_review ||
-     !touch_.owner_window_open(now) ||
-     pending_.empty())return false;
-  if(!touch_.start_scps_final_touch(true,now))return fault();
-  state_=State::waiting_touch;
+  if(state_==State::pending_local_review) {
+    const auto review=display_.poll_pairing_review(now,lvgl_lock_held);
+    if(review==K151SetupLvgl::PairingReview::fault)return fault();
+    if(review==K151SetupLvgl::PairingReview::approved) {
+      if(!touch_.start_scps_final_touch(true,now))return fault();
+      state_=State::waiting_touch;
+    }
+  }
   return true;
 }
 
