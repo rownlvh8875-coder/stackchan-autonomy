@@ -1,0 +1,74 @@
+{
+  "status": "FINITE_BENCH_COMPLETED_FACTORY_SLOT_RESTORED",
+  "date_local": "2026-11-22",
+  "timezone": "Asia/Seoul",
+  "branch_head": "76e92d2e3f9b63fcde983757aca85fd5fc140219",
+  "actual_ci_checkout": "dde79b33373be7e379648265c2640d088409e473",
+  "approved_scope": "ONE_POST_MODEL_HEAP_BENCH_AND_OTA1_RESTORE",
+  "scope_consumed": true,
+  "port": "COM3",
+  "backup": {
+    "bytes_per_file": 16777216,
+    "both_sha256_match": true,
+    "original_slot_verified_before_write": true
+  },
+  "install": {
+    "offset": 5308416,
+    "write_bytes": 792144,
+    "erase_bytes": 794624,
+    "image_sha256": "08f8f10e66b3ed9a756a780b11bf877e06a8a542a93937c2f03928404838128b",
+    "write_elapsed_s": 13.771,
+    "verify_elapsed_s": 2.101,
+    "independent_digest_matched": true
+  },
+  "trial": {
+    "initial_reset_reason": 11,
+    "start_commands": 1,
+    "stop_commands": 0,
+    "checkpoint_count": 11,
+    "synthetic_24k_frames_10ms": 32,
+    "synthetic_direct_chunks": 64,
+    "synthetic_matches": 0,
+    "max_detect_us": 7188,
+    "max_poll_us": 9003,
+    "poll_includes_checkpoint_latency": true,
+    "receiver_elapsed_s": 4.8285,
+    "observed_hold": true,
+    "local_tls12_peer_verified": true,
+    "network_tls_measured": false,
+    "operating_admission": false,
+    "model_resident_local_tls_wire": {
+      "internal_free_at_start": 353659,
+      "internal_min": 298695,
+      "internal_watermark_drop": 54964,
+      "psram_free_at_start": 8047576,
+      "psram_min": 5723848,
+      "psram_watermark_drop": 2323728
+    },
+    "simultaneous_speech_stage": {
+      "internal_largest": 196608,
+      "psram_largest": 5636096,
+      "question_pcm_bytes": 384000,
+      "wire_speech_bytes": 960000,
+      "decoded_speech_bytes": 960000,
+      "all_in_psram": true
+    }
+  },
+  "restore": {
+    "offset": 5308416,
+    "bytes": 5177344,
+    "original_slot_sha256": "39280cbec8d01362c559cedce7d8cd088d951096a5d8f045ead27fe6bf9038fb",
+    "write_elapsed_s": 85.860,
+    "verify_elapsed_s": 9.676,
+    "independent_digest_matched": true,
+    "partition_table_matches_at_all_three_stages": true,
+    "ota_selection_matches_at_all_three_stages": true,
+    "factory_boot_request_elapsed_s": 0.685,
+    "com3_returned": true,
+    "factory_screen_user_confirmed": null
+  },
+  "real_audio_captured_or_sent": false,
+  "paid_api_calls": 0,
+  "executed_code_ci_passed": 9,
+  "executed_code_ci_total": 9
+}
