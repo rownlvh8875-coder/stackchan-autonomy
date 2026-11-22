@@ -26,7 +26,14 @@ constexpr uint8_t kDldo1Enable = 0x80;
 constexpr uint8_t kDldo1Voltage = 0x99;
 constexpr uint8_t kVoltageMask = 0x1f;
 constexpr uint8_t kBacklightLevel = 22; // Vendor brightness mapping at 25%.
+constexpr uint8_t kP0Output = 0x02;
 constexpr uint8_t kP1Output = 0x03;
+constexpr uint8_t kP0Direction = 0x04;
+constexpr uint8_t kP1Direction = 0x05;
+constexpr uint8_t kAwGlobalControl = 0x11;
+constexpr uint8_t kP0PushPull = 0x10;
+constexpr uint8_t kTouchReset = 0x01; // AW9523B P0_0, active low.
+constexpr uint8_t kTouchIrq = 0x04; // AW9523B P1_2, input.
 constexpr uint8_t kLcdReset = 0x02; // AW9523B P1_1, active low.
 
 // ILI9342E register settings from M5Stack StackChan firmware,
@@ -77,28 +84,118 @@ bool set_bits(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t mask, uint8_t va
          read_register(dev, reg, observed) && observed == after;
 }
 
+bool other_p0_outputs_are_low(i2c_master_dev_handle_t expander) {
+  uint8_t mode{}, direction{}, output{};
+  return read_register(expander, k151::kAw9523P0ModeRegister, mode) &&
+         read_register(expander, kP0Direction, direction) &&
+         read_register(expander, kP0Output, output) &&
+         !(output & mode & ~direction & ~kTouchReset);
+}
+
 void wait_at_least(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms) + 1); }
 } // namespace
 
 K151LcdPanel::~K151LcdPanel() { (void)shutdown(); }
 
+bool K151LcdPanel::prepare_touch_pins() {
+  uint8_t p0_mode{}, p0_direction{}, p0_output{}, p1_mode{}, p1_direction{}, drive{};
+  if (!read_register(expander_, k151::kAw9523P0ModeRegister, p0_mode) ||
+      !read_register(expander_, kP0Direction, p0_direction) ||
+      !read_register(expander_, kP0Output, p0_output) ||
+      !read_register(expander_, k151::kAw9523P0ModeRegister + 1, p1_mode) ||
+      !read_register(expander_, kP1Direction, p1_direction) ||
+      !read_register(expander_, kAwGlobalControl, drive))
+    return false;
+
+  if (!(p0_mode & kTouchReset) || (p0_direction & kTouchReset) ||
+      (p1_mode & (kLcdReset | kTouchIrq)) != (kLcdReset | kTouchIrq) ||
+      (p1_direction & kLcdReset))
+    return false;
+  const bool reset_held = !(p0_output & kTouchReset);
+  const bool irq_is_input = p1_direction & kTouchIrq;
+  const bool needs_push_pull = !(drive & kP0PushPull);
+  // The mode bit changes the whole P0 bank. Keep any other already-high
+  // GPIO output untouched. Change an IRQ output only while touch is reset.
+  if ((needs_push_pull && (p0_output & p0_mode & ~p0_direction & ~kTouchReset)) ||
+      (!irq_is_input && !reset_held) || stop_.load())
+    return false;
+
+  if (!irq_is_input) {
+    touch_irq_changed_ = true;
+    if (!set_bits(expander_, kP1Direction, kTouchIrq, kTouchIrq) || stop_.load()) return false;
+  }
+  if (needs_push_pull) {
+    p0_drive_changed_ = true;
+    if (!set_bits(expander_, kAwGlobalControl, kP0PushPull, kP0PushPull) || stop_.load())
+      return false;
+  }
+  if (reset_held) {
+    wait_at_least(5);
+    if (stop_.load()) return false;
+    touch_reset_changed_ = true;
+    if (!set_bits(expander_, kP0Output, kTouchReset, kTouchReset)) return false;
+  }
+  if (reset_held || needs_push_pull) wait_at_least(300);
+  return !stop_.load();
+}
+
+bool K151LcdPanel::restore_touch_pins() {
+  // Restore the active-low reset before returning IRQ to its previous
+  // output direction, so the two devices never drive the IRQ together.
+  if (touch_reset_changed_) {
+    if (!set_bits(expander_, kP0Output, kTouchReset, 0)) return false;
+    touch_reset_changed_ = false;
+    if (touch_irq_changed_) wait_at_least(5);
+  }
+  if (p0_drive_changed_) {
+    if (!other_p0_outputs_are_low(expander_) ||
+        !set_bits(expander_, kAwGlobalControl, kP0PushPull, 0))
+      return false;
+    p0_drive_changed_ = false;
+  }
+  if (touch_irq_changed_) {
+    if (!set_bits(expander_, kP1Direction, kTouchIrq, 0)) return false;
+    touch_irq_changed_ = false;
+  }
+  return true;
+}
+
 bool K151LcdPanel::locate_panel(i2c_master_bus_handle_t bus) {
-  if (!attach_device(bus, k151::Device::touch_ft6336, touch_)) return false;
+  uint8_t id{};
+  if (!attach_device(bus, k151::Device::pmic_axp2101, pmic_) ||
+      !read_register(pmic_, 0x03, id) || id != 0x4a ||
+      !read_register(pmic_, kDldo1Voltage, initial_backlight_level_) ||
+      !attach_device(bus, k151::Device::io_aw9523, expander_) ||
+      !read_register(expander_, 0x10, id) || id != 0x23 ||
+      !prepare_touch_pins() || !attach_device(bus, k151::Device::touch_ft6336, touch_))
+    return false;
+
   constexpr uint8_t reg = 0xa3;
   std::array<uint8_t, 6> version{};
   const bool matched = i2c_master_transmit_receive(touch_, &reg, 1, version.data(), version.size(),
                                                     kI2cTimeoutMs) == ESP_OK &&
                        k151::ft6336_9342e_signature(version);
-  if (!release_device(touch_) || !matched) return false;
+  return matched && !stop_.load();
+}
 
-  uint8_t id{}, mode{}, direction{};
-  return attach_device(bus, k151::Device::pmic_axp2101, pmic_) &&
-         read_register(pmic_, 0x03, id) && id == 0x4a &&
-         read_register(pmic_, kDldo1Voltage, initial_backlight_level_) &&
-         attach_device(bus, k151::Device::io_aw9523, expander_) &&
-         read_register(expander_, 0x10, id) && id == 0x23 &&
-         read_register(expander_, 0x13, mode) && (mode & kLcdReset) &&
-         read_register(expander_, 0x05, direction) && !(direction & kLcdReset);
+bool K151LcdPanel::handoff_stop_input(i2c_master_bus_handle_t bus,
+                                      const std::atomic_bool& expected_stop) {
+  if (!ready() || bus != board_bus_ || &stop_ != &expected_stop) return false;
+  const auto idle = [&] {
+    constexpr uint8_t status_register = 0x02;
+    std::array<uint8_t, 6> touch_status{};
+    return !stop_.load() &&
+           i2c_master_transmit_receive(touch_, &status_register, 1,
+                                       touch_status.data(), touch_status.size(),
+                                       kI2cTimeoutMs) == ESP_OK &&
+           !(touch_status[0] & 0x0f) && !stop_.load();
+  };
+
+  // Acknowledge the UI's release event before the STOP monitor owns INTN.
+  // Both AW9523B input registers can carry pending events.
+  uint8_t ignored{};
+  return idle() && read_register(expander_, 0x00, ignored) && !stop_.load() &&
+         read_register(expander_, 0x01, ignored) && idle();
 }
 
 bool K151LcdPanel::open_display() {
@@ -178,6 +275,7 @@ bool K151LcdPanel::start(i2c_master_bus_handle_t bus, bool local_display_request
       !K151CodecPort::is_registered_board_bus(bus))
     return false;
   attempted_ = true;
+  board_bus_ = bus;
   // Write the initial frame with the backlight disabled before displaying it.
   if (locate_panel(bus) && !stop_.load() && open_display() && initialize_controller() &&
       present_now() && esp_lcd_panel_io_tx_param(io_, 0x29, nullptr, 0) == ESP_OK) {
@@ -242,6 +340,7 @@ bool K151LcdPanel::present_now() {
 }
 
 bool K151LcdPanel::shutdown() {
+  board_bus_ = nullptr;
   // Darkness does not depend on a successful SPI transfer.
   if (backlight_claimed_ && set_bits(pmic_, kLdoEnable, kDldo1Enable, 0) &&
       set_bits(pmic_, kDldo1Voltage, kVoltageMask, initial_backlight_level_))
@@ -262,7 +361,8 @@ bool K151LcdPanel::shutdown() {
   if (sd_cs_claimed_ && !spi_owned_ && gpio_set_direction(kSdSelect, GPIO_MODE_INPUT) == ESP_OK)
     sd_cs_claimed_ = false;
   const bool touch_released = release_device(touch_);
-  const bool expander_released = !controller_claimed_ && release_device(expander_);
+  const bool expander_released = !controller_claimed_ && restore_touch_pins() &&
+                                 release_device(expander_);
   const bool pmic_released = !backlight_claimed_ && release_device(pmic_);
   return touch_released && expander_released && pmic_released && !io_ && !spi_owned_ &&
          !sd_cs_claimed_;

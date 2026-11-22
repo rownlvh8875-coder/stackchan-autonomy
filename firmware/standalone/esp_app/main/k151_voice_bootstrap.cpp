@@ -8,10 +8,10 @@
 
 namespace stackchan::standalone {
 
-K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup,
+K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel& panel,
     const std::atomic_bool& paid_consent, const std::atomic_bool& budget_writes,
     K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus)
-    : setup_(setup), paid_consent_(paid_consent), budget_writes_(budget_writes),
+    : setup_(setup), panel_(panel), paid_consent_(paid_consent), budget_writes_(budget_writes),
       evidence_(evidence), board_bus_(board_bus),
       storage_(setup.owner_, paid_consent, budget_writes, setup.stop_),
       voice_(ledger_, network_, setup.owner_, paid_consent, budget_writes, setup.stop_,
@@ -39,7 +39,7 @@ bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t>
       &setup_.stop_ != &K151DisplayStop::flag() || !authorized() || !confirmed_setup())
     return false;
   attempted_ = true;
-  const auto display_stop = K151DisplayStop::arm(board_bus_);
+  const auto display_stop = K151DisplayStop::arm(board_bus_, panel_);
   display_stop_owned_ = display_stop != K151DisplayStop::ArmResult::unavailable;
   if (display_stop != K151DisplayStop::ArmResult::armed) {
     stop();

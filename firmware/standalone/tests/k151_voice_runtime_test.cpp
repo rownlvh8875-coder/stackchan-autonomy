@@ -5,6 +5,7 @@
 #include "k151_install_hold.hpp"
 #include "k151_head_touch_owner.hpp"
 #include "k151_display_stop.hpp"
+#include "k151_lcd_panel.hpp"
 
 #include <algorithm>
 #include <array>
@@ -51,6 +52,7 @@ void (*stop_timer_callback)(void*) = nullptr;
 std::atomic_int stop_gpio_level{1};
 unsigned gpio_configures = 0, gpio_samples = 0, timer_creates = 0;
 bool stop_timer_active = false;
+unsigned panel_handoffs = 0;
 constexpr std::array kStopDuringRequest{
     "bootstrap_display_stop_during_stt", "bootstrap_display_stop_during_gpt",
     "bootstrap_display_stop_during_tts"};
@@ -108,6 +110,7 @@ extern "C" esp_err_t i2c_master_bus_add_device(
     i2c_master_bus_handle_t bus, const i2c_device_config_t* config,
     i2c_master_dev_handle_t* device) {
   assert(bus == &menu_bus && board_bus_registered && !stop_timer_active && !stop_probe);
+  assert(panel_handoffs == 1);
   assert(config->dev_addr_length == I2C_ADDR_BIT_LEN_7 && config->scl_speed_hz == 100'000);
   assert(config->device_address == stop_expander.address ||
          config->device_address == stop_panel.address);
@@ -277,6 +280,14 @@ extern "C" void nvs_close(nvs_handle_t handle) { assert(handle == 1 || handle ==
 
 namespace stackchan::standalone {
 bool K151InstallHold::device_activation_allowed() { return scenario != "bootstrap_hold"; }
+K151LcdPanel::~K151LcdPanel() = default;
+bool K151LcdPanel::handoff_stop_input(i2c_master_bus_handle_t bus,
+                                      const std::atomic_bool& expected_stop) {
+  assert(bus == &menu_bus && &expected_stop == &stop_ && &expected_stop == &stop_source());
+  assert(!stop_ && !stop_probe && !stop_timer_active && !network_starts && !nvs_init_calls);
+  assert(++panel_handoffs == 1);
+  return scenario != "bootstrap_stop_lcd_handoff_refused";
+}
 K151HeadTouchOwner::~K151HeadTouchOwner() = default;
 bool K151HeadTouchOwner::finish_owner_setup(K151LocalOwnerSetup& setup, uint64_t now_ms) {
   return setup.confirm(now_ms, true); // This host fixture supplies the physical confirmation.
@@ -466,7 +477,8 @@ void exercise_bootstrap() {
   auto board_bus = &menu_bus;
   if (scenario == "bootstrap_missing_bus") board_bus = nullptr;
   if (scenario == "bootstrap_wrong_bus") board_bus = &wrong_bus;
-  K151VoiceBootstrap bootstrap(setup, consent, budget_writes, {true, true}, board_bus);
+  K151LcdPanel panel(stop_source());
+  K151VoiceBootstrap bootstrap(setup, panel, consent, budget_writes, {true, true}, board_bus);
   if (scenario == "bootstrap_manual_stop") {
     bootstrap.stop();
     assert(!setup.ready());
@@ -498,7 +510,9 @@ void exercise_bootstrap() {
     assert(nvs_init_calls == int(!early && !stop_admission_failed));
     assert(!stop_probe && !stop_timer_active && !stop_timer_callback);
     assert(stop_masks == initial_stop_masks);
-    if (early) assert(!gpio_configures && !timer_creates);
+    if (early) assert(!panel_handoffs && !gpio_configures && !timer_creates);
+    if (scenario == "bootstrap_stop_lcd_handoff_refused")
+      assert(panel_handoffs == 1 && !stop_probe_closes && !gpio_configures && !timer_creates);
     if (stop_admission_failed) assert(K151DisplayStop::flag() && !setup.ready());
     if (scenario == "bootstrap_stop_probe_busy") assert(stop_probe_closes == 2);
     if (scenario == "bootstrap_stop_arming_restore_retry") assert(restore_failed_once);

@@ -44,6 +44,7 @@ def runtime_binary(tmp_path_factory):
     args += ["-isystem", str(BASE / "tests/sdk_esp_codec_dev_1_6_2")]
     for directory in (
         folder,
+        BASE / "tests/lcd_io_doubles",
         BASE / "tests/codec_io_doubles",
         BASE / "tests/idf_partition_doubles",
         BASE / "tests/sdk_esp_sr_2_4_7",
@@ -101,6 +102,7 @@ def runtime_binary(tmp_path_factory):
         "bootstrap_missing_bus",
         "bootstrap_wrong_bus",
         "bootstrap_wrong_stop_binding",
+        "bootstrap_stop_lcd_handoff_refused",
         "bootstrap_stop_irq_bad_id",
         "bootstrap_stop_irq_bad_direction",
         "bootstrap_stop_mask_write_failed",

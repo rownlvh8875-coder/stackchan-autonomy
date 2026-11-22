@@ -7,12 +7,15 @@
 
 namespace stackchan::standalone {
 
+class K151LcdPanel;
+
 // Call only from the device-local owner task. Setup and the authorization
-// flags and the registered I2C1 bus outlive this object. The owner task
+// flags, the panel and the registered I2C1 bus outlive this object. The owner task
 // serializes all access to the bus. The HOLD entrypoint links a marker only.
 class K151VoiceBootstrap final {
  public:
-  K151VoiceBootstrap(K151LocalOwnerSetup& setup, const std::atomic_bool& paid_consent,
+  K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel& panel,
+                     const std::atomic_bool& paid_consent,
                      const std::atomic_bool& budget_writes, K151AudioBoardEvidence evidence,
                      i2c_master_bus_handle_t board_bus);
   ~K151VoiceBootstrap();
@@ -22,8 +25,8 @@ class K151VoiceBootstrap final {
   // A separate local action may initialize an absent budget. Without it,
   // startup requires an existing valid ledger. No USB frame grants either
   // budget permission. The model pack is the static read-only app asset.
-  // Setup must use K151DisplayStop::flag(). The display owner hands off IRQ
-  // reads before start so the GPIO monitor sees every pending STOP.
+  // Setup and panel use K151DisplayStop::flag(). Finish local touch input
+  // before start. The IRQ monitor owns the line after the panel's final acknowledgment.
   bool start(VoiceModelConfig models, std::span<const uint8_t> model_pack,
              bool allow_first_budget);
   NativeVoiceStep poll();
@@ -35,6 +38,7 @@ class K151VoiceBootstrap final {
   bool confirmed_setup();
 
   K151LocalOwnerSetup& setup_;
+  K151LcdPanel& panel_;
   const std::atomic_bool& paid_consent_;
   const std::atomic_bool& budget_writes_;
   const K151AudioBoardEvidence evidence_;

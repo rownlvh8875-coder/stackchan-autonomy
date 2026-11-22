@@ -9,8 +9,11 @@
 
 namespace stackchan::standalone {
 
+class K151DisplayStop;
+
 // Single board/LVGL owner task. LVGL and the borrowed I2C1 bus must outlive
-// the panel. Only the owner uses SPI3. A completed SPI frame is transport
+// the panel. Shut down voice and its IRQ monitor before releasing display
+// I/O. Only the owner uses SPI3. A completed SPI frame is transport
 // evidence. Physical panel identity and readability require a local check.
 class K151LcdPanel final {
  public:
@@ -27,7 +30,11 @@ class K151LcdPanel final {
   static const char* compiled_link_marker();
 
  private:
+  friend class K151DisplayStop;
+  bool handoff_stop_input(i2c_master_bus_handle_t bus, const std::atomic_bool& expected_stop);
   bool locate_panel(i2c_master_bus_handle_t bus);
+  bool prepare_touch_pins();
+  bool restore_touch_pins();
   bool open_display();
   bool initialize_controller();
   bool transmit_rows(unsigned first, unsigned last, uint8_t* pixels);
@@ -35,6 +42,7 @@ class K151LcdPanel final {
   static void flush(lv_display_t* display, const lv_area_t* area, uint8_t* pixels);
 
   const std::atomic_bool& stop_;
+  i2c_master_bus_handle_t board_bus_ = nullptr;
   i2c_master_dev_handle_t touch_ = nullptr;
   i2c_master_dev_handle_t pmic_ = nullptr;
   i2c_master_dev_handle_t expander_ = nullptr;
@@ -49,6 +57,9 @@ class K151LcdPanel final {
   bool sd_cs_claimed_ = false;
   bool backlight_claimed_ = false;
   bool controller_claimed_ = false;
+  bool touch_irq_changed_ = false;
+  bool touch_reset_changed_ = false;
+  bool p0_drive_changed_ = false;
   bool fault_ = false;
 };
 

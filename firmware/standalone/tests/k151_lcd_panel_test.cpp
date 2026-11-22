@@ -41,6 +41,10 @@ lv_obj_t screen, root;
 std::array<lv_obj_t, 3> labels;
 std::array<std::string_view, 3> captions;  // Known mock labels only.
 uint8_t ldo_enable = 0xbf, ldo_voltage = 0x9a, expander_p1 = 0x83;
+uint8_t expander_p0 = 0x07, p0_direction = 0x18, p1_direction = 0x0c, p0_drive = 0x10;
+uint8_t initial_p0{}, initial_p1{}, initial_drive{}, initial_irq_direction{}, initial_ldo_enable{};
+bool release_failed_once = false;
+unsigned ft_contact_reads = 0, irq_ack_reads = 0;
 bool spi_open = false, lcd_open = false, lv_open = false, display_on = false;
 bool sd_cs_driven = false;
 uint32_t sd_cs_level = 0;
@@ -61,6 +65,11 @@ bool failed_before_claim() {
   return std::ranges::find(early, scenario) != early.end();
 }
 
+void check_touch_registers_restored() {
+  assert(expander_p0 == initial_p0 && p0_drive == initial_drive);
+  assert(p1_direction == initial_irq_direction);
+}
+
 void check_released() {
   assert(!spi_open && !lcd_open && !lv_open && !allocated && !sd_cs_driven);
   assert(!touch.open && !pmic.open && !expander.open);
@@ -68,6 +77,13 @@ void check_released() {
 } // namespace
 
 namespace stackchan::standalone {
+class K151DisplayStop {
+ public:
+  static bool handoff(K151LcdPanel& panel, i2c_master_bus_handle_t bus,
+                      const std::atomic_bool& flag) {
+    return panel.handoff_stop_input(bus, flag);
+  }
+};
 bool K151InstallHold::device_activation_allowed() { return scenario != "hold"; }
 bool K151CodecPort::is_registered_board_bus(i2c_master_bus_handle_t input) {
   return input == &bus;
@@ -101,8 +117,22 @@ extern "C" esp_err_t i2c_master_transmit_receive(
     uint8_t* data, size_t size, int timeout_ms) {
   assert(device->open && reg_size == 1 && timeout_ms == 30);
   if (device == &touch) {
-    assert(*reg == 0xa3 && size == 6);
-    if (scenario == "panel_read_error") return ESP_FAIL;
+    assert(size == 6);
+    if (*reg == 0x02) {
+      assert(scenario.starts_with("handoff_"));
+      ++ft_contact_reads;
+      std::fill_n(data, size, 0);
+      if (scenario == "handoff_touch_held" ||
+          (scenario == "handoff_late_press" && ft_contact_reads == 2))
+        data[0] = 1;
+      return ESP_OK;
+    }
+    assert(*reg == 0xa3);
+    if (scenario == "panel_read_error" || scenario == "cold_panel_read_error" ||
+        !(expander_p0 & 1)) return ESP_FAIL;
+    assert(p1_direction & 0x04);
+    if (scenario.starts_with("cold_"))
+      assert(delays.size() >= 2 && delays[0] > 5 && delays[1] > 300 && (p0_drive & 0x10));
     const std::array<uint8_t, 6> version{0x64, 0x01, 0x01, 0x12, 0, 0x11};
     std::ranges::copy(version, data);
     if (scenario == "wrong_panel") data[3] = 0x10;
@@ -114,9 +144,19 @@ extern "C" esp_err_t i2c_master_transmit_receive(
     else assert(false);
   } else {
     assert(device == &expander && size == 1);
+    if (*reg == 0x00 || *reg == 0x01) {
+      assert(ft_contact_reads == 1 && irq_ack_reads == *reg && scenario.starts_with("handoff_"));
+      ++irq_ack_reads;
+      *data = 0;
+      return *reg == 0x01 && scenario == "handoff_i2c_error" ? ESP_FAIL : ESP_OK;
+    }
     if (*reg == 0x10) *data = 0x23;
+    else if (*reg == 0x02) *data = expander_p0;
     else if (*reg == 0x03) *data = expander_p1;
-    else if (*reg == 0x05) *data = scenario == "wrong_reset_direction" ? 0x0e : 0x0c;
+    else if (*reg == 0x04) *data = p0_direction;
+    else if (*reg == 0x05) *data = scenario == "wrong_reset_direction" ? 0x0e : p1_direction;
+    else if (*reg == 0x11) *data = p0_drive;
+    else if (*reg == 0x12) *data = 0xff;
     else if (*reg == 0x13) *data = scenario == "wrong_expander_mode" ? 0xfd : 0xff;
     else assert(false);
   }
@@ -124,9 +164,10 @@ extern "C" esp_err_t i2c_master_transmit_receive(
 }
 extern "C" esp_err_t i2c_master_transmit(
     i2c_master_dev_handle_t device, const uint8_t* bytes, size_t size, int timeout_ms) {
-  assert(device->open && size == 2 && timeout_ms == 30 && lcd_open);
+  assert(device->open && size == 2 && timeout_ms == 30);
   ++register_writes;
   if (device == &pmic && bytes[0] == 0x90) {
+    assert(lcd_open);
     assert((bytes[1] & 0x7f) == (ldo_enable & 0x7f));
     ldo_enable = bytes[1];
     if (ldo_enable & 0x80) {
@@ -135,15 +176,36 @@ extern "C" esp_err_t i2c_master_transmit(
       if (scenario == "stop_enabling_lamp") stop = true;
     }
   } else if (device == &pmic && bytes[0] == 0x99) {
+    assert(lcd_open);
     assert(!(ldo_enable & 0x80) && (bytes[1] & 0xe0) == (ldo_voltage & 0xe0));
     const auto old = ldo_voltage;
     ldo_voltage = bytes[1];
     if (scenario == "brightness_readback_error" && (ldo_voltage & 0x1f) == 22)
       ldo_voltage = old;
   } else {
-    assert(device == &expander && bytes[0] == 0x03 && !(ldo_enable & 0x80));
-    assert((bytes[1] & ~2) == (expander_p1 & ~2));
-    expander_p1 = bytes[1];
+    assert(device == &expander);
+    if (bytes[0] == 0x03) {
+      assert(lcd_open && !(ldo_enable & 0x80));
+      assert((bytes[1] & ~2) == (expander_p1 & ~2));
+      expander_p1 = bytes[1];
+    } else if (bytes[0] == 0x05) {
+      assert(!(expander_p0 & 1) && (bytes[1] & ~4) == (p1_direction & ~4));
+      if (delays.size() > 2) assert(delays.back() > 5);
+      p1_direction = bytes[1];
+    } else if (bytes[0] == 0x11) {
+      assert((bytes[1] & ~0x10) == (p0_drive & ~0x10));
+      assert(!(expander_p0 & 1) && (p1_direction & 4));
+      p0_drive = bytes[1];
+    } else {
+      assert(bytes[0] == 0x02 && (p0_drive & 0x10) && (p1_direction & 4));
+      assert((bytes[1] & ~1) == (expander_p0 & ~1) && !delays.empty() && delays[0] > 5);
+      expander_p0 = bytes[1];
+      if (scenario == "cold_reset_write_error" && (expander_p0 & 1)) return ESP_FAIL;
+      if (scenario == "cold_restore_retry" && !(expander_p0 & 1) && !release_failed_once) {
+        release_failed_once = true;
+        return ESP_FAIL;
+      }
+    }
   }
   return ESP_OK;
 }
@@ -248,7 +310,9 @@ extern "C" esp_err_t esp_lcd_panel_io_tx_param(
 }
 void vTaskDelay(unsigned ticks) {
   delays.push_back(ticks);
-  if (scenario == "stop_reset" && delays.size() == 1) stop = true;
+  if ((scenario == "stop_reset" || scenario == "cold_stop_before_release") &&
+      delays.size() == 1) stop = true;
+  if (scenario == "cold_stop_after_release" && delays.size() == 2) stop = true;
 }
 
 extern "C" bool lv_is_initialized() { return scenario != "lvgl_not_initialized"; }
@@ -342,19 +406,37 @@ extern "C" void lv_label_set_text(lv_obj_t* label, const char* value) {
 int main(int argc, char** argv) {
   assert(argc == 2);
   scenario = argv[1];
+  if (scenario.starts_with("cold_")) {
+    expander_p0 = scenario == "cold_other_output_high" ? 2 : 0;
+    expander_p1 = p0_direction = p1_direction = p0_drive = 0;
+    ldo_enable = 0x3f;
+  }
+  initial_p0 = expander_p0;
+  initial_p1 = expander_p1;
+  initial_drive = p0_drive;
+  initial_irq_direction = p1_direction;
+  initial_ldo_enable = ldo_enable;
   K151LcdPanel panel(stop);
   K151SetupLvgl setup(stop);
-  const bool start_ok = scenario == "ok" || scenario.starts_with("sas_") ||
+  const bool cold_ok = scenario == "cold_start" || scenario == "cold_restore_retry" ||
+                       scenario == "cold_restore_with_foreign_output";
+  const bool handoff_case = scenario.starts_with("handoff_");
+  const bool start_ok = scenario == "ok" || cold_ok || handoff_case || scenario.starts_with("sas_") ||
                         scenario == "stop_after_start";
   auto* handle = scenario == "wrong_bus" ? &other_bus : &bus;
   assert(panel.start(handle, scenario != "not_requested") == start_ok);
   if (!start_ok) {
     check_released();
+    check_touch_registers_restored();
     assert(!panel.ready() && !panel.display());
     if (failed_before_claim()) {
       assert(register_writes == 0 && ldo_enable == 0xbf && expander_p1 == 0x83);
       if (scenario == "hold" || scenario == "wrong_bus" || scenario == "not_requested" ||
           scenario == "lvgl_not_initialized") assert(attach_calls == 0);
+    } else if (scenario.starts_with("cold_")) {
+      assert(ldo_enable == initial_ldo_enable && ldo_voltage == 0x9a && expander_p1 == initial_p1);
+      assert(!frames && commands.empty());
+      if (scenario == "cold_other_output_high") assert(!register_writes && delays.empty());
     } else {
       assert(ldo_enable == 0x3f && ldo_voltage == 0x9a && expander_p1 == 0x81);
     }
@@ -369,21 +451,44 @@ int main(int argc, char** argv) {
   assert(!setup.attach(panel, true, false, true));
   assert(!setup.attach(panel, true, true, false));
   assert(setup.attach(panel, true, true, true) && frames == 2 && setup.attached());
-  if (scenario == "stop_after_start") {
+  if (handoff_case) {
+    const std::atomic_bool wrong_flag{false};
+    assert(!K151DisplayStop::handoff(panel, &bus, wrong_flag));
+    assert(!K151DisplayStop::handoff(panel, &other_bus, stop));
+    assert(ft_contact_reads == 0 && irq_ack_reads == 0);
+    const bool stopped = scenario == "handoff_stopped";
+    stop = stopped;
+    assert(K151DisplayStop::handoff(panel, &bus, stop) == (scenario == "handoff_idle"));
+    const bool acked = !stopped && scenario != "handoff_touch_held";
+    const bool rechecked = acked && scenario != "handoff_i2c_error";
+    assert(irq_ack_reads == (acked ? 2u : 0u));
+    assert(ft_contact_reads == (rechecked ? 2u : stopped ? 0u : 1u));
+  } else if (scenario == "stop_after_start") {
     stop = true;
     assert(!setup.attached() && !setup.present_pairing_sas("12345678", true, true, true));
   } else {
     assert(!setup.present_pairing_sas("12345678", false, true, true));
     assert(!setup.present_pairing_sas("invalid", true, true, true));
     assert(frames == 2);
-    const bool transfer_ok = scenario == "ok";
+    const bool transfer_ok = scenario == "ok" || cold_ok;
     assert(setup.present_pairing_sas("12345678", true, true, true) == transfer_ok);
     assert(frames == 3 && setup.attached() == transfer_ok);
     if (transfer_ok) assert(transmitted_rows == 240 && captions[0] == "USB pairing check");
     else assert(ldo_enable == 0x3f); // No retained visible prior SAS after transfer failure.
   }
   assert(setup.detach(true));
+  if (scenario == "cold_restore_with_foreign_output") {
+    expander_p0 |= 0x02; // Another board subsystem still owns a high output.
+    assert(!panel.shutdown() && expander.open && !panel.ready());
+    assert(expander_p0 == 0x02 && (p0_drive & 0x10) && (p1_direction & 4));
+    expander_p0 &= ~0x02;
+  }
+  if (scenario == "cold_restore_retry") {
+    assert(!panel.shutdown() && release_failed_once && expander.open);
+    assert(!panel.ready() && p1_direction != initial_irq_direction);
+  }
   assert(panel.shutdown());
   check_released();
-  assert(ldo_enable == 0x3f && ldo_voltage == 0x9a && expander_p1 == 0x81);
+  assert(ldo_enable == 0x3f && ldo_voltage == 0x9a && expander_p1 == (initial_p1 & ~2));
+  check_touch_registers_restored();
 }
