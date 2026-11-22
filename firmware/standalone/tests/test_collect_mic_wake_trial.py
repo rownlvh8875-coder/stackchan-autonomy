@@ -28,6 +28,22 @@ REPORT = {
 }
 
 
+QUESTION_WAIT = {**WAIT, "mic_trial": "WAIT_QUESTION_LOCAL_START"}
+QUESTION_CUE = {"mic_trial": "QUESTION_NOW", "operating_admission": False}
+WAKE_V2 = {
+    **REPORT,
+    "mic_wake_trial": "MIC_WAKE_TRIAL_V2",
+    "stage": "complete",
+    "codec_cleanup_unverified": False,
+}
+QUESTION = {
+    "mic_question_trial": "MIC_QUESTION_TRIAL_V1",
+    "result": "endpoint",
+    "codec_cleanup_unverified": False,
+    "operating_admission": False,
+}
+
+
 class FakeSerial:
     def __init__(self, records):
         self.input = deque(json.dumps(item).encode("ascii") + b"\n" for item in records)
@@ -94,6 +110,79 @@ def test_protocol_error_cannot_repeat_start_or_return_audio(receiver, records, s
     with pytest.raises(ValueError):
         receiver.receive_once(port, lambda: None)
     assert port.writes == [b"HELLO\n"] + ([b"START 1234ABCD\n", b"STOP\n"] if start_sent else [])
+
+
+def test_collect_question_without_audio(receiver):
+    port = FakeSerial([QUESTION_WAIT, LISTEN, QUESTION_CUE, WAKE_V2, QUESTION, HOLD])
+    prompts = []
+    report = receiver.receive_once(
+        port, lambda: prompts.append("wake"), announce_question=lambda: prompts.append("question")
+    )
+    assert report == {"wake": WAKE_V2, "question": QUESTION}
+    assert prompts == ["wake", "question"]
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [LISTEN, WAKE_V2, QUESTION],
+        [LISTEN, QUESTION_CUE, WAKE_V2, {**QUESTION, "pcm": [42]}],
+        [LISTEN, QUESTION_CUE, WAKE_V2, {**QUESTION, "codec_cleanup_unverified": True}],
+        [LISTEN, QUESTION_CUE, WAKE_V2, {**QUESTION, "result": "not_run"}],
+        [LISTEN, QUESTION_CUE, WAKE_V2, HOLD],
+        [LISTEN, QUESTION_CUE, WAKE_V2, QUESTION, QUESTION],
+        [LISTEN, QUESTION_CUE, QUESTION_CUE],
+        [QUESTION_CUE],
+    ],
+)
+def test_question_protocol_fails_closed(receiver, records):
+    port = FakeSerial([QUESTION_WAIT, *records, HOLD])
+    with pytest.raises(ValueError):
+        receiver.receive_once(port, lambda: None, announce_question=lambda: None)
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n", b"STOP\n"]
+
+
+@pytest.mark.parametrize("question", [False, True])
+def test_other_trial_cannot_receive_start(receiver, question):
+    port = FakeSerial([WAIT if question else QUESTION_WAIT])
+    cue = (lambda: None) if question else None
+    with pytest.raises(ValueError):
+        receiver.receive_once(port, lambda: None, announce_question=cue)
+    assert port.writes == [b"HELLO\n"]
+
+
+def test_question_requires_its_own_verified_approval(receiver, tmp_path):
+    digest = "a" * 64
+    manifest = {"image_sha256": digest, "port": "COM3"}
+    approval = {"approved": True, "image_sha256": digest, "scope": receiver.SCOPE}
+    installed = {
+        **manifest,
+        "independent_verify_passed": True,
+        "offset": 0x510000,
+    }
+
+    def write(name, record):
+        (tmp_path / name).write_text(json.dumps(record), encoding="utf-8")
+
+    write("review-manifest.json", manifest)
+    write("approval.json", approval)
+    write("install-verified.json", installed)
+    with pytest.raises(ValueError):
+        receiver.verified_port(tmp_path, question=True)
+
+    manifest.update(
+        kind="REVIEW_ONLY_MIC_QUESTION_TRIAL_V1",
+        expected_protocol="MIC_QUESTION_TRIAL_V1",
+        scope="ONE_MIC_QUESTION_TRIAL_AND_OTA1_RESTORE",
+    )
+    write("review-manifest.json", manifest)
+    with pytest.raises(ValueError):
+        receiver.verified_port(tmp_path, question=True)
+    write("approval.json", {**approval, "scope": manifest["scope"]})
+    assert receiver.verified_port(tmp_path, question=True) == ("COM3", digest)
+    with pytest.raises(ValueError):
+        receiver.verified_port(tmp_path)
 
 
 def test_open_waits_for_port_to_return_without_toggling_control_lines(receiver):

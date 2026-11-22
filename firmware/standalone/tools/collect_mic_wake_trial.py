@@ -9,16 +9,49 @@ from pathlib import Path
 from wake_bench_trace import parse_mic_wake_trial_report
 
 SCOPE = "ONE_MIC_WAKE_TRIAL_AND_OTA1_RESTORE"
+QUESTION_SCOPE = "ONE_MIC_QUESTION_TRIAL_AND_OTA1_RESTORE"
+QUESTION_PROTOCOL = "MIC_QUESTION_TRIAL_V1"
 WIRE_LIMIT = 512
+QUESTION_BEFORE_CUE = {"not_run", "memory_denied", "prepare_failed", "open_failed"}
+QUESTION_AFTER_CUE = {"read_failed", "no_endpoint", "endpoint"}
+QUESTION_ANY_TIME = {"stopped", "clock_fault", "release_failed"}
 
 
-def receive_once(port, announce, *, before_start=lambda: None, clock=time.monotonic):
+def validate_question_report(record, *, cue_seen, wake):
+    result = record.get("result")
+    cleanup = record.get("codec_cleanup_unverified")
+    wake_detected = wake["result"] == "detected"
+    cue_results = QUESTION_AFTER_CUE if cue_seen else QUESTION_BEFORE_CUE
+    if (
+        set(record)
+        != {"mic_question_trial", "result", "codec_cleanup_unverified", "operating_admission"}
+        or record.get("mic_question_trial") != QUESTION_PROTOCOL
+        or record.get("operating_admission") is not False
+        or type(cleanup) is not bool
+        or not isinstance(result, str)
+        or result not in QUESTION_ANY_TIME | cue_results
+        or wake["mic_wake_trial"] != "MIC_WAKE_TRIAL_V2"
+        or wake_detected != (result != "not_run")
+        or (
+            cleanup and result in {"not_run", "stopped", "memory_denied", "endpoint", "no_endpoint"}
+        )
+    ):
+        raise ValueError("Invalid question trial report")
+    return record
+
+
+def receive_once(
+    port, announce, *, announce_question=None, before_start=lambda: None, clock=time.monotonic
+):
+    question_mode = announce_question is not None
+    challenge = "WAIT_QUESTION_LOCAL_START" if question_mode else "WAIT_LOCAL_START"
     next_hello = clock()
     deadline = next_hello + 15
     waiting_replies = 0
     accepted_nonce = None
     started = listening = complete = False
-    report = None
+    report = question_report = None
+    question_cued = False
     pending = bytearray()
     try:
         while clock() < deadline:
@@ -43,10 +76,11 @@ def receive_once(port, announce, *, before_start=lambda: None, clock=time.monoto
             if not isinstance(record, dict):
                 continue
             marker = record.get("mic_trial")
-            if marker == "WAIT_LOCAL_START":
+            if marker in ("WAIT_LOCAL_START", "WAIT_QUESTION_LOCAL_START"):
                 nonce = record.get("nonce")
                 if (
-                    not waiting_replies
+                    marker != challenge
+                    or not waiting_replies
                     or set(record) != {"mic_trial", "nonce", "wait_ms"}
                     or record.get("wait_ms") != 60000
                     or not isinstance(nonce, str)
@@ -77,21 +111,40 @@ def receive_once(port, announce, *, before_start=lambda: None, clock=time.monoto
                     raise ValueError("Unexpected listening marker")
                 listening = True
                 announce()
+            elif marker == "QUESTION_NOW":
+                if (
+                    not question_mode
+                    or not listening
+                    or question_cued
+                    or report is not None
+                    or set(record) != {"mic_trial", "operating_admission"}
+                    or record["operating_admission"] is not False
+                ):
+                    raise ValueError("Unexpected question marker")
+                question_cued = True
+                announce_question()
             elif "mic_wake_trial" in record:
                 if not started or report is not None:
                     raise ValueError("Unexpected or repeated trial result")
                 report = parse_mic_wake_trial_report(record)
                 if report["result"] in {"detected", "not_detected"} and not listening:
                     raise ValueError("Capture result preceded the listening marker")
+            elif "mic_question_trial" in record:
+                if not question_mode or report is None or question_report is not None:
+                    raise ValueError("Unexpected or repeated question report")
+                question_report = validate_question_report(
+                    record, cue_seen=question_cued, wake=report
+                )
             elif marker == "HOLD_UNTIL_RESET":
                 if (
                     report is None
+                    or (question_mode and question_report is None)
                     or set(record) != {"mic_trial", "operating_admission"}
                     or (record["operating_admission"] is not False)
                 ):
                     raise ValueError("Trial did not finish with a verified result")
                 complete = True
-                return report
+                return {"wake": report, "question": question_report} if question_mode else report
         raise TimeoutError("Trial deadline elapsed")
     finally:
         if started and not complete:
@@ -101,7 +154,7 @@ def receive_once(port, announce, *, before_start=lambda: None, clock=time.monoto
                 pass
 
 
-def verified_port(directory):
+def verified_port(directory, *, question=False):
     def record(name):
         return json.loads((directory / name).read_text(encoding="utf-8-sig"))
 
@@ -110,11 +163,18 @@ def verified_port(directory):
     installed = record("install-verified.json")
     digest = manifest["image_sha256"]
     port = manifest["port"]
+    scope = QUESTION_SCOPE if question else SCOPE
+    if question and not (
+        manifest.get("kind") == "REVIEW_ONLY_MIC_QUESTION_TRIAL_V1"
+        and manifest.get("scope") == scope
+        and manifest.get("expected_protocol") == QUESTION_PROTOCOL
+    ):
+        raise ValueError("Question trial review manifest is required")
     if not (
         re.fullmatch(r"[0-9a-f]{64}", digest)
         and re.fullmatch(r"COM[1-9][0-9]*", port)
         and approved.get("approved") is True
-        and approved.get("scope") == SCOPE
+        and approved.get("scope") == scope
         and approved.get("image_sha256") == installed.get("image_sha256") == digest
         and installed.get("independent_verify_passed") is True
         and installed.get("offset") == 0x510000
@@ -143,9 +203,10 @@ def open_port(serial, name, *, clock=time.monotonic, wait=time.sleep):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review-dir", required=True, type=Path)
+    parser.add_argument("--question", action="store_true")
     args = parser.parse_args()
     try:
-        port_name, digest = verified_port(args.review_dir)
+        port_name, digest = verified_port(args.review_dir, question=args.question)
         intent = args.review_dir / "mic-receive-intent.json"
         if intent.exists():
             raise ValueError("A START was already attempted")
@@ -156,12 +217,16 @@ def main():
 
         import serial
 
+        def cue_question():
+            print("지금 짧은 질문을 한 번 말하고 잠시 기다려 주세요.", flush=True)
+
         port = open_port(serial, port_name)
         try:
             report = receive_once(
                 port,
                 lambda: print("지금 Hi StackChan을 한 번 말해 주세요.", flush=True),
                 before_start=reserve,
+                announce_question=cue_question if args.question else None,
             )
         finally:
             port.close()
