@@ -12,6 +12,8 @@ enum lv_event_code_t { LV_EVENT_INVALIDATE_AREA };
 enum lv_align_t { LV_ALIGN_TOP_MID, LV_ALIGN_CENTER, LV_ALIGN_BOTTOM_MID };
 extern "C" {
 bool lv_is_initialized();
+void lv_init();
+void lv_deinit();
 lv_display_t* lv_display_create(int32_t, int32_t);
 void lv_display_set_user_data(lv_display_t*, void*);
 void* lv_display_get_user_data(lv_display_t*);

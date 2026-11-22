@@ -26,6 +26,7 @@
 #include "k151_voice_bootstrap.hpp"
 #include "k151_wifi_time.hpp"
 #include "k151_owner_setup.hpp"
+#include "k151_owner_session.hpp"
 #include "k151_head_touch_owner.hpp"
 #include "k151_setup_lvgl.hpp"
 #include "k151_lcd_panel.hpp"
@@ -34,7 +35,6 @@
 #include "k151_install_hold.hpp"
 #include "k151_voice_decode.hpp"
 namespace stackchan::standalone { const char* offline_voice_cycle_compiled_marker(); }
-#include "nvs_port.hpp"
 #include "standalone_core.hpp"
 
 #include <esp_log.h>
@@ -65,6 +65,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151VoiceBootstrap::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151WifiTimePort::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151LocalOwnerSetup::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151OwnerSession::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151HeadTouchOwner::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151SetupLvgl::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151LcdPanel::compiled_link_marker());
@@ -76,18 +77,5 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151WakeNetPort::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151MicWakeTrial::compiled_link_marker());
 
-  IsolatedNvs nvs;
-  if (!nvs.init_without_erase()) {
-    ESP_LOGE(kTag, "NVS init failed; no erase or recovery attempted");
-  } else {
-    PersistentGuard guard(nvs);
-    const ProfileLoad profile_state = guard.restore_profile();
-    const bool budget_restored = guard.restore_budget();
-    Session session;
-    session.boot(0, false, profile_state == ProfileLoad::valid);
-    ESP_LOGW(kTag, "Readonly check: profile=%d budget=%d; cloud=OFF state=%d",
-             static_cast<int>(profile_state), static_cast<int>(budget_restored),
-             static_cast<int>(session.state()));
-  }
   for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
 }

@@ -15,6 +15,7 @@ namespace {
 constexpr size_t kUsbReadChunk=96;
 constexpr uint32_t kTxBuffer=512,kRxBuffer=512;
 constexpr uint32_t kTxTicks=0;
+constexpr uint32_t kFinalTxMs=250;
 constexpr uint64_t kSessionMaxMs=120000;
 }
 
@@ -160,8 +161,16 @@ bool K151ScpsUsbPort::finalize_after_touch(uint64_t now) {
   credentials.clear();
   if(!confirmed || !setup_.ready())return fault();
   state_=State::complete;
-  // ACK only after local sensor-owned confirmation + RAM provisioning.
-  return send(scpswire::Op::completed) || fault();
+  return true;
+}
+
+bool K151ScpsUsbPort::close_completed_transport() {
+  if (!running_ || state_ != State::complete || !setup_.ready() || stop_.load())
+    return fault();
+  if (!send(scpswire::Op::completed) ||
+      usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(kFinalTxMs) + 1) != ESP_OK ||
+      stop_.load() || !shutdown()) return fault();
+  return true;
 }
 
 bool K151ScpsUsbPort::fault() {
@@ -175,17 +184,18 @@ bool K151ScpsUsbPort::fault() {
 }
 
 bool K151ScpsUsbPort::shutdown() {
-  const bool was_running=running_;
-  running_=false;
   frames_.invalidate();
   scrub_pending();
   pairing_.stop();
   if(state_!=State::complete || stop_.load())setup_.stop();
   if(state_!=State::complete || stop_.load())touch_.revoke();
   state_=state_==State::complete?State::complete:State::stopped;
-  if(was_running && usb_serial_jtag_driver_uninstall()!=ESP_OK)
+  if(running_ && usb_serial_jtag_driver_uninstall()!=ESP_OK) {
     faulted_=true;
-  return !faulted_;
+    return false;
+  }
+  running_=false;
+  return true;
 }
 
 } // namespace stackchan::standalone

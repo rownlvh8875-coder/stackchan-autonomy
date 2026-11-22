@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: MIT
+#include "k151_owner_session.hpp"
+
+#include "k151_contract.hpp"
+#include "k151_display_stop.hpp"
+#include "k151_install_hold.hpp"
+#include <esp_timer.h>
+#include <sdkconfig.h>
+
+namespace stackchan::standalone {
+namespace {
+constexpr uint64_t kPollIntervalMs = 50;
+#if defined(CONFIG_ESP_CONSOLE_UART_DEFAULT) && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
+constexpr bool kSeparateUartConsole = true;
+#else
+constexpr bool kSeparateUartConsole = false;
+#endif
+}
+
+K151OwnerSession::K151OwnerSession() : stop_(K151DisplayStop::flag()) {}
+K151OwnerSession::~K151OwnerSession() { (void)shutdown(); }
+
+bool K151OwnerSession::on_owner_task() const {
+  return task_ && task_ == xTaskGetCurrentTaskHandle() && core_ == xPortGetCoreID();
+}
+
+bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verified) {
+  if (task_ || stop_.load() || !exact_board_verified || !physical_lcd_verified ||
+      !kSeparateUartConsole || !K151InstallHold::device_activation_allowed() ||
+      lv_is_initialized()) return false;
+  task_ = xTaskGetCurrentTaskHandle();
+  if (!task_) return false;
+  core_ = xPortGetCoreID();
+
+  i2c_master_bus_config_t cfg{};
+  cfg.i2c_port = I2C_NUM_1;
+  cfg.sda_io_num = static_cast<gpio_num_t>(k151::kI2cSda);
+  cfg.scl_io_num = static_cast<gpio_num_t>(k151::kI2cScl);
+  cfg.clk_source = I2C_CLK_SRC_DEFAULT;
+  cfg.glitch_ignore_cnt = 7;
+  cfg.flags.enable_internal_pullup = 1;
+  if (i2c_new_master_bus(&cfg, &bus_) == ESP_OK && !stop_.load()) {
+    lv_init();
+    owns_lvgl_ = lv_is_initialized();
+    if (owns_lvgl_ && panel_.start(bus_, true) &&
+        view_.attach(panel_, physical_lcd_verified, true, true) &&
+        view_.present(TouchConsentPhase::clear_for_arm, OwnerSetupPhase::hold, false, false, true) &&
+        touch_.attach_for_setup(bus_, exact_board_verified, true)) {
+      const auto now_us = esp_timer_get_time();
+      if (now_us >= 0 && !stop_.load()) {
+        last_sample_ms_ = static_cast<uint64_t>(now_us / 1000);
+        board_verified_ = exact_board_verified;
+        lcd_verified_ = physical_lcd_verified;
+        step_ = Step::head_touch;
+        return true;
+      }
+    }
+  }
+  (void)abort_setup();
+  return false;
+}
+
+K151OwnerSession::Step K151OwnerSession::poll() {
+  if (!task_) return Step::idle;
+  if (!on_owner_task()) return Step::fault;
+  if (step_ == Step::stopped || step_ == Step::fault) return step_;
+  // The borrower must stop voice and its monitor before releasing the bus.
+  if (handoff_taken_) return stop_.load() ? Step::stopped : step_;
+  if (stop_.load()) return abort_setup();
+  // Do not poll head touch or USB after handoff. Voice owns further access to
+  // the display STOP input, and setup timeouts no longer govern the session.
+  if (step_ == Step::ready) return step_;
+  const auto now_us = esp_timer_get_time();
+  if (now_us < 0) return abort_setup();
+  const auto now = static_cast<uint64_t>(now_us / 1000);
+  if (now < last_sample_ms_ || now - last_sample_ms_ > HeadTouchConsent::kMaxSampleGapMs)
+    return abort_setup();
+  if (now - last_sample_ms_ < kPollIntervalMs) return step_;
+  last_sample_ms_ = now;
+
+  const auto event = touch_.poll_once(now);
+  if (stop_.load() || event == TouchConsentEvent::invalidated) return abort_setup();
+  if (step_ == Step::head_touch && event == TouchConsentEvent::owner_window_open) {
+    // Admission was verified before start. The USB port independently checks
+    // the current head window, shared latches, LCD and unclaimed driver.
+    if (!usb_.start(now, board_verified_, lcd_verified_, kSeparateUartConsole, true))
+      return abort_setup();
+    setup_input_.store(true);
+    if (!view_.present(TouchConsentPhase::owner_window, OwnerSetupPhase::hold, true, false, true))
+      return abort_setup();
+    step_ = Step::pairing;
+  } else if (step_ == Step::pairing) {
+    if (!usb_.poll_once(now, true)) return abort_setup();
+    if (event == TouchConsentEvent::final_confirmed) {
+      if (!usb_.finalize_after_touch(now) || !setup_.ready() ||
+          !view_.present(TouchConsentPhase::consumed, setup_.phase(), true, false, true) ||
+          !usb_.close_completed_transport() || !setup_.ready()) return abort_setup();
+      step_ = Step::ready;
+    }
+  }
+  return step_;
+}
+
+std::optional<K151OwnerSession::ReadySetup> K151OwnerSession::handoff() {
+  if (!on_owner_task() || handoff_taken_ || step_ != Step::ready || !setup_.ready())
+    return std::nullopt;
+  handoff_taken_ = true;
+  return ReadySetup{setup_, panel_, bus_};
+}
+
+bool K151OwnerSession::shutdown() {
+  if (!task_) return true;
+  if (!on_owner_task()) return false;
+  step_ = Step::stopped;
+  setup_input_.store(false);
+  setup_.stop();
+  if (!usb_.shutdown()) return false;
+  const bool head_released = touch_.detach();
+  const bool panel_released = !owns_lvgl_ || (view_.detach(true) && panel_.shutdown());
+  if (panel_released && owns_lvgl_) {
+    lv_deinit();
+    owns_lvgl_ = false;
+  }
+  if (!head_released || !panel_released) return false;
+  if (bus_ && i2c_del_master_bus(bus_) != ESP_OK) return false;
+  bus_ = nullptr;
+  return true;
+}
+
+K151OwnerSession::Step K151OwnerSession::abort_setup() {
+  const bool released = shutdown();
+  step_ = stop_.load() && released ? Step::stopped : Step::fault;
+  return step_;
+}
+
+const char* K151OwnerSession::compiled_link_marker() {
+  auto volatile start = &K151OwnerSession::start;
+  auto volatile poll = &K151OwnerSession::poll;
+  (void)start;
+  (void)poll;
+  return "K151 local setup owner task linked; NOT STARTED";
+}
+
+}  // namespace stackchan::standalone

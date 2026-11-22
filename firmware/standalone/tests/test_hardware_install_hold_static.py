@@ -19,6 +19,10 @@ def test_hardware_hold_is_marker_only_in_app_entrypoint():
     assert boot.count("K151VoiceBootstrap::") == 1
     assert "K151VoiceBootstrap::compiled_link_marker()" in boot
     assert "K151VoiceBootstrap " not in boot
+    assert "K151OwnerSession::compiled_link_marker()" in boot
+    assert "K151OwnerSession " not in boot
+    assert "init_without_erase(" not in boot
+    assert "restore_profile(" not in boot
     assert "!K151InstallHold::device_activation_allowed()" in bootstrap
     assert "PeripheralStopSupervisor supervisor" not in boot
     assert "esp_ota_set_boot_partition(" not in boot

@@ -60,6 +60,8 @@ inline constexpr SetupScreenFrame setup_screen_frame(
   }
   if (setup != OwnerSetupPhase::hold)
     return {SetupScreenKind::fault, "SETUP ERROR", "Invalid setup state", "Cloud stays OFF"};
+  if (touch == TouchConsentPhase::owner_window && trusted_input_ready)
+    return {SetupScreenKind::trusted_entry_required, "USB SETUP", "Open secure setup on PC", "Cloud stays OFF"};
   if (touch == TouchConsentPhase::owner_window ||
       touch == TouchConsentPhase::clear_for_confirm ||
       touch == TouchConsentPhase::wait_confirm_press ||

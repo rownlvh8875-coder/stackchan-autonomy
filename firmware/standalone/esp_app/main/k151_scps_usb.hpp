@@ -39,8 +39,10 @@ class K151ScpsUsbPort final {
   // Only the owner task calls this after polling Si12T and consuming a real
   // 3-second head-touch gesture. Sole path to RAM-only credential commit.
   bool finalize_after_touch(uint64_t now_ms);
+  // Deliver the terminal reply and give up USB before the voice handoff.
+  bool close_completed_transport();
 
-  bool shutdown();   // Must occur on installing core, may drop queued TX.
+  bool shutdown();   // Returns resource release status, even after a protocol fault.
   bool running() const { return running_ && !faulted_; }
   bool completed() const { return state_==State::complete; }
   bool faulted() const { return faulted_; }
