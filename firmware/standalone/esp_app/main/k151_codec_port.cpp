@@ -100,7 +100,7 @@ bool K151CodecPort::fail() {
   return false;
 }
 
-bool K151CodecPort::prepare(std::atomic_bool& owner, std::atomic_bool& stop,
+bool K151CodecPort::prepare(const std::atomic_bool& owner, const std::atomic_bool& stop,
                              const K151AudioBoardEvidence& evidence) {
   if (attempted_ || !owner.load() || stop.load() || !evidence.verified()) return false;
   owner_ = &owner;
@@ -422,12 +422,16 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
   return true;
 }
 
-bool K151CodecPort::playback_available() const {
+bool K151CodecPort::playback_enabled_by_build() {
   // Source-derived AW9523/AXP2101 sequence is not a measured K151 power-up.
   // The DMA observer still needs physical reset, mute and codec-idle evidence.
   if (!kK151PhysicalOutputEnabledInHoldImage ||
       !kK151SafeDmaDrainDriverAvailable) return false;
-  return !microphone_only() && tx_tail_registered_ && prepared();
+  return true;
+}
+
+bool K151CodecPort::playback_available() const {
+  return playback_enabled_by_build() && !microphone_only() && tx_tail_registered_ && prepared();
 }
 
 bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {

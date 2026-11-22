@@ -29,7 +29,7 @@ class K151CodecPort final {
   ~K151CodecPort();
 
   // Both atomic flags must outlive this port and latch loss until teardown.
-  bool prepare(std::atomic_bool& owner, std::atomic_bool& stop,
+  bool prepare(const std::atomic_bool& owner, const std::atomic_bool& stop,
                const K151AudioBoardEvidence& evidence);
   bool prepare_microphone_only(const std::atomic_bool& owner, const std::atomic_bool& stop,
                                const K151MicOnlyEvidence& evidence);
@@ -38,6 +38,7 @@ class K151CodecPort final {
   bool capture_idle() const;  // Check physical I2S idle before the next capture.
   bool start_fresh_capture(); // Open duplex RX and discard its first complete PCM block.
   bool capture_mono_24k(std::span<int16_t> mono);  // <= 10ms PCM; 20ms driver wait + 40ms postcheck.
+  static bool playback_enabled_by_build();
   bool playback_available() const;
   bool speaker_on_low_volume(const std::atomic_bool& consent);
   bool speaker_off();

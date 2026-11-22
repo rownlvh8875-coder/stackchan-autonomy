@@ -7,8 +7,8 @@
 
 namespace stackchan::standalone {
 
-inline AudioHooks k151_audio_hooks(K151CodecPort& codec, std::atomic_bool& owner,
-                                  std::atomic_bool& stop, const std::atomic_bool& consent,
+inline AudioHooks k151_audio_hooks(K151CodecPort& codec, const std::atomic_bool& owner,
+                                  const std::atomic_bool& stop, const std::atomic_bool& consent,
                                   K151AudioBoardEvidence evidence) {
   return AudioHooks{
       [&codec]() { return codec.microphone_off(); },

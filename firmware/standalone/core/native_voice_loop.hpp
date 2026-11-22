@@ -9,7 +9,7 @@
 #include <utility>
 
 namespace stackchan::standalone {
-enum class NativeVoiceStep { listening, questioning, answered, cooldown, stopped };
+enum class NativeVoiceStep { listening, questioning, answered, cooldown, stopped, waiting_network };
 
 class NativeVoiceLoop final {
  public:

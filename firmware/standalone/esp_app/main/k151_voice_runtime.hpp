@@ -10,38 +10,43 @@
 
 namespace stackchan::standalone {
 
-// One owner task operates a prepared codec and its AudioGuard and takes over
-// the already provisioned Wi-Fi/time port. The physical STOP producer is
-// independent. The borrowed ports and flags outlive this object.
+// One owner task takes over a locally provisioned Wi-Fi/time port and owns
+// the codec and AudioGuard. The physical STOP producer is independent.
+// The ledger, network and flags outlive this object.
 class K151VoiceRuntime final {
  public:
-  K151VoiceRuntime(PersistentGuard& ledger, K151CodecPort& codec, AudioGuard& audio,
-                   K151WifiTimePort& network, const std::atomic_bool& local_owner,
-                   const std::atomic_bool& paid_consent, const std::atomic_bool& stop);
+  K151VoiceRuntime(PersistentGuard& ledger, K151WifiTimePort& network,
+                   const std::atomic_bool& local_owner, const std::atomic_bool& paid_consent,
+                   const std::atomic_bool& stop, K151AudioBoardEvidence evidence);
   K151VoiceRuntime(const K151VoiceRuntime&) = delete;
   K151VoiceRuntime& operator=(const K151VoiceRuntime&) = delete;
   ~K151VoiceRuntime();
 
   // The board owner calls this only after independent local paid consent.
-  // Supply the model pack embedded in this app's read-only flash. On success
-  // use poll() before the next 10ms frame and keep polling through cooldown.
-  // Start takes network ownership once the prerequisites pass.
+  // Supply the model pack in read-only app flash, with static storage duration.
+  // Start adopts the active network on success. Poll pumps association/time
+  // before opening audio and must continue through listening and cooldown.
+  // A rejected start leaves the network with its original owner.
   bool start(VoiceModelConfig models, std::span<const uint8_t> model_pack);
   NativeVoiceStep poll();
   void stop();
   static const char* compiled_link_marker();
 
  private:
+  enum class Phase { cold, waiting_network, operating, stopped };
+  bool authorized() const;
   bool admission_ready() const;
   bool live_ready() const;
+  bool start_voice();
 
   PersistentGuard& ledger_;
-  K151CodecPort& codec_;
-  AudioGuard& audio_;
   K151WifiTimePort& network_;
   const std::atomic_bool& owner_;
   const std::atomic_bool& consent_;
   const std::atomic_bool& stop_;
+  const K151AudioBoardEvidence evidence_;
+  K151CodecPort codec_;
+  AudioGuard audio_;
   std::atomic_bool busy_{false};
   Session session_;
   K151WakeNetPort model_;
@@ -55,8 +60,8 @@ class K151VoiceRuntime final {
   NativeWakeController wake_;
   NativeVoiceLoop loop_;
   VoiceModelConfig models_;
-  bool attempted_ = false;
-  bool active_ = false;
+  std::span<const uint8_t> model_pack_;
+  Phase phase_ = Phase::cold;
 };
 
 } // namespace stackchan::standalone

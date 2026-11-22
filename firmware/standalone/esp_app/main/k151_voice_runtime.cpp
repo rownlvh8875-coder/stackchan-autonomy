@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "k151_voice_runtime.hpp"
 
+#include "k151_audio_hold_hooks.hpp"
 #include "k151_mic_wake_memory.hpp"
 #include "k151_question_pcm.hpp"
 #include <ctime>
@@ -19,13 +20,14 @@ bool turn_psram_available() {
 } // namespace
 
 K151VoiceRuntime::K151VoiceRuntime(
-    PersistentGuard& ledger, K151CodecPort& codec, AudioGuard& audio,
-    K151WifiTimePort& network, const std::atomic_bool& local_owner,
-    const std::atomic_bool& paid_consent, const std::atomic_bool& stop)
-    : ledger_(ledger), codec_(codec), audio_(audio), network_(network),
+    PersistentGuard& ledger, K151WifiTimePort& network,
+    const std::atomic_bool& local_owner, const std::atomic_bool& paid_consent,
+    const std::atomic_bool& stop, K151AudioBoardEvidence evidence)
+    : ledger_(ledger), network_(network),
       owner_(local_owner), consent_(paid_consent), stop_(stop),
-      mic_(codec), sink_(codec, stop, paid_consent, local_owner),
-      speaker_(audio, sink_, stop, paid_consent, busy_,
+      evidence_(evidence), audio_(k151_audio_hooks(codec_, owner_, stop_, consent_, evidence_)),
+      mic_(codec_), sink_(codec_, stop, paid_consent, local_owner),
+      speaker_(audio_, sink_, stop, paid_consent, busy_,
                []() -> std::optional<uint64_t> {
                  const auto now_us = esp_timer_get_time();
                  if (now_us < 0) return std::nullopt;
@@ -35,20 +37,23 @@ K151VoiceRuntime::K151VoiceRuntime(
       dialog_(session_, ledger, api_.api(), speaker_, stop, paid_consent,
               network.admission_flag(), busy_),
       bridge_(mic_, stop, busy_),
-      turn_(session_, ledger, dialog_, bridge_, audio, stop, paid_consent, busy_,
+      turn_(session_, ledger, dialog_, bridge_, audio_, stop, paid_consent, busy_,
             k151_allocate_question_pcm),
-      wake_(session_, dialog_, mic_, audio, model_),
-      loop_(session_, ledger, wake_, turn_, audio, model_, stop, paid_consent, busy_,
+      wake_(session_, dialog_, mic_, audio_, model_),
+      loop_(session_, ledger, wake_, turn_, audio_, model_, stop, paid_consent, busy_,
             [this] { return live_ready(); }) {}
 
 K151VoiceRuntime::~K151VoiceRuntime() { stop(); }
 
+bool K151VoiceRuntime::authorized() const {
+  return owner_.load() && consent_.load() && !stop_.load();
+}
+
 bool K151VoiceRuntime::admission_ready() const {
-  return owner_.load() && consent_.load() && !stop_.load() &&
-         codec_.playback_available() && !audio_.stopped() &&
+  return authorized() && codec_.playback_available() && !audio_.stopped() &&
          ledger_.has_budget() && !ledger_.fatal() &&
          network_.live_network_ready() && k151_mic_wake_internal_heap_available() &&
-         owner_.load() && consent_.load() && !stop_.load();
+         authorized();
 }
 
 bool K151VoiceRuntime::live_ready() const {
@@ -58,31 +63,46 @@ bool K151VoiceRuntime::live_ready() const {
   const bool before_capture = audio_.state() == AudioState::idle &&
       (session_.state() == State::wake_wait || session_.state() == State::ready ||
        session_.state() == State::cooldown);
-  return active_ && (!before_capture || turn_psram_available()) && admission_ready();
+  return phase_ == Phase::operating && (!before_capture || turn_psram_available()) &&
+         admission_ready();
 }
 
 bool K151VoiceRuntime::start(VoiceModelConfig models, std::span<const uint8_t> model_pack) {
-  if (attempted_ || model_pack.empty() || !models.valid() || audio_.state() != AudioState::idle ||
-      !admission_ready() || !turn_psram_available()) return false;
-  attempted_ = active_ = true;
+  if (phase_ != Phase::cold || !K151CodecPort::playback_enabled_by_build() ||
+      !evidence_.verified() || model_pack.empty() || !models.valid() ||
+      !ledger_.has_budget() || ledger_.fatal() || !network_.active() || !authorized())
+    return false;
+  models_ = std::move(models);
+  model_pack_ = model_pack;
+  phase_ = Phase::waiting_network;
+  return true;
+}
+
+bool K151VoiceRuntime::start_voice() {
+  if (!k151_mic_wake_internal_heap_available() || !turn_psram_available() ||
+      !network_.live_network_ready() || !audio_.initialize(authorized(), evidence_.verified()) ||
+      !admission_ready()) return false;
   // Use the same checked read-only pack as the receive-only trial, so the
   // factory partition layout does not need a separate model partition.
-  const bool prepared = model_.prepare_embedded(owner_, stop_, model_pack);
+  if (!model_.prepare_embedded(owner_, stop_, std::exchange(model_pack_, {}))) return false;
   const auto now_us = esp_timer_get_time();
-  if (!prepared || now_us < 0 || !turn_psram_available() ||
-      !admission_ready() || !model_.ready()) {
-    stop();
-    return false;
-  }
-  models_ = std::move(models);
-  session_.boot(static_cast<uint64_t>(now_us / 1000), true, true);
+  if (now_us < 0 || !turn_psram_available() || !model_.ready() || !admission_ready()) return false;
+  session_.boot(static_cast<uint64_t>(now_us / 1000), true, model_.ready());
   session_.cloud_enable(true); // This local start already checked paid consent.
+  phase_ = Phase::operating;
   return true;
 }
 
 NativeVoiceStep K151VoiceRuntime::poll() {
-  if (!active_) return NativeVoiceStep::stopped;
-  if (!stop_.load() && owner_.load() && consent_.load() && network_.poll(stop_)) {
+  if (phase_ == Phase::cold || phase_ == Phase::stopped) return NativeVoiceStep::stopped;
+  if (authorized() && network_.poll(stop_) && authorized()) {
+    if (phase_ == Phase::waiting_network) {
+      if (!network_.live_network_ready()) return NativeVoiceStep::waiting_network;
+      if (!start_voice()) {
+        stop();
+        return NativeVoiceStep::stopped;
+      }
+    }
     const auto now_us = esp_timer_get_time();
     const auto unix_time = std::time(nullptr);
     if (now_us >= 0 && unix_time >= 0) {
@@ -96,10 +116,14 @@ NativeVoiceStep K151VoiceRuntime::poll() {
 }
 
 void K151VoiceRuntime::stop() {
-  if (!active_) return;
-  active_ = false;
+  if (phase_ == Phase::cold || phase_ == Phase::stopped) return;
+  phase_ = Phase::stopped;
+  model_pack_ = {};
   session_.cloud_enable(false);
-  (void)loop_.cancel();
+  if (audio_.state() != AudioState::cold) {
+    (void)loop_.cancel();
+    (void)codec_.shutdown();
+  }
   model_.close();
   (void)network_.shutdown();
 }
