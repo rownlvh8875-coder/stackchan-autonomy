@@ -132,8 +132,8 @@ bool K151LcdPanel::open_display() {
   if (gpio_config(&sd) != ESP_OK) return false;
 
   esp_lcd_panel_io_spi_config_t interface{};
-  interface.cs_gpio_num = 3;
-  interface.dc_gpio_num = 35;
+  interface.cs_gpio_num = GPIO_NUM_3;
+  interface.dc_gpio_num = GPIO_NUM_35;
   interface.spi_mode = 2;
   interface.pclk_hz = 40'000'000;
   interface.trans_queue_depth = 1;
@@ -148,7 +148,9 @@ bool K151LcdPanel::open_display() {
   lv_display_set_buffers_with_stride(display_, stripe_, nullptr, kStripeBytes, kStride,
                                      LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_set_flush_cb(display_, flush);
-  return lv_display_add_event_cb(display_, round_area, LV_EVENT_INVALIDATE_AREA, nullptr);
+  const auto before = lv_display_get_event_count(display_);
+  lv_display_add_event_cb(display_, round_area, LV_EVENT_INVALIDATE_AREA, nullptr);
+  return lv_display_get_event_count(display_) == before + 1;
 }
 
 bool K151LcdPanel::initialize_controller() {

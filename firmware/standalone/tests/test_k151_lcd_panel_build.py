@@ -18,7 +18,12 @@ def lcd_binary(tmp_path_factory):
     binary = tmp_path_factory.mktemp("k151-lcd") / "lcd"
     command = [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic"]
     command += ["-isystem", str(BASE / "tests/sdk_esp_codec_dev_1_6_2")]
-    for folder in (BASE / "tests/lcd_io_doubles", BASE / "tests/codec_io_doubles", BASE / "core", APP):
+    for folder in (
+        BASE / "tests/lcd_io_doubles",
+        BASE / "tests/codec_io_doubles",
+        BASE / "core",
+        APP,
+    ):
         command += ["-I", str(folder)]
     result = subprocess.run(
         command

@@ -23,7 +23,6 @@ struct i2c_master_dev_t { uint16_t address; bool open = false; };
 struct esp_lcd_panel_io_t {};
 struct lv_obj_t {};
 struct lv_event_t { lv_area_t* area; };
-struct lv_event_dsc_t {};
 struct lv_display_t {
   void* context;
   uint8_t* buffer;
@@ -40,7 +39,6 @@ esp_lcd_panel_io_t lcd_io;
 lv_display_t display{};
 lv_obj_t screen, root;
 std::array<lv_obj_t, 3> labels;
-lv_event_dsc_t descriptor;
 std::array<std::string_view, 3> captions;  // Known mock labels only.
 uint8_t ldo_enable = 0xbf, ldo_voltage = 0x9a, expander_p1 = 0x83;
 bool spi_open = false, lcd_open = false, lv_open = false, display_on = false;
@@ -276,11 +274,13 @@ extern "C" void lv_display_set_flush_cb(
     lv_display_t* disp, void (*cb)(lv_display_t*, const lv_area_t*, uint8_t*)) {
   disp->flush = cb;
 }
-extern "C" lv_event_dsc_t* lv_display_add_event_cb(
+extern "C" void lv_display_add_event_cb(
     lv_display_t* disp, void (*cb)(lv_event_t*), lv_event_code_t code, void* data) {
   assert(code == LV_EVENT_INVALIDATE_AREA && !data && disp->flush);
-  disp->round = cb;
-  return scenario == "lvgl_event_error" ? nullptr : &descriptor;
+  if (scenario != "lvgl_event_error") disp->round = cb;
+}
+extern "C" uint32_t lv_display_get_event_count(lv_display_t* disp) {
+  return disp->round ? 1 : 0;
 }
 extern "C" void* lv_event_get_param(lv_event_t* event) { return event->area; }
 extern "C" lv_obj_t* lv_display_get_screen_active(lv_display_t* disp) {
