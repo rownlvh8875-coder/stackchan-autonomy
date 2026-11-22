@@ -103,7 +103,7 @@ bool k151_conversation_boot_armed() { return armed; }
 extern "C" void app_main() {
   using namespace stackchan::standalone;
 #ifdef STACKCHAN_K151_PRIVATE_POLICY
-  ESP_LOGI(kTag, "K151_CONVERSATION_LOCAL_RELEASE");
+  ESP_LOGI(kTag, "%s", k151_local_release_marker());
 #else
   ESP_LOGW(kTag, "K151_CONVERSATION_REVIEW_NO_RELEASE");
 #endif

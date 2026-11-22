@@ -18,7 +18,9 @@ from esp_app_image import (
 )
 
 
-def validate_slot(partition_csv: str, write_offset: int, erase_bytes: int) -> dict:
+def validate_slot(
+    partition_csv: str, write_offset: int, erase_bytes: int, *, require_nvs: bool = False
+) -> dict:
     """CSV decoded by pinned IDF gen_esp32part from the *built binary* table.
 
     This checks build/bundle scope, not the current device's table or OTA state.
@@ -57,6 +59,8 @@ def validate_slot(partition_csv: str, write_offset: int, erase_bytes: int) -> di
         or not 0 < erase_bytes <= size
     ):
         raise ValueError("built OTA subtype/size/flags or erase range rejected")
+    if require_nvs and (0x9000, 0x4000, "nvs", "data", "nvs", "") not in records:
+        raise ValueError("built NVS size/offset/flags rejected")
     return {
         "selected_partition": "ota_1",
         "selected_partition_type": 0,

@@ -11,7 +11,7 @@ import pytest
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
-from offline_factory_recovery import EXPECTED_PARTITIONS, verify_copies  # noqa: E402
+from offline_factory_recovery import EXPECTED_PARTITIONS, verify_copies, verify_trial_restore  # noqa: E402
 
 ENTRY = struct.Struct("<2sBBII16sI")
 IMAGE_BYTES = 0x1000000
@@ -104,3 +104,31 @@ def test_read_only_cli_and_no_private_paths_in_result(synthetic):
     assert str(b) not in done.stdout
     assert "COM" not in done.stdout
     assert done.stderr == ""
+
+
+def test_trial_restore_is_bound_to_factory_ota1_and_current_nvs_snapshot(synthetic, tmp_path):
+    a, b, digest = synthetic
+    slot = tmp_path / "slot.bin"
+    with a.open("rb") as backup:
+        backup.seek(0x510000)
+        slot.write_bytes(backup.read(0x4F0000))
+    nvs = tmp_path / "pretrial-nvs.bin"
+    nvs.write_bytes(b"x" * 0x4000)
+    report = verify_trial_restore(a, b, digest, slot, nvs)
+    assert [part["offset"] for part in report["restore_in_order"]] == [0x510000, 0x9000]
+    assert [part["bytes"] for part in report["restore_in_order"]] == [0x4F0000, 0x4000]
+    assert report["pretrial_nvs_verified_against_device"] is False
+    assert report["restore_authorized"] is False
+    assert str(nvs) not in json.dumps(report)
+
+    with slot.open("r+b") as modified:
+        modified.write(b"X")
+    with pytest.raises(ValueError, match="OTA1"):
+        verify_trial_restore(a, b, digest, slot, nvs)
+
+    with a.open("rb") as backup:
+        backup.seek(0x510000)
+        slot.write_bytes(backup.read(0x4F0000))
+    nvs.write_bytes(b"short")
+    with pytest.raises(ValueError, match="NVS"):
+        verify_trial_restore(a, b, digest, slot, nvs)

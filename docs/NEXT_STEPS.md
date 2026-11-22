@@ -1,5 +1,40 @@
 # Next steps
 
+## 2026-11-23 오프라인 후속 — 독립 대화 한 턴 설치 검토서
+
+비공개 빌드는 장치·실측·결제 근거가 들어있는지 컴파일 때도 검사한다.
+한 턴으로 컴파일된 경우에만 해당 이미지와 ELF를
+`check_conversation_image.py --local-one-turn`으로 검토할 수 있다.
+기존 빌드 옵션에 `--factory-a`, `--factory-b`, `--factory-sha256`,
+`--factory-ota1`, `--pretrial-nvs`를 추가한다. 검증기는 이미지
+SHA256, 앱 쓰기 길이와 섹터 범위를 계산한다. 원본 OTA1은 두 전체
+백업의 같은 범위와 대조한다. NVS는 현재 기기에서 확보한 시험 직전
+스냅샷을 사용한다. 검토서는 로컬에 저장되며, 기기 대조와 설치·복구
+승인 여부는 미확인으로 기록한다.
+
+실행 전에는 같은 보드인지 확인하고 파티션 표·OTA 선택 데이터와
+원본 OTA1을 검증한다. 현재 NVS `0x9000`의 16,384바이트를 시험 직전
+스냅샷과 대조한다. 설치와 유료 요청, 그리고 NVS 복구가 각각 승인된
+경우에만 해당 범위를 적용한다. 실행기는 같은 ROM 세션에서 다음
+명령을 순서대로 사용한다. `APP`, `OTA1`, `NVS`는 검토서의 해시와
+일치하는 로컬 파일이다.
+
+~~~text
+write-flash  --flash-mode keep --flash-freq keep --flash-size keep 0x510000 APP
+verify-flash --flash-mode keep --flash-freq keep --flash-size keep 0x510000 APP
+
+write-flash  --flash-mode keep --flash-freq keep --flash-size keep 0x510000 OTA1
+verify-flash --flash-mode keep --flash-freq keep --flash-size keep 0x510000 OTA1
+write-flash  --flash-mode keep --flash-freq keep --flash-size keep 0x9000 NVS
+verify-flash --flash-mode keep --flash-freq keep --flash-size keep 0x9000 NVS
+~~~
+
+첫 번째 검증이 끝난 경우에만 시험 부팅을 요청한다. 설치 쓰기를
+시작한 뒤에는 시험 성공 여부와 관계없이 원본 복구를 진행한다.
+원본 OTA1 검증이 실패하면 NVS 쓰기와 재부팅을 멈춘다. 원본 OTA1과
+NVS 검증 뒤 파티션 표와 OTA 선택 데이터를 다시 대조하고 원본
+부팅을 요청한다. 로봇 화면에서 출고 상태 복귀를 확인한다.
+
 ## 2026-11-23 오프라인 후속 — 재부팅 후 한 턴 승인 확인
 
 한 턴 시험은 Wi-Fi 연결 전에 승인 당시의 `sc_gpt/budget`을 확인한다.

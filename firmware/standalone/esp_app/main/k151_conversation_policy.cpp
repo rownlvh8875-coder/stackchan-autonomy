@@ -6,15 +6,25 @@
 namespace stackchan::standalone {
 namespace {
 #ifdef STACKCHAN_K151_PRIVATE_POLICY
-const K151ConversationPolicy policy =
+constexpr K151ConversationPolicy policy =
 #include "k151_private_policy.inc"
     ;
+static_assert(local_conversation_scope_complete(policy), "Incomplete private K151 operating evidence");
 #else
 const K151ConversationPolicy policy{};
 #endif
 }
 
 const K151ConversationPolicy& k151_local_conversation_policy() { return policy; }
+
+#ifdef STACKCHAN_K151_PRIVATE_POLICY
+const char* k151_local_release_marker() {
+  if constexpr (policy.mode == K151ConversationBuildMode::one_paid_turn)
+    return "K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN";
+  else
+    return "K151_CONVERSATION_LOCAL_RELEASE_CONTINUOUS";
+}
+#endif
 
 bool k151_local_trial_budget_matches(const ReadValue& read) {
   if (read.code == ReadCode::missing && read.bytes.empty())

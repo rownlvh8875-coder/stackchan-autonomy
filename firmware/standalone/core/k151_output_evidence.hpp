@@ -33,7 +33,7 @@ struct K151OutputEvidence {
 
 // No Boolean evidence, USB frame, or GPT request can enable audio in HOLD.
 inline constexpr bool kK151PhysicalOutputEnabledInHoldImage = false;
-inline OutputBlock assess_k151_output(const K151OutputEvidence& e) {
+inline constexpr OutputBlock assess_k151_output(const K151OutputEvidence& e) {
   if (!e.exact_board_revision_verified) return OutputBlock::board_unknown;
   if (!e.exclusive_i2c_ownership_verified) return OutputBlock::i2c_not_exclusive;
   if (!e.axp2101_rails_measured) return OutputBlock::rails_not_measured;

@@ -1,13 +1,20 @@
-"""Bind an unarmed K151 conversation review to its ELF, model and slot geometry."""
+"""Bind a K151 conversation image and, locally, a one-turn restore review."""
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from check_board_probe import validate_slot
 from check_idf_build import validate, verify_realtime_transport
 from check_resource_bench import inspect_model_image
 from esp_app_image import SLOT_OFFSET, bind_source_head, validate_source_head
+from offline_factory_recovery import Rejected, verify_trial_restore
+
+PUBLIC_MARKER = b"K151_CONVERSATION_REVIEW_NO_RELEASE"
+PRIVATE_MARKER = b"K151_CONVERSATION_LOCAL_RELEASE"
+ONE_TURN_MARKER = PRIVATE_MARKER + b"_ONE_PAID_TURN\0"
+CONTINUOUS_MARKER = PRIVATE_MARKER + b"_CONTINUOUS"
 
 
 def verify_sdkconfig(text: str) -> None:
@@ -29,53 +36,93 @@ def verify_sdkconfig(text: str) -> None:
             raise ValueError(f"conversation build requires {key}")
 
 
-def inspect_image(app: bytes, elf_sha256: str, partition_csv: str) -> dict:
+def inspect_image(
+    app: bytes, elf_sha256: str, partition_csv: str, *, local_one_turn: bool = False
+) -> dict:
     envelope = inspect_model_image(app, elf_sha256, b"k151_conversation_review")
+    if local_one_turn:
+        if PUBLIC_MARKER in app or CONTINUOUS_MARKER in app:
+            raise ValueError("mixed or incompatible conversation image")
+    elif PRIVATE_MARKER in app:
+        raise ValueError("private release marker in public conversation image")
     markers = (
         # ESP_LOGW wraps this marker in its format string, including a newline.
-        b"K151_CONVERSATION_REVIEW_NO_RELEASE",
+        ONE_TURN_MARKER if local_one_turn else PUBLIC_MARKER,
         b"Say Hi StackChan\0",
         b"Standby verified. Trial ended.\0",
     )
-    if b"K151_CONVERSATION_LOCAL_RELEASE" in app:
-        raise ValueError("private release marker in public conversation image")
     for marker in markers:
         if marker not in app:
             raise ValueError(f"missing expected conversation marker {marker!r}")
     verify_realtime_transport(app)
     return {
         **envelope,
-        **validate_slot(partition_csv, SLOT_OFFSET, envelope["erase_span_bytes"]),
-        "kind": "CONVERSATION_REVIEW_NO_RELEASE",
-        "private_board_policy_embedded": False,
+        **validate_slot(
+            partition_csv, SLOT_OFFSET, envelope["erase_span_bytes"], require_nvs=local_one_turn
+        ),
+        "kind": "LOCAL_ONE_PAID_TURN_REVIEW"
+        if local_one_turn
+        else "CONVERSATION_REVIEW_NO_RELEASE",
+        "private_board_policy_embedded": local_one_turn,
         "cloud_enabled_at_boot": False,
         "paid_api_called": False,
         "physical_output_or_stop_proven": False,
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("elf", "bin", "partition-csv", "sdkconfig", "out"):
         parser.add_argument(f"--{name}", required=True, type=Path)
     parser.add_argument("--idf-head", required=True)
     parser.add_argument("--source-head", required=True)
-    args = parser.parse_args()
-    validate_source_head(args.source_head)
-    verify_sdkconfig(args.sdkconfig.read_text(encoding="utf-8"))
-    base = validate(args.elf, args.bin, args.idf_head)
-    result = inspect_image(
-        args.bin.read_bytes(), base["elf"]["sha256"], args.partition_csv.read_text(encoding="utf-8")
+    parser.add_argument("--local-one-turn", action="store_true")
+    for name in ("factory-a", "factory-b", "factory-ota1", "pretrial-nvs"):
+        parser.add_argument(f"--{name}", type=Path)
+    parser.add_argument("--factory-sha256")
+    args = parser.parse_args(argv)
+    restore = (
+        args.factory_a,
+        args.factory_b,
+        args.factory_sha256,
+        args.factory_ota1,
+        args.pretrial_nvs,
     )
-    result.update(
-        idf_commit=base["idf_commit"],
-        elf=base["elf"],
-        source_head=bind_source_head(result["app_version"], args.source_head),
-        psram_console_and_task_config_verified=True,
-    )
-    with args.out.open("x", encoding="utf-8") as output:
-        output.write(json.dumps(result, indent=2) + "\n")
-    print(json.dumps(result, separators=(",", ":")))
+    if args.local_one_turn and ("CI" in os.environ or not all(restore)):
+        parser.error("local one-turn review requires local execution and all restore inputs")
+    if not args.local_one_turn and any(restore):
+        parser.error("restore inputs are only supported for local one-turn review")
+
+    try:
+        validate_source_head(args.source_head)
+        verify_sdkconfig(args.sdkconfig.read_text(encoding="utf-8"))
+        base = validate(args.elf, args.bin, args.idf_head)
+        result = inspect_image(
+            args.bin.read_bytes(),
+            base["elf"]["sha256"],
+            args.partition_csv.read_text(encoding="utf-8"),
+            local_one_turn=args.local_one_turn,
+        )
+        result.update(
+            idf_commit=base["idf_commit"],
+            elf=base["elf"],
+            source_head=bind_source_head(result["app_version"], args.source_head),
+            psram_console_and_task_config_verified=True,
+        )
+        if args.local_one_turn:
+            result["runtime_budget_write_scope"] = "sc_gpt/budget"
+            result["recovery"] = verify_trial_restore(*restore)
+        with args.out.open("x", encoding="utf-8") as output:
+            output.write(json.dumps(result, indent=2) + "\n")
+    except (OSError, ValueError, Rejected):
+        if not args.local_one_turn:
+            raise
+        print("LOCAL_ONE_PAID_TURN_REVIEW_REJECTED")
+        return 2
+    if args.local_one_turn:
+        print("LOCAL_ONE_PAID_TURN_REVIEW_WRITTEN_NO_AUTHORIZATION")
+    else:
+        print(json.dumps(result, separators=(",", ":")))
     return 0
 
 

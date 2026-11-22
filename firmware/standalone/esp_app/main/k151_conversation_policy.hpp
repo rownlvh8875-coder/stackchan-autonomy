@@ -54,7 +54,7 @@ struct K151AdmittedConversation {
   K151ConversationBuildMode mode;
 };
 
-inline bool local_conversation_scope_complete(const K151ConversationPolicy& policy) {
+inline constexpr bool local_conversation_scope_complete(const K151ConversationPolicy& policy) {
   const bool first_budget = policy.trial_budget_must_be_missing &&
                             policy.allow_first_budget && !policy.trial_budget_sha256;
   const bool existing_budget = !policy.trial_budget_must_be_missing && policy.trial_budget_sha256 &&
@@ -99,6 +99,9 @@ inline bool matches_reviewed_trial_budget(const K151ConversationPolicy& policy, 
 // These symbols exist only in the separate conversation project configuration.
 struct ReadValue;
 const K151ConversationPolicy& k151_local_conversation_policy();
+#ifdef STACKCHAN_K151_PRIVATE_POLICY
+const char* k151_local_release_marker();
+#endif
 bool k151_local_trial_budget_matches(const ReadValue& read);
 bool k151_conversation_boot_armed();
 

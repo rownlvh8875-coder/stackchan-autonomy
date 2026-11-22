@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from check_conversation_image import inspect_image, verify_sdkconfig  # noqa: E402
+from check_conversation_image import inspect_image, main, verify_sdkconfig  # noqa: E402
 from test_board_probe_image import TABLE  # noqa: E402
 from test_resource_bench_image import ELF_SHA, image  # noqa: E402
 from test_resource_bench_image import pack as resource_pack  # noqa: E402
@@ -15,8 +15,11 @@ pinned_pack = resource_pack
 
 PROJECT = b"k151_conversation_review"
 REVIEW = b"W (%lu) %s: K151_CONVERSATION_REVIEW_NO_RELEASE\n\0"
+ONE_TURN = b"K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN\0"
+CONTINUOUS = b"K151_CONVERSATION_LOCAL_RELEASE_CONTINUOUS\0"
 STATUS = b"Say Hi StackChan\0Standby verified. Trial ended.\0"
 ROUTE = b"/v1/realtime?model=gpt-realtime-2.1-mini\0"
+PRIVATE_TABLE = "nvs,data,nvs,0x9000,0x4000,\n" + TABLE
 
 
 def test_review_scope_is_bound_to_app_elf_and_model(pinned_pack):
@@ -44,6 +47,46 @@ def test_review_scope_is_bound_to_app_elf_and_model(pinned_pack):
 def test_refuse_missing_paths_private_policy_and_unsafe_logging(pinned_pack, payload):
     with pytest.raises(ValueError):
         inspect_image(image(pinned_pack + payload, project=PROJECT), ELF_SHA, TABLE)
+
+
+def test_private_review_requires_one_turn_marker_and_keeps_approval_unset(pinned_pack):
+    fixture = image(pinned_pack + ONE_TURN + STATUS + ROUTE, project=PROJECT)
+    report = inspect_image(fixture, ELF_SHA, PRIVATE_TABLE, local_one_turn=True)
+    assert report["private_board_policy_embedded"] is True
+    assert report["install_authorized"] is False and report["paid_api_called"] is False
+    with pytest.raises(ValueError, match="NVS"):
+        inspect_image(fixture, ELF_SHA, TABLE, local_one_turn=True)
+
+
+@pytest.mark.parametrize("markers", [REVIEW, CONTINUOUS, ONE_TURN + CONTINUOUS, ONE_TURN + REVIEW])
+def test_private_review_rejects_other_build_modes(pinned_pack, markers):
+    fixture = image(pinned_pack + markers + STATUS + ROUTE, project=PROJECT)
+    with pytest.raises(ValueError):
+        inspect_image(fixture, ELF_SHA, PRIVATE_TABLE, local_one_turn=True)
+
+
+def test_local_review_refuses_ci_before_opening_any_artifact(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("CI", "true")
+    argv = ["--local-one-turn"]
+    for option in (
+        "elf",
+        "bin",
+        "partition-csv",
+        "sdkconfig",
+        "out",
+        "factory-a",
+        "factory-b",
+        "factory-ota1",
+        "pretrial-nvs",
+    ):
+        argv.extend((f"--{option}", str(tmp_path / option)))
+    for option in ("idf-head", "source-head", "factory-sha256"):
+        argv.extend((f"--{option}", "fixture"))
+    with pytest.raises(SystemExit) as error:
+        main(argv)
+    assert error.value.code == 2
+    assert "requires local execution" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
 
 
 def test_review_requires_psram_serial_separation_and_one_ms_scheduler():

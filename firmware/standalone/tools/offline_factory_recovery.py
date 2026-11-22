@@ -14,6 +14,8 @@ import struct
 import sys
 from pathlib import Path
 
+from esp_app_image import SLOT_BYTES, SLOT_OFFSET
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 # Reuse the repository's already-tested, hash-pinned partition-table parser.
 sys.path.insert(0, str(REPO_ROOT / "experiments" / "k151_layout_spike"))
@@ -125,6 +127,9 @@ def verify_copies(path_a: Path, path_b: Path, expected_sha256: str) -> dict:
         "backup_count": 2,
         "image_length_bytes": IMAGE_BYTES,
         "sha256_verified_locally": hashlib.sha256(images[0]).hexdigest(),
+        "factory_ota1_sha256": hashlib.sha256(
+            images[0][SLOT_OFFSET : SLOT_OFFSET + SLOT_BYTES]
+        ).hexdigest(),
         "partition_table_md5_checked": True,
         "partition_count": len(EXPECTED_PARTITIONS),
         "ota_partition_count": 2,
@@ -136,6 +141,45 @@ def verify_copies(path_a: Path, path_b: Path, expected_sha256: str) -> dict:
         "factory_official_app_compatibility_verified": False,
         "install_authorized": False,
         "flash_modified": False,
+    }
+
+
+def verify_trial_restore(
+    factory_a: Path, factory_b: Path, expected_sha256: str, ota1: Path, pretrial_nvs: Path
+) -> dict:
+    """Describe a complete paid-trial rollback using local files only."""
+    factory = verify_copies(factory_a, factory_b, expected_sha256)
+    nvs_offset, nvs_size = 0x9000, 0x4000
+    with ota1.open("rb") as slot:
+        ota1_bytes = slot.read(SLOT_BYTES + 1)
+    if (
+        len(ota1_bytes) != SLOT_BYTES
+        or hashlib.sha256(ota1_bytes).hexdigest() != factory["factory_ota1_sha256"]
+    ):
+        raise ValueError("factory OTA1 restore slice disagrees with the verified full backups")
+    with pretrial_nvs.open("rb") as snapshot:
+        nvs_bytes = snapshot.read(nvs_size + 1)
+    if len(nvs_bytes) != nvs_size:
+        raise ValueError("pretrial NVS snapshot size rejected")
+    return {
+        "matching_factory_copies": factory["backup_count"],
+        "restore_in_order": [
+            {
+                "partition": "ota_1",
+                "offset": SLOT_OFFSET,
+                "bytes": SLOT_BYTES,
+                "sha256": factory["factory_ota1_sha256"],
+            },
+            {
+                "partition": "nvs",
+                "offset": nvs_offset,
+                "bytes": nvs_size,
+                "sha256": hashlib.sha256(nvs_bytes).hexdigest(),
+            },
+        ],
+        "verify_each_range_before_next_restore": True,
+        "pretrial_nvs_verified_against_device": False,
+        "restore_authorized": False,
     }
 
 
