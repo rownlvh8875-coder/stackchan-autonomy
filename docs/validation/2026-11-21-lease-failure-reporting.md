@@ -1,5 +1,23 @@
 # Windows lease 실패 근거와 실패 전용 계측
 
+## 2026-11-23 정책 시험에서 실제 SQLite 지연 분리
+
+`b3d2205`의 PR Windows Python 3.12 작업은 root 시험 500개를
+통과한 뒤 1개 실패와 2개 건너뜀으로 끝났다. 가상 soak까지
+도달하지 않았다. 두 번째 lease 확인은 0.916초에 시간 초과로
+안전 정지했다. 계측에서 SQLite COMMIT 완료 최대 0.620초,
+스토리지 직렬 대기 최대 0.603초, 실행기 대기 최대 0.260ms,
+이벤트 루프 지연 최대 15.6ms가 관측됐다. 이 최대값들은
+서로 다른 연산일 수 있다. [실패한 Windows 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45052849742/job/137301652848)
+
+해당 시험에서만 제어된 타임스탬프를 사용한다. TTL 1.5초에서
+0.6초 뒤 얻은 lease의 남은 0.9초를 기준으로 검증한다. 이후
+0.6초에 도착한 결과는 허용하고, 0.91초에 늦게 도착한 정상 결과는
+시간 초과로 거부한다. 고정된 TTL 4분의 1을 사용하는 변형에서는
+두 정책 사례가 실패함을 재현했다. 기존 SQLite·작업 큐·만료
+통합 시험과 실제 운영 제한은 이 수정의 영향 범위 밖이다.
+과거 virtual soak 시간 초과의 근본 원인은 확정되지 않았다.
+
 2026-11-21, Asia/Seoul. 새 운영 기능이 아닌 기존 pytest/TimingProbe 연결이다.
 production action/storage/control/state_store/soak와 제한/내구성은 변경하지 않았다.
 
