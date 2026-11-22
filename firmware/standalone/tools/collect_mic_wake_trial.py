@@ -39,7 +39,7 @@ def validate_question_report(record, *, cue_seen, wake):
         or type(cleanup) is not bool
         or not isinstance(result, str)
         or result not in QUESTION_ANY_TIME | cue_results
-        or wake["mic_wake_trial"] not in ("MIC_WAKE_TRIAL_V2", "MIC_WAKE_TRIAL_V3")
+        or wake["mic_wake_trial"] not in ("MIC_WAKE_TRIAL_V2", "MIC_WAKE_TRIAL_V3", "MIC_WAKE_TRIAL_V4")
         or wake_detected != (result != "not_run")
         or (cleanup and result in CLEAN_QUESTION_RESULTS)
     ):

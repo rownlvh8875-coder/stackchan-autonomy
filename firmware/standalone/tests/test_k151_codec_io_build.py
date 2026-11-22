@@ -293,7 +293,7 @@ def test_embedded_pack_to_mic_report(
     assert trial.returncode == 0, trial.stderr
     report = parse_mic_wake_trial_report(json.loads(trial.stdout))
     assert report["result"] == result
-    assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V3"
+    assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V4"
     assert report["stage"] == stage
     assert report["codec_cleanup_unverified"] is False
     assert report.get("frames_read") == frames
@@ -372,7 +372,7 @@ def test_k151_wake_clock_reason(port_binary, case, result, reason, monkeypatch):
     report = parse_mic_wake_trial_report(json.loads(attempt.stdout))
     assert report["result"] == result
     assert report.get("clock_reason") == reason
-    assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V3"
+    assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V4"
     assert report["stage"] == ("capture_clock" if reason else "complete")
     assert ("frames_read" in report) is (reason is None)
 
@@ -412,7 +412,7 @@ def test_k151_wake_clock_reason(port_binary, case, result, reason, monkeypatch):
         "standard_gate_stop",
     ],
 )
-def test_question_after_verified_wake(port_binary, case):
+def test_question_after_verified_wake(port_binary, case, monkeypatch):
     attempt = subprocess.run(
         [str(port_binary), "mic_only_trial_question_" + case],
         capture_output=True,
@@ -420,6 +420,25 @@ def test_question_after_verified_wake(port_binary, case):
         timeout=10,
     )
     assert attempt.returncode == 0, attempt.stderr
+    deadline_progress = {
+        "wake_paced_deadline": (486, 151, "none", "mic_read"),
+        "wake_cue_deadline": (500, 155, "none", "mic_read"),
+        "wake_detect_over_deadline": (500, 156, "detected", "model_return"),
+    }
+    if case in deadline_progress:
+        monkeypatch.syspath_prepend(str(BASE / "tools"))
+        from wake_bench_trace import parse_mic_wake_trial_report
+
+        report = parse_mic_wake_trial_report(json.loads(attempt.stdout))
+        assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V4"
+        assert report["clock_reason"] == "capture_window_exceeded"
+        frames, calls, result, step = deadline_progress[case]
+        assert report["deadline_progress"] == {
+            "frames_read": frames,
+            "model_calls": calls,
+            "last_model_result": result,
+            "last_poll_step": step,
+        }
 
 
 @pytest.mark.parametrize("operation", ["read_reg", "write_reg"])

@@ -12,6 +12,7 @@ namespace stackchan::standalone {
 
 enum class K151MicWakeTrialResult { denied, stopped, not_detected, detected, fault, memory_denied };
 inline constexpr uint32_t kK151MicWakeTrialFrameLimit = 500;
+inline constexpr size_t kK151MicWakeReportBytes = 384;
 inline constexpr size_t kK151WakeOnlyObservationFrames = 75; // 1.5s of 20ms PCM frames.
 
 enum class K151QuestionTrialMode { standard, wake_only_control };
@@ -37,12 +38,18 @@ enum class K151MicWakeClockReason {
   capture_window_exceeded,
 };
 
+struct K151WakeDeadlineProgress {
+  uint32_t frames_read;
+  NativeWakePollTrace poll;
+};
+
 struct K151MicWakeDiagnostic {
   K151MicWakeStage stage = K151MicWakeStage::admission;
   // This is independent of the primary failure. A prior fault alone does
   // not make a later successful teardown unverified.
   bool codec_cleanup_unverified = false;
   K151MicWakeClockReason clock_reason = K151MicWakeClockReason::none;
+  std::optional<K151WakeDeadlineProgress> deadline_progress{};
 };
 
 // Fixed diagnostic JSON line. Returns zero and clears the first byte on

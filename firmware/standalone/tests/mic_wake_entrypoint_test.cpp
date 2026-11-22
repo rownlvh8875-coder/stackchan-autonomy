@@ -123,14 +123,14 @@ size_t stackchan::standalone::format_k151_mic_wake_report(
   if (result == K151MicWakeTrialResult::stopped) {
     assert(!counts && diagnostic.stage == K151MicWakeStage::wake_input);
     return std::snprintf(output.data(), output.size(),
-        "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V3\",\"result\":\"stopped\","
+        "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V4\",\"result\":\"stopped\","
         "\"operating_admission\":false,\"stage\":\"wake_input\","
         "\"codec_cleanup_unverified\":false}\n");
   }
   assert(result == K151MicWakeTrialResult::detected && counts && counts->frames_read == 4);
   assert(diagnostic.stage == K151MicWakeStage::complete);
   return std::snprintf(output.data(), output.size(),
-      "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V3\",\"result\":\"detected\","
+      "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V4\",\"result\":\"detected\","
       "\"operating_admission\":false,\"stage\":\"complete\",\"codec_cleanup_unverified\":false,"
       "\"frames_read\":4,\"all_zero_frames\":0,"
       "\"full_scale_samples\":0}\n");

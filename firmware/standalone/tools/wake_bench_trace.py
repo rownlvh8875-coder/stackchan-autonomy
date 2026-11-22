@@ -37,6 +37,11 @@ _MIC_CLOCK_REASONS = frozenset(
         "capture_window_exceeded",
     }
 )
+_MIC_DEADLINE_FIELDS = frozenset(
+    {"frames_read", "model_calls", "last_model_result", "last_poll_step"}
+)
+_MIC_MODEL_RESULTS = frozenset({"not_called", "none", "detected", "error"})
+_MIC_POLL_STEPS = frozenset({"poll_entry", "mic_read", "input_processing", "model_return"})
 _MIC_MEMORY_STAGES = frozenset({"baseline_memory", "resident_memory"})
 _MIC_FAULT_STAGES = frozenset(
     {
@@ -67,12 +72,33 @@ _MIC_RESULT_STAGES = {
 }
 
 
+def _valid_deadline_progress(progress: object) -> bool:
+    if not isinstance(progress, dict) or set(progress) != _MIC_DEADLINE_FIELDS:
+        return False
+    frames = progress["frames_read"]
+    calls = progress["model_calls"]
+    result = progress["last_model_result"]
+    step = progress["last_poll_step"]
+    return (
+        type(frames) is int
+        and type(calls) is int
+        and 0 <= calls <= frames <= 500
+        and isinstance(result, str)
+        and result in _MIC_MODEL_RESULTS
+        and isinstance(step, str)
+        and step in _MIC_POLL_STEPS
+        and (calls == 0) == (result == "not_called")
+        and (step != "model_return" or calls > 0)
+        and (result not in {"detected", "error"} or step == "model_return")
+    )
+
+
 def parse_mic_wake_trial_report(record: object) -> dict:
     """Validate the fixed per-trial record emitted by the microphone diagnostic."""
     if (
         not isinstance(record, dict)
         or record.get("mic_wake_trial")
-        not in ("MIC_WAKE_TRIAL_V1", "MIC_WAKE_TRIAL_V2", "MIC_WAKE_TRIAL_V3")
+        not in ("MIC_WAKE_TRIAL_V1", "MIC_WAKE_TRIAL_V2", "MIC_WAKE_TRIAL_V3", "MIC_WAKE_TRIAL_V4")
         or record.get("operating_admission") is not False
         or not isinstance(record.get("result"), str)
         or record["result"] not in _MIC_RESULTS
@@ -82,11 +108,21 @@ def parse_mic_wake_trial_report(record: object) -> dict:
     fields = _MIC_FIELDS | _MIC_COUNT_FIELDS if clean else _MIC_FIELDS
     version = record["mic_wake_trial"]
     has_diagnostic = version != "MIC_WAKE_TRIAL_V1"
-    has_clock_reason = version == "MIC_WAKE_TRIAL_V3" and record.get("stage") == "capture_clock"
+    has_clock_reason = (
+        version in ("MIC_WAKE_TRIAL_V3", "MIC_WAKE_TRIAL_V4")
+        and record.get("stage") == "capture_clock"
+    )
+    has_deadline_progress = (
+        version == "MIC_WAKE_TRIAL_V4"
+        and has_clock_reason
+        and record.get("clock_reason") == "capture_window_exceeded"
+    )
     if has_diagnostic:
         fields |= _MIC_DIAGNOSTIC_FIELDS
     if has_clock_reason:
         fields |= {"clock_reason"}
+    if has_deadline_progress:
+        fields |= {"deadline_progress"}
     if set(record) != fields:
         raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
     if has_diagnostic:
@@ -122,6 +158,11 @@ def parse_mic_wake_trial_report(record: object) -> dict:
             or not 0 <= full_scale <= (frames - zeroes) * 240
         ):
             raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
+    if has_deadline_progress:
+        progress = record["deadline_progress"]
+        if not _valid_deadline_progress(progress):
+            raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
+        return record | {"deadline_progress": progress.copy()}
     return record.copy()
 
 

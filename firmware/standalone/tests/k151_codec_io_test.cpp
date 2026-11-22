@@ -502,7 +502,7 @@ int main(int argc,char** argv) {
       if (mode=="mic_only_trial_poll_gap_boundary") trial_time_us+=100000;
     }};
     const auto result=trial.run(local_owner,local_stop,{true,true},std::make_unique<TrialDetector>());
-    std::array<char,256> line{};
+    std::array<char, kK151MicWakeReportBytes> line{};
     assert(format_k151_mic_wake_report(result,trial.diagnostic(),trial.take_input_counts(),line)!=0);
     std::fputs(line.data(),stdout);
     return 0;
@@ -525,7 +525,7 @@ int main(int argc,char** argv) {
     using Outcome = K151MicWakeTrialResult;
     using Stage = K151MicWakeStage;
     const K151MicWakeDiagnostic complete{Stage::complete};
-    std::array<char, 256> json{};
+    std::array<char, kK151MicWakeReportBytes> json{};
     const K151MicWakeInputCounts observed{4,1,6};
     const K151MicWakeInputCounts impossible{4,3,241};
     assert(format_k151_mic_wake_report(Outcome::detected,complete,impossible,json)==0);
@@ -537,6 +537,16 @@ int main(int argc,char** argv) {
     assert(format_k151_mic_wake_report(Outcome::fault,{static_cast<Stage>(90)},std::nullopt,json)==0);
     using ClockReason = K151MicWakeClockReason;
     assert(format_k151_mic_wake_report(Outcome::fault,{Stage::capture_clock},std::nullopt,json)==0);
+    K151MicWakeDiagnostic deadline{Stage::capture_clock, false, ClockReason::capture_window_exceeded};
+    assert(format_k151_mic_wake_report(Outcome::fault, deadline, std::nullopt, json) == 0);
+    deadline.deadline_progress = K151WakeDeadlineProgress{
+        500, {NativeWakePollTrace::Step::model_return, 156, NativeWakeResult::detected}};
+    assert(format_k151_mic_wake_report(Outcome::fault, deadline, std::nullopt, json) > 0);
+    // No partial JSON may escape if the fixed report is truncated.
+    assert(format_k151_mic_wake_report(Outcome::fault, deadline, std::nullopt,
+                                       std::span(json).first(256)) == 0 && json[0] == '\0');
+    deadline.deadline_progress->poll.model_calls = 501;
+    assert(format_k151_mic_wake_report(Outcome::fault, deadline, std::nullopt, json) == 0);
     assert(format_k151_mic_wake_report(
         Outcome::fault,{Stage::capture_clock,false,static_cast<ClockReason>(99)},
         std::nullopt,json)==0);
@@ -595,6 +605,9 @@ int main(int argc,char** argv) {
       assert(trial_model_drops == 1 && channels_created == 1);
       assert(question.result == Result::not_run && !question_allocated);
       assert(question_cues == 0 && question_reads == 0);
+      std::array<char, kK151MicWakeReportBytes> report{};
+      assert(format_k151_mic_wake_report(wake, trial.diagnostic(), std::nullopt, report) != 0);
+      std::fputs(report.data(), stdout);
       return 0;
     }
     const auto counts = trial.take_input_counts();
@@ -705,7 +718,7 @@ int main(int argc,char** argv) {
       assert(counts->full_scale_samples == (injected ? 6u : 0u));
     }
     if (mode == "mic_only_trial_input_counts" || mode == "mic_only_trial_stop_on_drop") {
-      std::array<char, 256> json{};
+      std::array<char, kK151MicWakeReportBytes> json{};
       assert(format_k151_mic_wake_report(outcome,trial.diagnostic(),counts,json) != 0);
       std::printf("%s", json.data());
     }

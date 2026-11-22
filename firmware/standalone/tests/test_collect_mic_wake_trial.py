@@ -202,7 +202,8 @@ def test_question_and_control_challenges_are_not_interchangeable(receiver, wake_
 
 
 @pytest.mark.parametrize("wake_only", [False, True])
-def test_collects_v3_wake_deadline_before_question_phase(receiver, wake_only):
+@pytest.mark.parametrize("version", [3, 4])
+def test_collects_wake_deadline_before_question_phase(receiver, wake_only, version):
     fault = {
         "mic_wake_trial": "MIC_WAKE_TRIAL_V3",
         "result": "fault",
@@ -211,6 +212,16 @@ def test_collects_v3_wake_deadline_before_question_phase(receiver, wake_only):
         "codec_cleanup_unverified": False,
         "operating_admission": False,
     }
+    if version == 4:
+        fault.update(
+            mic_wake_trial="MIC_WAKE_TRIAL_V4",
+            deadline_progress={
+                "frames_read": 486,
+                "model_calls": 151,
+                "last_model_result": "none",
+                "last_poll_step": "mic_read",
+            },
+        )
     question = {**QUESTION, "result": "not_run"}
     wait = CONTROL_WAIT if wake_only else QUESTION_WAIT
     port = FakeSerial([wait, LISTEN, fault, question, HOLD])

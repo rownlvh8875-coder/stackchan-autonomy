@@ -227,6 +227,8 @@ def test_mic_wake_clock_fault_requires_reason_in_v3_only():
     del legacy["clock_reason"]
     assert parse_mic_wake_trial_report(legacy) == legacy
     assert parse_mic_wake_trial_report(CLOCK_FAULT_V3) == CLOCK_FAULT_V3
+    v4_clock_rollback = CLOCK_FAULT_V3 | {"mic_wake_trial": "MIC_WAKE_TRIAL_V4"}
+    assert parse_mic_wake_trial_report(v4_clock_rollback) == v4_clock_rollback
     with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
         parse_mic_wake_trial_report(legacy | {"mic_wake_trial": "MIC_WAKE_TRIAL_V3"})
 
@@ -247,3 +249,47 @@ def test_mic_wake_clock_fault_requires_reason_in_v3_only():
 def test_mic_wake_v3_rejects_invalid_clock_diagnostics(change):
     with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
         parse_mic_wake_trial_report(CLOCK_FAULT_V3 | change)
+
+
+DEADLINE_V4 = CLOCK_FAULT_V3 | {
+    "mic_wake_trial": "MIC_WAKE_TRIAL_V4",
+    "clock_reason": "capture_window_exceeded",
+}
+PROGRESS_V4 = {
+    "frames_read": 500,
+    "model_calls": 156,
+    "last_model_result": "detected",
+    "last_poll_step": "model_return",
+}
+
+
+def test_mic_wake_v4_requires_deadline_progress_only_for_window_overrun():
+    record = DEADLINE_V4 | {"deadline_progress": PROGRESS_V4}
+    assert parse_mic_wake_trial_report(record) == record
+    for rejected in (DEADLINE_V4, record | {"clock_reason": "poll_duration_exceeded"},
+                     record | {"mic_wake_trial": "MIC_WAKE_TRIAL_V3"}):
+        with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
+            parse_mic_wake_trial_report(rejected)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"frames_read": True},
+        {"frames_read": 501},
+        {"frames_read": 155},
+        {"model_calls": 0},
+        {"model_calls": -1},
+        {"last_model_result": []},
+        {"last_model_result": "not_called"},
+        {"last_model_result": "raw"},
+        {"last_poll_step": "mic_read"},
+        {"last_poll_step": []},
+        {"last_poll_step": "untrusted"},
+        {"samples": [1]},
+    ],
+)
+def test_mic_wake_v4_rejects_invalid_or_extra_progress_fields(change):
+    record = DEADLINE_V4 | {"deadline_progress": PROGRESS_V4 | change}
+    with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
+        parse_mic_wake_trial_report(record)
