@@ -14,7 +14,7 @@ from test_resource_bench_image import pack as resource_pack  # noqa: E402
 pinned_pack = resource_pack
 
 PROJECT = b"k151_conversation_review"
-REVIEW = b"K151_CONVERSATION_REVIEW_NO_RELEASE\0"
+REVIEW = b"W (%lu) %s: K151_CONVERSATION_REVIEW_NO_RELEASE\n\0"
 STATUS = b"Say Hi StackChan\0Standby verified. Trial ended.\0"
 ROUTE = b"/v1/realtime?model=gpt-realtime-2.1-mini\0"
 

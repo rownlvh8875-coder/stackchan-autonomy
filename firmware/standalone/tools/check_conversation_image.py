@@ -32,12 +32,16 @@ def verify_sdkconfig(text: str) -> None:
 def inspect_image(app: bytes, elf_sha256: str, partition_csv: str) -> dict:
     envelope = inspect_model_image(app, elf_sha256, b"k151_conversation_review")
     markers = (
-        b"K151_CONVERSATION_REVIEW_NO_RELEASE\0",
+        # ESP_LOGW wraps this marker in its format string, including a newline.
+        b"K151_CONVERSATION_REVIEW_NO_RELEASE",
         b"Say Hi StackChan\0",
         b"Standby verified. Trial ended.\0",
     )
-    if any(marker not in app for marker in markers) or b"K151_CONVERSATION_LOCAL_RELEASE" in app:
-        raise ValueError("missing unarmed review markers or private release embedded")
+    if b"K151_CONVERSATION_LOCAL_RELEASE" in app:
+        raise ValueError("private release marker in public conversation image")
+    for marker in markers:
+        if marker not in app:
+            raise ValueError(f"missing expected conversation marker {marker!r}")
     verify_realtime_transport(app)
     return {
         **envelope,

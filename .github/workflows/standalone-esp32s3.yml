@@ -43,6 +43,35 @@ jobs:
             --idf-head "$IDF_SHA" \
             --check-realtime \
             --out firmware/standalone/esp_app/validation-manifest.json
+      - name: Build unarmed standalone conversation for review (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          python3 firmware/standalone/tools/prepare_wakenet_assets.py \
+            --source firmware/standalone/esp_app/managed_components/espressif__esp-sr/model/wakenet_model/wn9l_histackchan_tts3 \
+            --out firmware/standalone/resource_bench/main/srmodels.bin
+          APP=firmware/standalone/esp_app
+          OUT="$GITHUB_WORKSPACE/$APP/build-conversation-review"
+          idf.py -C "$APP" -B "$OUT" -DK151_CONVERSATION_REVIEW=ON \
+            -DK151_CONVERSATION_PRIVATE_POLICY= -DSDKCONFIG="$OUT/sdkconfig" \
+            -DIDF_TARGET=esp32s3 -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_conversation_image.py \
+            --elf "$OUT/k151_conversation_review.elf" --bin "$OUT/k151_conversation_review.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --sdkconfig "$OUT/sdkconfig" \
+            --out "$OUT/validation-manifest.json"
+      - name: Publish unarmed conversation SHA and size proof (NO firmware binary)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-conversation-review-NO-RELEASE-proof
+          path: firmware/standalone/esp_app/build-conversation-review/validation-manifest.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Build panel, head touch and screen STOP probe (NO INSTALL)
         shell: bash
         run: |
@@ -183,9 +212,6 @@ jobs:
           SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
           test "$SOURCE_HEAD" = "$GITHUB_SHA"
           test "${#SOURCE_HEAD}" = 40
-          python3 firmware/standalone/tools/prepare_wakenet_assets.py \
-            --source firmware/standalone/esp_app/managed_components/espressif__esp-sr/model/wakenet_model/wn9l_histackchan_tts3 \
-            --out firmware/standalone/resource_bench/main/srmodels.bin
           idf.py -C firmware/standalone/resource_bench -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
           idf.py -C firmware/standalone/resource_bench -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
           python3 firmware/standalone/tools/check_resource_bench.py \
@@ -209,32 +235,6 @@ jobs:
                   target.parent.mkdir(parents=True, exist_ok=True)
                   shutil.copyfile(notice, target)
           PY
-      - name: Build unarmed standalone conversation for review (NO INSTALL)
-        shell: bash
-        run: |
-          set -euo pipefail
-          . "$IDF_PATH/export.sh"
-          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
-          test "$SOURCE_HEAD" = "$GITHUB_SHA"
-          APP=firmware/standalone/esp_app
-          OUT="$GITHUB_WORKSPACE/$APP/build-conversation-review"
-          idf.py -C "$APP" -B "$OUT" -DK151_CONVERSATION_REVIEW=ON \
-            -DK151_CONVERSATION_PRIVATE_POLICY= -DSDKCONFIG="$OUT/sdkconfig" \
-            -DIDF_TARGET=esp32s3 -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
-          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
-            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
-          python3 firmware/standalone/tools/check_conversation_image.py \
-            --elf "$OUT/k151_conversation_review.elf" --bin "$OUT/k151_conversation_review.bin" \
-            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
-            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --sdkconfig "$OUT/sdkconfig" \
-            --out "$OUT/validation-manifest.json"
-      - name: Publish unarmed conversation SHA and size proof (NO firmware binary)
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: k151-conversation-review-NO-RELEASE-proof
-          path: firmware/standalone/esp_app/build-conversation-review/validation-manifest.json
-          if-no-files-found: error
-          retention-days: 14
       - name: Build separate read-only board probe (NO INSTALL)
         shell: bash
         run: |
