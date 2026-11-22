@@ -414,17 +414,23 @@ bool K151CodecPort::speaker_on_low_volume() {
 }
 
 bool K151CodecPort::speaker_off() {
-  output_pending_ = false;
+  output_data_ = OutputData::empty;
   if (!output_open_) return !out_control_.faulted();
+  const bool standby_requested = out_control_.request_aw88298_standby();
   const int rc = esp_codec_dev_close(out_dev_);
-  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT) || !out_control_.healthy()) {
-    fault_ = true; return false;
-  }
-  output_open_ = false;
-  return true;
+  const bool closed = rc == 0 && data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT);
+  if (closed) output_open_ = false;
+  if (standby_requested && closed && out_control_.aw88298_standby_verified())
+    return true;
+
+  fault_ = true;
+  // Reset is a fallback on uncertainty, never a successful completed turn.
+  if (!reset_controlled_ || !set_amplifier_reset(true)) cleanup_unverified_ = true;
+  return false;
 }
 
 bool K151CodecPort::play_mono_24k(std::span<const int16_t> mono) {
+  output_data_ = OutputData::empty;
   if (!prepared() || !output_open_ || input_open_ ||
       !valid_pcm_playback(mono)) return false;
   // Copy avoids const-casting the caller's buffer through esp_codec_dev.
@@ -435,14 +441,15 @@ bool K151CodecPort::play_mono_24k(std::span<const int16_t> mono) {
                                      static_cast<int>(mono.size() * sizeof(int16_t)));
   wipe_pcm(chunk);
   if (rc != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT)) return fail();
-  output_pending_ = true;
+  output_data_ = OutputData::queued;
   return true;
 }
 
 bool K151CodecPort::wait_for_tx_tail(const std::atomic_bool& owner,
                                     const std::atomic_bool& consent,
                                     const std::atomic_bool& stop) {
-  if (!tx_tail_registered_ || !output_open_ || !std::exchange(output_pending_, false))
+  const auto data = std::exchange(output_data_, OutputData::empty);
+  if (!tx_tail_registered_ || !output_open_ || data != OutputData::queued)
     return false;
   const auto allowed = [&] {
     return owner.load() && consent.load() && !stop.load() &&
@@ -470,15 +477,20 @@ bool K151CodecPort::wait_for_tx_tail(const std::atomic_bool& owner,
     // esp_timer_get_time() is lock-free and callable with interrupts masked.
     const auto result = tx_tail.poll(esp_timer_get_time);
     portEXIT_CRITICAL(&tx_tail_lock);
-    if (result == DmaTxTail::Result::observed && allowed()) return true;
+    if (result == DmaTxTail::Result::observed && allowed()) {
+      output_data_ = OutputData::dma_complete;
+      return true;
+    }
     if (result != DmaTxTail::Result::waiting) return reject();
     vTaskDelay(1);
   }
 }
 
 bool K151CodecPort::drain_output_before_mute() {
-  // The DMA rotation alone does not observe idle at the amplifier.
-  return false;
+  // AudioGuard separately requires speaker_off() to verify amplifier standby.
+  const auto data = std::exchange(output_data_, OutputData::empty);
+  return data == OutputData::dma_complete && output_open_ && !input_open_ &&
+         prepared() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT);
 }
 
 bool K151CodecPort::quiet() {

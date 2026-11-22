@@ -1,5 +1,17 @@
 # Next steps
 
+## 2026-11-22 오프라인 후속 — 재생 완료와 앰프 대기 복귀
+
+마지막 PCM에 대한 DMA 확인은 한 번만 소비한다. 이어 AW88298
+HMUTE와 전원 차단을 순서대로 요청하고, 코덱 닫기와 SYSST.SWS
+정지 상태까지 확인해 재생을 완료한다. 확인에 실패하면 앰프 리셋을
+시도하고 턴을 종료한다. 대기 복귀의 시간 기준은 음소거 검증 뒤다.
+모의 레지스터와 고정 SDK로 쓰기·읽기 실패, 스위칭 잔류와 STOP을
+검증한다. 운영 출력은 HOLD다.
+임시 호스트 실행기는 실제 코덱 포트와 모의 DMA를 연결해 완료·STOP·
+스위칭 잔류·DMA 확인 누락·확인 재사용·새 쓰기 뒤 기존 확인 폐기를 통과했다.
+[AW88298 데이터시트, SYSST와 SYSCTRL](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/K128%20CoreS3/AW88298.PDF#page=31).
+
 ## 2026-11-22 오프라인 후속 — 앰프 리셋과 음소거 상태 확인
 
 양방향 오디오 준비는 현재 보드의 AXP2101 레일 enable과 AW9523
@@ -16,6 +28,8 @@ PSRAM을 켠 질문 전용 앱은 DMA 상태의 lock-free 단언에서 실패했
 DMA 상태를 내부 DRAM의 ESP-IDF 임계 구역으로 보호해 두 빌드
 구성이 같은 경로를 사용하도록 수정했다.
 [7ab304f 타깃 결과](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45032927534).
+12640ac의 ESP32-S3 작업은 PSRAM 질문 전용 앱을 포함해 통과했다.
+[12640ac 타깃 결과](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45033915101).
 
 ## 2026-11-22 오프라인 후속 — 마지막 재생 쓰기 뒤 DMA 완료 관측
 

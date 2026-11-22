@@ -13,12 +13,12 @@ using namespace stackchan::standalone;
 
 struct AudioFake {
   bool microphone = false, amplifier = false;
-  bool fail_drain = false;
+  bool fail_drain = false, fail_mute = false;
   int drain_calls = 0, speaker_on_calls = 0;
   AudioHooks hooks() {
     return {
         [this]() { microphone = false; return true; },
-        [this]() { amplifier = false; return true; },
+        [this]() { amplifier = false; return !fail_mute; },
         []() { return true; },
         [this]() { microphone = true; return true; },
         []() { return true; },
@@ -80,6 +80,28 @@ struct Fixture {
 };
 
 int main() {
+  for (int test = 0; test < 5; ++test) {
+    Fixture x;
+    x.hardware.fail_mute = test == 4;
+    int clock_reads = 0;
+    GuardedVoiceSpeaker speaker{
+        x.guard, x.sink, x.stop, x.consent, x.busy,
+        [&]() -> std::optional<uint64_t> {
+          ++clock_reads;
+          assert(!x.hardware.amplifier && x.busy && x.guard.state() == AudioState::idle);
+          if (test == 1) return std::nullopt;
+          if (test == 2) return 1209; // Earlier than the sink's 1210.
+          if (test == 3) x.stop = true;
+          return 1235;
+        }};
+    const auto result = speaker.play_pcm24k(x.samples, 1200);
+    assert(clock_reads == (test == 4 ? 0 : 1));
+    if (test == 0) {
+      assert(result.complete && result.finished_ms == 1235 && !x.busy);
+    } else {
+      assert(!result.complete && speaker.latched() && x.busy && x.guard.stopped());
+    }
+  }
   {
     Fixture x;
     assert(x.speaker.play_pcm24k(x.samples, 1200).complete);

@@ -25,7 +25,12 @@ K151VoiceRuntime::K151VoiceRuntime(
     : ledger_(ledger), codec_(codec), audio_(audio), network_(network),
       owner_(local_owner), consent_(paid_consent), stop_(stop),
       mic_(codec), sink_(codec, stop, paid_consent, local_owner),
-      speaker_(audio, sink_, stop, paid_consent, busy_),
+      speaker_(audio, sink_, stop, paid_consent, busy_,
+               []() -> std::optional<uint64_t> {
+                 const auto now_us = esp_timer_get_time();
+                 if (now_us < 0) return std::nullopt;
+                 return static_cast<uint64_t>(now_us / 1000);
+               }),
       api_(network, paid_consent, local_owner, stop),
       dialog_(session_, ledger, api_.api(), speaker_, stop, paid_consent,
               network.admission_flag(), busy_),

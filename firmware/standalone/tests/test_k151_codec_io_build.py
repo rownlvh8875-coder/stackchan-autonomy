@@ -602,7 +602,21 @@ def aw88298_startup_binary(tmp_path_factory):
 
 @pytest.mark.parametrize(
     "mode",
-    ["raw", "held", "reset", "unknown_width", "read_failure", "readback_mismatch", "write_failure"],
+    [
+        "raw",
+        "held",
+        "reset",
+        "unknown_width",
+        "read_failure",
+        "readback_mismatch",
+        "write_failure",
+        "standby",
+        "standby_mute_read_fail",
+        "standby_mute_write_fail",
+        "standby_power_write_fail",
+        "standby_still_switching",
+        "standby_after_fault",
+    ],
 )
 def test_real_aw88298_startup_stays_quiet(aw88298_startup_binary, mode):
     result = subprocess.run(

@@ -42,7 +42,7 @@ class K151CodecPort final {
   bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms PCM; not wall-clock latency.
   bool wait_for_tx_tail(const std::atomic_bool& owner, const std::atomic_bool& consent,
                         const std::atomic_bool& stop);
-  bool drain_output_before_mute(); // False until real DMA+codec drain telemetry.
+  bool drain_output_before_mute(); // Consume fresh DMA tail confirmation.
   bool quiet();      // Both codecs; error latches fault
   bool shutdown();   // One release attempt/handle; retains failed I2S, fault stays.
   bool prepared() const {
@@ -56,6 +56,7 @@ class K151CodecPort final {
   bool cleanup_unverified() const { return cleanup_unverified_; }
 
  private:
+  enum class OutputData { empty, queued, dma_complete };
   bool microphone_only() const { return receive_only_; }
   bool input_allowed() const {
     // A cold port rejects on prepared() without latching a new I/O fault.
@@ -99,7 +100,7 @@ class K151CodecPort final {
   bool input_open_ = false;
   bool output_open_ = false;
   bool tx_tail_registered_ = false;
-  bool output_pending_ = false;
+  OutputData output_data_ = OutputData::empty;
   K151MicWakeStage prepare_stage_ = K151MicWakeStage::admission;
   bool cleanup_unverified_ = false;
 };

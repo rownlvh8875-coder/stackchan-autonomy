@@ -52,13 +52,26 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
            read_word(0x05) && (value[1] & 0x10) != 0 &&
            read_word(0x01) && (value[0] & 0x01) == 0;
   }
+  bool request_aw88298_standby() {
+    if (profile_ != Profile::aw88298_muted_startup || !opened(this)) return false;
+    const auto update = [&](int reg) {
+      std::array<uint8_t, 2> value{};
+      return read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK &&
+             write_aw88298(reg, 1, value.data(), value.size(), true) == ESP_CODEC_DEV_OK;
+    };
+    // Force HMUTE before power-down. Attempt power-down even if mute was
+    // unsuccessful. Only these two masked writes may run after a fault.
+    const bool mute = update(0x05);
+    const bool power = update(0x04);
+    return mute && power;
+  }
  private:
   static constexpr uint8_t kPowerVerified = 1, kMuteVerified = 2, kAttenuationVerified = 4;
 
-  int write_aw88298(int reg, int len, void* data, int size) {
+  int write_aw88298(int reg, int len, void* data, int size, bool standby_request = false) {
     if (len != 1 || size != 2 || reg < 0 || reg > 0xff)
       return record(ESP_CODEC_DEV_INVALID_ARG);
-    if (faulted() && !cleaning_up_) return ESP_CODEC_DEV_WRONG_STATE;
+    if (faulted() && !cleaning_up_ && !standby_request) return ESP_CODEC_DEV_WRONG_STATE;
 
     // esp_codec_dev 1.6.2 sends the 16-bit word high byte first.
     const auto* bytes = static_cast<const uint8_t*>(data);

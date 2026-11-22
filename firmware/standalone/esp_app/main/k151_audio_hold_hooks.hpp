@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Explicitly dormant AudioGuard ↔ K151CodecPort hooks, never used by app_main.
-// No verified AXP2101/AW9523 power sequence, capture flush or TX DMA drain.
+// Output hardware and capture flush still require device verification.
 #pragma once
 
 #include "audio_guard.hpp"
@@ -9,8 +9,7 @@
 namespace stackchan::standalone {
 
 // Returning success from a missing physical operation would be unsafe.
-// Even if a future caller creates these hooks, AudioGuard initialization
-// and playback drain fail closed in the HOLD build.
+// AudioGuard initialization fails closed in the HOLD build.
 inline AudioHooks k151_unapproved_audio_hooks(K151CodecPort& codec) {
   return AudioHooks{
       [&codec]() { return codec.microphone_off(); },

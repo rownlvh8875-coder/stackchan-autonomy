@@ -15,11 +15,15 @@ std::array<uint16_t, 256> registers{};
 std::string_view scenario;
 int writes = 0;
 bool power_seen = false, mute_seen = false, volume_seen = false;
+bool standby_request = false;
+int standby_mute_writes = 0;
 
 bool is_open(const audio_codec_ctrl_if_t* h) { return h == &i2c; }
 int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* output, int bytes) {
   assert(h == &i2c && address_bytes == 1 && bytes == 2);
   if (scenario == "read_failure" && reg == 0x05) return ESP_CODEC_DEV_READ_FAIL;
+  if (standby_request && scenario == "standby_mute_read_fail" && reg == 0x05)
+    return ESP_CODEC_DEV_READ_FAIL;
   auto value = registers.at(reg);
   if (scenario == "readback_mismatch" && reg == 0x05) value &= ~0x10;
   auto* data = static_cast<uint8_t*>(output);
@@ -38,6 +42,15 @@ int write(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* inpu
     if (reg == 0x0c) assert((word >> 8) >= 0x60 && (word >> 8) <= 0xc0);
   }
   if (scenario == "write_failure" && reg == 0x05) return ESP_CODEC_DEV_WRITE_FAIL;
+  if (standby_request && reg == 0x05) {
+    assert(!power_seen);
+    ++standby_mute_writes;
+    if (scenario == "standby_mute_write_fail") return ESP_CODEC_DEV_WRITE_FAIL;
+  }
+  if (standby_request && reg == 0x04) {
+    if (scenario == "standby_power_write_fail") return ESP_CODEC_DEV_WRITE_FAIL;
+    if (scenario != "standby_still_switching") registers[0x01] &= ~0x0100;
+  }
   if (reg == 0x04) power_seen = true;
   if (reg == 0x05) mute_seen = true;
   if (reg == 0x0c) volume_seen = true;
@@ -90,6 +103,36 @@ int main(int argc, char** argv) {
     assert(guarded.muted_startup_verified());
     assert((registers[0x04] & 0x43) == 0x03 && (registers[0x05] & 0x10) != 0);
     assert((registers[0x0c] >> 8) >= 0x60);
+    if (scenario.starts_with("standby")) {
+      // Begin with an emulated active register state. No physical amp is opened.
+      constexpr uint16_t active_power = 0x40c4, active_mute = 0x26a8;
+      registers[0x00] = 0x1852;
+      registers[0x01] = 0x0100;
+      registers[0x04] = active_power;
+      registers[0x05] = active_mute;
+      const auto attenuation = registers[0x0c];
+      if (scenario == "standby_after_fault") {
+        uint8_t invalid_width = 0;
+        assert(bus->write_reg(bus, 0x05, 1, &invalid_width, 1) != ESP_CODEC_DEV_OK);
+        assert(guarded.faulted());
+      }
+      power_seen = false;
+      standby_request = true;
+      const bool requested = guarded.request_aw88298_standby();
+      standby_request = false;
+      const bool mute_failed =
+          scenario == "standby_mute_read_fail" || scenario == "standby_mute_write_fail";
+      const bool power_failed = scenario == "standby_power_write_fail";
+      assert(requested == (!mute_failed && !power_failed));
+      assert(power_seen == !power_failed);
+      assert(registers[0x04] == (power_failed ? active_power : (active_power & ~0x43) | 0x03));
+      assert(registers[0x05] == (mute_failed ? active_mute : active_mute | 0x10));
+      assert(standby_mute_writes == (scenario == "standby_mute_read_fail" ? 0 : 1));
+      assert(registers[0x0c] == attenuation);
+      assert(guarded.faulted() == (mute_failed || power_failed || scenario == "standby_after_fault"));
+      assert(guarded.aw88298_standby_verified() == (scenario == "standby"));
+      guarded.begin_cleanup();
+    }
     if (scenario == "unknown_width") {
       uint8_t data = 0x08;
       const int before = writes;
