@@ -21,6 +21,9 @@ def test_hardware_hold_is_marker_only_in_app_entrypoint():
     assert "K151VoiceBootstrap " not in boot
     assert "K151OwnerSession::compiled_link_marker()" in boot
     assert "K151OwnerSession " not in boot
+    assert '"k151_conversation_owner.cpp"' in cmake
+    assert boot.count("K151ConversationOwner::") == 1
+    assert "K151ConversationOwner::compiled_link_marker()" in boot
     assert "init_without_erase(" not in boot
     assert "restore_profile(" not in boot
     assert "!K151InstallHold::device_activation_allowed()" in bootstrap

@@ -2,6 +2,7 @@
 // Real runtime, audio hooks, wake/turn loop and API binding with host-only device doubles.
 #include "k151_voice_runtime.hpp"
 #include "k151_voice_bootstrap.hpp"
+#include "k151_conversation_owner.hpp"
 #include "k151_install_hold.hpp"
 #include "k151_head_touch_owner.hpp"
 #include "k151_display_stop.hpp"
@@ -53,6 +54,10 @@ std::atomic_int stop_gpio_level{1};
 unsigned gpio_configures = 0, gpio_samples = 0, timer_creates = 0;
 bool stop_timer_active = false;
 unsigned panel_handoffs = 0;
+int board_task, other_task;
+TaskHandle_t current_task = &board_task;
+bool lvgl_on = false, setup_usb = false;
+uint64_t review_started_ms = 0;
 constexpr std::array kStopDuringRequest{
     "bootstrap_display_stop_during_stt", "bootstrap_display_stop_during_gpt",
     "bootstrap_display_stop_during_tts"};
@@ -61,6 +66,8 @@ const std::atomic_bool& stop_source() {
   return scenario.starts_with("bootstrap_") && scenario != "bootstrap_wrong_stop_binding"
        ? K151DisplayStop::flag() : stop;
 }
+
+bool conversation_case() { return scenario.starts_with("bootstrap_conversation_"); }
 
 void display_press() {
   assert(stop_timer_active && stop_timer_callback);
@@ -105,6 +112,24 @@ const audio_codec_ctrl_if_t control = fake_control();
 }
 
 extern "C" int64_t esp_timer_get_time() { return now_us; }
+TaskHandle_t xTaskGetCurrentTaskHandle() { return current_task; }
+int xPortGetCoreID() { return 0; }
+extern "C" bool lv_is_initialized() { return lvgl_on; }
+extern "C" void lv_init() { assert(board_bus_registered); lvgl_on = true; }
+extern "C" void lv_deinit() { assert(!setup_usb && !codec_running); lvgl_on = false; }
+extern "C" esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t* config,
+                                       i2c_master_bus_handle_t* out) {
+  assert(conversation_case() && !board_bus_registered && config->i2c_port == I2C_NUM_1);
+  board_bus_registered = true;
+  *out = &menu_bus;
+  return ESP_OK;
+}
+extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t bus) {
+  assert(bus == &menu_bus && board_bus_registered && !stop_probe && !stop_timer_active);
+  assert(!lvgl_on && !setup_usb && !codec_running && !model_loaded);
+  board_bus_registered = false;
+  return ESP_OK;
+}
 
 extern "C" esp_err_t i2c_master_bus_add_device(
     i2c_master_bus_handle_t bus, const i2c_device_config_t* config,
@@ -288,6 +313,10 @@ extern "C" esp_err_t i2c_master_get_bus_handle(i2c_port_t port, i2c_master_bus_h
 namespace stackchan::standalone {
 bool K151InstallHold::device_activation_allowed() { return scenario != "bootstrap_hold"; }
 K151LcdPanel::~K151LcdPanel() = default;
+bool K151LcdPanel::start(i2c_master_bus_handle_t bus, bool owner_task) {
+  return bus == &menu_bus && owner_task && lvgl_on;
+}
+bool K151LcdPanel::shutdown() { return !setup_usb && !stop_probe && !stop_timer_active; }
 bool K151LcdPanel::handoff_stop_input(i2c_master_bus_handle_t bus,
                                       const std::atomic_bool& expected_stop) {
   assert(bus == &menu_bus && &expected_stop == &stop_ && &expected_stop == &stop_source());
@@ -296,6 +325,45 @@ bool K151LcdPanel::handoff_stop_input(i2c_master_bus_handle_t bus,
   return scenario != "bootstrap_stop_lcd_handoff_refused";
 }
 K151HeadTouchOwner::~K151HeadTouchOwner() = default;
+bool K151HeadTouchOwner::attach_for_setup(i2c_master_bus_handle_t bus, bool exact, bool exclusive) {
+  return bus == &menu_bus && exact && exclusive;
+}
+TouchConsentEvent K151HeadTouchOwner::poll_once(uint64_t) {
+  if (setup_usb) return TouchConsentEvent::final_confirmed;
+  owner_mode_ = true;
+  return TouchConsentEvent::owner_window_open;
+}
+bool K151HeadTouchOwner::detach() { owner_mode_ = false; return !setup_usb; }
+bool K151SetupLvgl::attach(K151LcdPanel&, bool exact, bool lock, bool local) {
+  return exact && lock && local && lvgl_on;
+}
+bool K151SetupLvgl::present(TouchConsentPhase, OwnerSetupPhase, bool, bool, bool lock) {
+  return lock && lvgl_on;
+}
+bool K151SetupLvgl::detach(bool lock) { return lock && !setup_usb && !codec_running; }
+bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first, bool lock, bool one_turn) {
+  assert(first && lock && one_turn && !setup_usb && !network_starts && !nvs_init_calls);
+  review_started_ms = now;
+  return true;
+}
+K151SetupLvgl::ReviewResult K151SetupLvgl::poll_voice_review(uint64_t now, bool lock) {
+  assert(lock && review_started_ms && !setup_usb && !network_starts && !nvs_init_calls);
+  return now - review_started_ms >= 1200 ? ReviewResult::approved : ReviewResult::waiting;
+}
+void K151SecurePcSetup::stop() {}
+K151ScpsUsbPort::~K151ScpsUsbPort() { assert(!setup_usb); }
+bool K151ScpsUsbPort::start(uint64_t, bool exact, bool panel, bool uart, bool exclusive) {
+  assert(exact && panel && uart && exclusive && lvgl_on);
+  return running_ = setup_usb = true;
+}
+bool K151ScpsUsbPort::poll_once(uint64_t, bool lock) { return lock && setup_usb; }
+bool K151ScpsUsbPort::finalize_after_touch(uint64_t now) {
+  constexpr std::array<uint8_t, 4> ssid{'t', 'e', 's', 't'};
+  return setup_.arm(now) && setup_.submit_wifi(ssid, "mock-password", now) &&
+         setup_.submit_api_key("not-a-real-key-test", now) && setup_.confirm(now, true);
+}
+bool K151ScpsUsbPort::close_completed_transport() { return shutdown(); }
+bool K151ScpsUsbPort::shutdown() { running_ = setup_usb = false; return true; }
 bool K151HeadTouchOwner::finish_owner_setup(K151LocalOwnerSetup& setup, uint64_t now_ms) {
   return setup.confirm(now_ms, true); // This host fixture supplies the physical confirmation.
 }
@@ -312,7 +380,8 @@ bool K151CodecPort::prepare(const std::atomic_bool& given_owner,
                            i2c_master_bus_handle_t borrowed_bus) {
   assert(borrowed_bus == &menu_bus);
   if (!is_registered_board_bus(borrowed_bus)) return false;
-  assert(&given_owner == &owner && &given_stop == &stop_source() && owner && !given_stop && consent);
+  assert((conversation_case() || &given_owner == &owner) &&
+         &given_stop == &stop_source() && given_owner && !given_stop && consent);
   assert(evidence.verified() && network_polls == 2 && !codec_running);
   ++codec_starts;
   if (scenario == "codec_failure") return false;
@@ -341,7 +410,8 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> pcm) {
   return true;
 }
 bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& given_consent) {
-  assert(&given_consent == &consent && consent && !stop_source() && capture_idle() && calls == 3);
+  assert((conversation_case() || &given_consent == &consent) &&
+         given_consent && !stop_source() && capture_idle() && calls == 3);
   return amp_open = true;
 }
 bool K151CodecPort::play_mono_24k(std::span<const int16_t> pcm) {
@@ -361,6 +431,7 @@ bool K151CodecPort::shutdown() {
   assert(!mic_open && !amp_open);
   if (codec_running) ++codec_stops;
   prepared_ = codec_running = false;
+  if (scenario == "bootstrap_conversation_unverified_release") cleanup_unverified_ = true;
   return true;
 }
 
@@ -396,7 +467,8 @@ bool K151WifiTimePort::copy_api_key(EphemeralApiKey& out) const {
 bool K151WakeNetPort::prepare_embedded(const std::atomic_bool& given_owner,
                                       const std::atomic_bool& given_stop,
                                       std::span<const uint8_t> supplied) {
-  assert(&given_owner == &owner && &given_stop == &stop_source() && supplied.data() == pack.data());
+  assert((conversation_case() || &given_owner == &owner) && given_owner &&
+         &given_stop == &stop_source() && supplied.data() == pack.data());
   assert(codec_running && !mic_open && !amp_open && consent && !given_stop);
   ++model_starts;
   if (scenario == "model_failure") return false;
@@ -447,6 +519,56 @@ bool K151VoiceDecoder::speech_pcm(std::span<const uint8_t>, std::vector<int16_t>
 }
 }
 
+void exercise_conversation() {
+  using Phase = K151ConversationOwner::Phase;
+  auto& conversation = K151ConversationOwner::instance();
+  board_bus_registered = false;
+  const VoiceModelConfig models{"stt", "gpt", "tts", "voice"};
+  const auto request = [&](bool paid, bool budget) {
+    return conversation.request_voice(models, pack, paid, budget, true, K151VoiceMode::one_paid_turn);
+  };
+  assert(!request(true, true) && conversation.start({true, true}, true));
+  now_us += 50'000;
+  assert(conversation.poll().phase == Phase::setup && setup_usb);
+  now_us += 50'000;
+  assert(conversation.poll().phase == Phase::cloud_off && !setup_usb);
+  assert(!request(false, true) && !request(true, false) && !review_started_ms);
+  assert(!calls && !network_starts && !nvs_init_calls);
+  assert(request(true, true));
+  current_task = &other_task;
+  assert(conversation.poll().phase == Phase::fault && !conversation.shutdown() && board_bus_registered);
+  current_task = &board_task;
+  for (unsigned i = 0; i < 23; ++i) {
+    now_us += 50'000;
+    assert(conversation.poll().phase == Phase::voice_review && !network_starts && !nvs_init_calls);
+  }
+  now_us += 50'000;
+  assert(conversation.poll().phase == Phase::voice && network_starts == 1 && !setup_usb);
+  assert(conversation.poll().voice == NativeVoiceStep::waiting_network);
+  if (scenario == "bootstrap_conversation_stop") {
+    display_press();
+    assert(conversation.poll().phase == Phase::stopped && !board_bus_registered &&
+           !calls && !mic_opens && !setup_usb);
+    return;
+  }
+  auto state = conversation.poll();
+  for (unsigned i = 0; i < 200 && state.voice == NativeVoiceStep::questioning; ++i) {
+    now_us += 20'000;
+    state = conversation.poll();
+  }
+  assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::answered && calls == 3);
+  now_us += 600'000;
+  state = conversation.poll();
+  assert(mic_opens == 3 && plays == 1 && !pending_pcm && !mic_open && !amp_open);
+  if (scenario == "bootstrap_conversation_unverified_release") {
+    assert(state.phase == Phase::fault && !conversation.shutdown() && board_bus_registered);
+    std::_Exit(0); // The real owner task and borrowed board live until reset.
+  }
+  assert(state.phase == Phase::trial_complete && state.voice == NativeVoiceStep::trial_standby);
+  assert(!board_bus_registered && !lvgl_on && !stop_timer_active && !request(true, true));
+  assert(conversation.poll().phase == Phase::trial_complete && calls == 3 && nvs_commits == 2);
+}
+
 void exercise_bootstrap() {
   if (scenario == "bootstrap_scopes_separate") {
     IsolatedNvs enrollment;
@@ -485,7 +607,9 @@ void exercise_bootstrap() {
   if (scenario == "bootstrap_missing_bus") board_bus = nullptr;
   if (scenario == "bootstrap_wrong_bus") board_bus = &wrong_bus;
   K151LcdPanel panel(stop_source());
-  K151VoiceBootstrap bootstrap(setup, panel, consent, budget_writes, {true, true}, board_bus);
+  const bool paid_trial = scenario == "bootstrap_one_paid_trial";
+  K151VoiceBootstrap bootstrap(setup, panel, consent, budget_writes, {true, true}, board_bus,
+      paid_trial ? K151VoiceMode::one_paid_turn : K151VoiceMode::continuous);
   if (scenario == "bootstrap_manual_stop") {
     bootstrap.stop();
     assert(!setup.ready());
@@ -494,7 +618,7 @@ void exercise_bootstrap() {
   const auto stop_at = std::ranges::find(kStopDuringRequest, scenario);
   const bool stop_inside_request = stop_at != kStopDuringRequest.end();
   const int stop_stage = static_cast<int>(stop_at - kStopDuringRequest.begin()) + 1;
-  const bool turn = stop_inside_request || scenario == "bootstrap_first_turn" ||
+  const bool turn = paid_trial || stop_inside_request || scenario == "bootstrap_first_turn" ||
                     scenario == "bootstrap_stop_at_reservation" ||
                     scenario == "bootstrap_revoke_storage_at_stt";
   const bool restore_retry = scenario == "bootstrap_display_stop_restore_retry";
@@ -572,6 +696,15 @@ void exercise_bootstrap() {
     const auto stored = BudgetLedger::restore(durable_budget);
     assert(nvs_commits == 2 && stored && stored->count() == 1);
     if (interrupted) assert(!stop_timer_active && !stop_timer_callback && K151DisplayStop::flag());
+    if (paid_trial) {
+      now_us += 100'000;
+      assert(bootstrap.poll() == NativeVoiceStep::cooldown && mic_opens == 2);
+      now_us += 500'000;
+      assert(bootstrap.poll() == NativeVoiceStep::trial_standby);
+      assert(mic_opens == 3 && !mic_open && !amp_open);
+      assert(bootstrap.poll() == NativeVoiceStep::stopped);
+      assert(calls == 3 && plays == 1 && nvs_commits == 2);
+    }
   } else {
     budget_writes = false;
     assert(bootstrap.poll() == NativeVoiceStep::stopped);
@@ -589,6 +722,10 @@ int main(int argc, char** argv) {
   scenario = argv[1];
   if (scenario == "bootstrap_stop_masks_already_configured") stop_masks = {0xff, 0xfb};
   initial_stop_masks = stop_masks;
+  if (conversation_case()) {
+    exercise_conversation();
+    return 0;
+  }
   if (scenario.starts_with("bootstrap_")) {
     exercise_bootstrap();
     return 0;

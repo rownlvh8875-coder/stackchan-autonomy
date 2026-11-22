@@ -9,7 +9,9 @@
 #include <utility>
 
 namespace stackchan::standalone {
-enum class NativeVoiceStep { listening, questioning, answered, cooldown, stopped, waiting_network };
+enum class NativeVoiceStep {
+  listening, questioning, answered, cooldown, stopped, waiting_network, trial_standby
+};
 
 class NativeVoiceLoop final {
  public:
@@ -32,7 +34,7 @@ class NativeVoiceLoop final {
   NativeVoiceStep poll(uint64_t now_ms, uint64_t unix_seconds,
                        const VoiceModelConfig& models) {
     if (faulted_) return NativeVoiceStep::stopped;
-    if (!live_ready()) return cancel();
+    if (reported_trial_standby_ || !live_ready()) return cancel();
     started_ = true;
     session_.tick(now_ms);
     if (turn_.active()) {
@@ -48,6 +50,11 @@ class NativeVoiceLoop final {
     if (session_.state() == State::cooldown) return NativeVoiceStep::cooldown;
     if (session_.state() != State::wake_wait) return cancel();
     if (!wake_.active() && (!wake_.begin(now_ms) || !live_ready())) return cancel();
+    if (ledger_.paid_trial_spent()) {
+      // Prove the normal wake rearm after cooldown without reading a second turn.
+      reported_trial_standby_ = true;
+      return NativeVoiceStep::trial_standby;
+    }
     const auto event = wake_.poll(now_ms);
     if (!live_ready()) return cancel();
     if (event.step == NativeWakeStep::detected) {
@@ -84,5 +91,6 @@ class NativeVoiceLoop final {
   const std::atomic_bool& busy_;
   std::function<bool()> readiness_;
   bool started_ = false, faulted_ = false;
+  bool reported_trial_standby_ = false;
 };
 } // namespace stackchan::standalone

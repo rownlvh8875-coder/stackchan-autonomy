@@ -60,6 +60,15 @@ int main() {
   assert(configured.restore_budget_for_setup(true));
   assert(configured.reserved_conversations() == 1);
   assert(setup_store.writes == 2 && setup_store.data["budget"] == reserved_budget);
+  PersistentGuard one_turn(setup_store, true);
+  assert(one_turn.restore_budget() && !one_turn.paid_trial_spent());
+  assert(one_turn.admit_builtin_wake(1, true, true) && one_turn.reserve(now + 1, true, true, 1));
+  assert(one_turn.paid_trial_spent() && setup_store.writes == 3);
+  assert(one_turn.authorize_step(PaidStage::transcribe, true, true));
+  one_turn.cancel_permit();
+  assert(one_turn.admit_builtin_wake(2, true, true));
+  assert(!one_turn.reserve(now + 86401, true, true, 2)); // Ledger window has rolled over.
+  assert(!one_turn.authorize_step(PaidStage::transcribe, true, true) && setup_store.writes == 3);
   TestKv corrupt_setup;
   corrupt_setup.data["budget"] = {1, 2, 3};
   PersistentGuard corrupt(corrupt_setup);

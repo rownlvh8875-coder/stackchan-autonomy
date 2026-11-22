@@ -12,16 +12,19 @@ namespace stackchan::standalone {
 K151VoiceBootstrap::K151VoiceBootstrap(const K151VoiceHandoff& handoff,
                                        K151AudioBoardEvidence evidence)
     : K151VoiceBootstrap(handoff.setup, handoff.panel, handoff.paid_consent,
-                         handoff.budget_writes, evidence, handoff.bus) {
+                         handoff.budget_writes, evidence, handoff.bus,
+                         handoff.one_paid_turn ? K151VoiceMode::one_paid_turn
+                                               : K151VoiceMode::continuous) {
   reviewed_first_budget_ = handoff.allow_first_budget;
 }
 
 K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel& panel,
     const std::atomic_bool& paid_consent, const std::atomic_bool& budget_writes,
-    K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus)
+    K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus, K151VoiceMode mode)
     : setup_(setup), panel_(panel), paid_consent_(paid_consent), budget_writes_(budget_writes),
       evidence_(evidence), board_bus_(board_bus),
       storage_(setup.owner_, paid_consent, budget_writes, setup.stop_),
+      ledger_(storage_, mode == K151VoiceMode::one_paid_turn),
       voice_(ledger_, network_, setup.owner_, paid_consent, budget_writes, setup.stop_,
              evidence_, board_bus_) {}
 
@@ -79,6 +82,10 @@ NativeVoiceStep K151VoiceBootstrap::poll() {
   if (!display_stop_owned_) return NativeVoiceStep::stopped;
   if (authorized()) {
     const auto result = voice_.poll();
+    if (result == NativeVoiceStep::trial_standby) {
+      stop();
+      return board_release_verified() ? result : NativeVoiceStep::stopped;
+    }
     if (result != NativeVoiceStep::stopped) return result;
   }
   stop();

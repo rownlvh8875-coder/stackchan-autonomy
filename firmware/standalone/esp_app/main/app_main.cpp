@@ -27,6 +27,7 @@
 #include "k151_wifi_time.hpp"
 #include "k151_owner_setup.hpp"
 #include "k151_owner_session.hpp"
+#include "k151_conversation_owner.hpp"
 #include "k151_head_touch_owner.hpp"
 #include "k151_setup_lvgl.hpp"
 #include "k151_lcd_panel.hpp"
@@ -66,6 +67,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151WifiTimePort::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151LocalOwnerSetup::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151OwnerSession::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151ConversationOwner::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151HeadTouchOwner::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151SetupLvgl::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151LcdPanel::compiled_link_marker());

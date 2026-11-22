@@ -17,6 +17,13 @@ def runtime_binary(tmp_path_factory):
         pytest.skip("C++20 compiler required")
     folder = tmp_path_factory.mktemp("k151-voice-runtime")
     (folder / "freertos").mkdir()
+    (folder / "psa").mkdir()
+    (folder / "psa/crypto.h").write_text("#pragma once\nusing psa_key_id_t = unsigned;\n")
+    (folder / "freertos/task.h").write_text(
+        "#pragma once\nusing TaskHandle_t = void*;\n"
+        "TaskHandle_t xTaskGetCurrentTaskHandle();\nint xPortGetCoreID();\n"
+    )
+    (folder / "sdkconfig.h").write_text("#define CONFIG_ESP_CONSOLE_UART_DEFAULT 1\n")
     (folder / "esp_event.h").write_text(
         "#pragma once\nusing esp_event_base_t = const char*;\n"
         "using esp_event_handler_instance_t = void*;\n"
@@ -59,6 +66,8 @@ def runtime_binary(tmp_path_factory):
             str(APP / "k151_voice_runtime.cpp"),
             str(APP / "k151_voice_api_adapter.cpp"),
             str(APP / "k151_voice_bootstrap.cpp"),
+            str(APP / "k151_owner_session.cpp"),
+            str(APP / "k151_conversation_owner.cpp"),
             str(APP / "k151_display_stop.cpp"),
             str(APP / "k151_owner_setup.cpp"),
             str(APP / "nvs_port.cpp"),
@@ -94,6 +103,10 @@ def runtime_binary(tmp_path_factory):
         "stop_during_model",
         "low_heap_after_model",
         "bootstrap_first_turn",
+        "bootstrap_one_paid_trial",
+        "bootstrap_conversation_complete",
+        "bootstrap_conversation_stop",
+        "bootstrap_conversation_unverified_release",
         "bootstrap_existing",
         "bootstrap_hold",
         "bootstrap_unconfirmed",

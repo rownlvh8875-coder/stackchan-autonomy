@@ -99,11 +99,12 @@ K151SetupLvgl::ReviewResult K151SetupLvgl::poll_pairing_review(
   return result;
 }
 
-bool K151SetupLvgl::begin_voice_review(uint64_t now, bool allow_first_budget, bool lvgl_lock_held) {
+bool K151SetupLvgl::begin_voice_review(uint64_t now, bool allow_first_budget, bool lvgl_lock_held,
+                                       bool one_paid_turn) {
   if (voice_review_started_ || review_ != ReviewPhase::closed || sas_visible_ ||
       !lvgl_lock_held || !attached()) return false;
   voice_review_started_ = true;
-  lv_label_set_text(title_, "PAID OPENAI VOICE");
+  lv_label_set_text(title_, one_paid_turn ? "PAID VOICE (ONE TURN)" : "PAID OPENAI VOICE");
   lv_label_set_text(first_, allow_first_budget
       ? "Send question audio to OpenAI\nCreate or update NVS budget log"
       : "Send question audio to OpenAI\nUpdate existing NVS budget log");

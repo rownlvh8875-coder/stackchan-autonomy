@@ -37,7 +37,8 @@ enum class PaidStage : uint8_t { transcribe = 0, respond = 1, synthesize = 2 };
 
 class PersistentGuard {
  public:
-  explicit PersistentGuard(AtomicKv& store) : store_(store) {}
+  explicit PersistentGuard(AtomicKv& store, bool limit_to_one_paid_turn = false)
+      : store_(store), limit_to_one_paid_turn_(limit_to_one_paid_turn) {}
 
   // A corrupt/missing ledger is never silently treated as an empty ledger.
   // An explicit, separately authorized FIRST provisioning operation may set
@@ -117,12 +118,13 @@ class PersistentGuard {
     const bool mismatch = builtin_wake_epoch_ && !builtin;
     builtin_wake_epoch_.reset(); // Consumed even if a later gate refuses.
     if (mismatch || (wake_epoch && !profile_ && !builtin) || fatal_ ||
-        !paid_owner_consent || !budget_ || permit_active_) return false;
+        !paid_owner_consent || !budget_ || permit_active_ || paid_trial_spent_) return false;
     const bool ok = budget_->reserve(epoch, trusted_clock, [this](std::span<const uint8_t> wire) {
       return verified_commit(kBudgetKey, wire);
     });
     if (budget_->faulted()) fatal_ = true;
     if (ok && !fatal_) {
+      paid_trial_spent_ = limit_to_one_paid_turn_;
       permit_active_ = true;
       builtin_permit_ = builtin;
       next_step_ = 0;
@@ -133,6 +135,8 @@ class PersistentGuard {
   bool has_profile() const { return profile_.has_value(); }
   bool has_budget() const { return budget_.has_value(); }
   bool fatal() const { return fatal_; }
+  // Independent of the rolling ledger window and not cleared by cancellation.
+  bool paid_trial_spent() const { return paid_trial_spent_; }
   size_t reserved_conversations() const { return budget_ ? budget_->count() : 0; }
   // Consume the permit BEFORE each outbound API send. Even if the HTTP
   // request times out, the same step cannot be authorized twice.
@@ -182,9 +186,11 @@ class PersistentGuard {
   static constexpr std::string_view kProfileKey = "wake_profile";
   static constexpr std::string_view kBudgetKey = "budget";
   AtomicKv& store_;
+  const bool limit_to_one_paid_turn_;
   std::optional<std::vector<uint8_t>> profile_;
   std::optional<BudgetLedger> budget_;
   bool fatal_ = false;
+  bool paid_trial_spent_ = false;
   bool permit_active_ = false;
   unsigned next_step_ = 0;
   std::optional<uint64_t> builtin_wake_epoch_;

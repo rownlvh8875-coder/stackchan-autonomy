@@ -56,7 +56,7 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
 }
 
 bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budget_scope_approved,
-                                              bool allow_first_budget) {
+                                              bool allow_first_budget, bool one_paid_turn) {
   if (!on_owner_task() || step_ != Step::ready || !setup_.ready() || usb_.running() ||
       !paid_scope_approved || !budget_scope_approved || stop_.load())
     return false;
@@ -66,12 +66,13 @@ bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budge
     return false;
   }
   const auto now = static_cast<uint64_t>(now_us / 1000);
-  if (!view_.begin_voice_review(now, allow_first_budget, true)) {
+  if (!view_.begin_voice_review(now, allow_first_budget, true, one_paid_turn)) {
     (void)abort_setup();
     return false;
   }
   voice_review_started_ms_ = last_sample_ms_ = now;
   allow_first_budget_ = allow_first_budget;
+  one_paid_turn_ = one_paid_turn;
   step_ = Step::voice_review;
   return true;
 }
@@ -140,7 +141,8 @@ std::optional<K151VoiceHandoff> K151OwnerSession::handoff() {
       !paid_consent_.load() || !budget_writes_.load() || stop_.load())
     return std::nullopt;
   handoff_taken_ = true;
-  return K151VoiceHandoff{setup_, panel_, bus_, paid_consent_, budget_writes_, allow_first_budget_};
+  return K151VoiceHandoff{setup_, panel_, bus_, paid_consent_, budget_writes_,
+                         allow_first_budget_, one_paid_turn_};
 }
 
 bool K151OwnerSession::shutdown() {

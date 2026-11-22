@@ -40,7 +40,8 @@ class K151SetupLvgl final {
   enum class ReviewPhase : uint8_t { idle, wait_clear, wait_press, holding, wait_release, closed };
   bool begin_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
   ReviewResult poll_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
-  bool begin_voice_review(uint64_t now_ms, bool allow_first_budget, bool lvgl_lock_held);
+  bool begin_voice_review(uint64_t now_ms, bool allow_first_budget, bool lvgl_lock_held,
+                          bool one_paid_turn = false);
   ReviewResult poll_voice_review(uint64_t now_ms, bool lvgl_lock_held);
   void wait_for_fresh_contact(uint64_t now_ms);
   ReviewResult poll_contact(uint64_t now_ms, bool lvgl_lock_held);

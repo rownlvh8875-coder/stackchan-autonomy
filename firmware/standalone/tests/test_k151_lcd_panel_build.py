@@ -73,6 +73,7 @@ def lcd_binary(tmp_path_factory):
         "review_final_short_frame",
         "review_voice_existing",
         "review_voice_first",
+        "review_voice_one_turn",
         "review_voice_banner_failure",
         "hold",
         "wrong_bus",

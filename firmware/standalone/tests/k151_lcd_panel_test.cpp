@@ -98,8 +98,9 @@ class K151ScpsUsbPort {
 class K151OwnerSession {
  public:
   using Review = K151SetupLvgl::ReviewResult;
-  static bool begin_voice(K151SetupLvgl& setup, uint64_t now, bool first_budget) {
-    return setup.begin_voice_review(now, first_budget, true);
+  static bool begin_voice(K151SetupLvgl& setup, uint64_t now, bool first_budget,
+                          bool one_turn = false) {
+    return setup.begin_voice_review(now, first_budget, true, one_turn);
   }
   static Review poll_voice(K151SetupLvgl& setup, uint64_t now) {
     return setup.poll_voice_review(now, true);
@@ -534,10 +535,11 @@ int main(int argc, char** argv) {
       assert(poll(2200, 0) == Review::approved && frames == 5);
       assert(setup.present(TouchConsentPhase::consumed, OwnerSetupPhase::ready, true, false, true));
       const bool expect_banner = scenario != "review_voice_banner_failure";
-      assert(K151OwnerSession::begin_voice(setup, 2400, scenario != "review_voice_existing")
+      const bool one_turn = scenario == "review_voice_one_turn";
+      assert(K151OwnerSession::begin_voice(setup, 2400, scenario != "review_voice_existing", one_turn)
              == expect_banner);
       if (expect_banner) {
-        assert(captions[0] == "PAID OPENAI VOICE");
+        assert(captions[0] == (one_turn ? "PAID VOICE (ONE TURN)" : "PAID OPENAI VOICE"));
         assert(!K151OwnerSession::begin_voice(setup, 2400, true));
         assert(K151ScpsUsbPort::poll(setup, 2400) == Review::fault);
         const auto voice = [&](uint64_t now, uint8_t count) {

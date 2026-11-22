@@ -32,6 +32,9 @@ class K151VoiceRuntime final {
   bool start(VoiceModelConfig models, std::span<const uint8_t> model_pack);
   NativeVoiceStep poll();
   void stop();
+  bool board_release_verified() const {
+    return (phase_ == Phase::cold || phase_ == Phase::stopped) && !codec_.cleanup_unverified();
+  }
   static const char* compiled_link_marker();
 
  private:

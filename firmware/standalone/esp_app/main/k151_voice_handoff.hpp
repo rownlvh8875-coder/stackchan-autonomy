@@ -19,14 +19,15 @@ struct K151VoiceHandoff {
   const std::atomic_bool& paid_consent;
   const std::atomic_bool& budget_writes;
   const bool allow_first_budget;
+  const bool one_paid_turn;
 
  private:
   friend class K151OwnerSession;
   K151VoiceHandoff(K151LocalOwnerSetup& settings, K151LcdPanel& display,
                    i2c_master_bus_handle_t board_bus, const std::atomic_bool& paid,
-                   const std::atomic_bool& writes, bool first_budget)
+                   const std::atomic_bool& writes, bool first_budget, bool one_turn)
       : setup(settings), panel(display), bus(board_bus), paid_consent(paid),
-        budget_writes(writes), allow_first_budget(first_budget) {}
+        budget_writes(writes), allow_first_budget(first_budget), one_paid_turn(one_turn) {}
 };
 
 } // namespace stackchan::standalone
