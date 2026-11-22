@@ -3,7 +3,6 @@
 #pragma once
 
 #include "owner_setup.hpp"
-#include "k151_wifi_time.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -17,6 +16,7 @@ namespace stackchan::standalone {
 // authorization mechanism is deliberately NOT provided or guessed here.
 class K151HeadTouchOwner;
 class K151VoiceBootstrap;
+class K151WifiTimePort;
 
 class K151LocalOwnerSetup final {
  public:
