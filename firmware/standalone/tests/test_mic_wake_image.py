@@ -103,3 +103,25 @@ def test_question_only_image_has_own_identity_and_no_model(model_fixture):
             )
     with pytest.raises(ValueError):
         inspect_image(image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, question_only=True)
+
+
+def test_silent_tx_image_is_distinct_and_has_no_voice_trial(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    project = b"k151_silent_tx_probe"
+    markers = b"WAIT_SILENT_TX_LOCAL_START\0K151_SILENT_TX_V1\0"
+    manifest = inspect_image(image(markers, project=project), ELF_SHA, SLOT_CSV, silent_tx=True)
+    assert manifest["kind"] == "GPIO_ISOLATED_SILENT_TX_NOT_OPERATIONAL"
+    assert manifest["routes_audio_pins"] is False
+    assert manifest["tx_descriptor_count"] == 2
+    assert manifest["amplifier_or_fifo_drain_verified"] is False
+    assert manifest["install_authorized"] is False
+    for unexpected in (model_fixture, b"LISTEN_NOW\0", b"QUESTION_ONLY_NOW\0"):
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers + unexpected, project=project), ELF_SHA, SLOT_CSV, silent_tx=True
+            )
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(markers, project=b"k151_question_only"), ELF_SHA, SLOT_CSV, silent_tx=True
+        )

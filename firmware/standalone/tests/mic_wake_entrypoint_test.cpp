@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "board_probe_sdk.hpp"
 #include "k151_mic_wake_trial.hpp"
+#ifdef STACKCHAN_K151_SILENT_TX_PROBE
+#include "k151_silent_tx_probe.hpp"
+#endif
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -77,7 +80,20 @@ int xTaskCreate(void (*entry)(void*), const char*, unsigned, void* arg, unsigned
 void vTaskDelete(void*) {}
 void vTaskDelay(unsigned) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
 
-#ifdef STACKCHAN_K151_QUESTION_ONLY
+#if defined(STACKCHAN_K151_SILENT_TX_PROBE)
+K151SilentTxResult stackchan::standalone::run_k151_silent_tx_probe(
+    const std::atomic_bool& owner, const std::atomic_bool& stop) {
+  assert(owner.load() && !stop.load() && ++sessions == 1);
+  if (scenario == "stop_during") {
+    listening = true;
+    for (int i = 0; !stop.load() && i < 500; ++i) vTaskDelay(1);
+    assert(stop.load());
+    return K151SilentTxResult::stopped;
+  }
+  assert(scenario == "detect");
+  return K151SilentTxResult::observed;
+}
+#elif defined(STACKCHAN_K151_QUESTION_ONLY)
 K151QuestionTrialDiagnostic stackchan::standalone::run_k151_question_trial(
     const std::atomic_bool& owner, const std::atomic_bool& stop,
     const K151MicOnlyEvidence& evidence, void (*cue)(), K151QuestionTrialMode mode) {

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "bench_gate.hpp"
 #include "board_evidence.hpp"
-#ifdef STACKCHAN_K151_QUESTION_ONLY
+#if defined(STACKCHAN_K151_SILENT_TX_PROBE)
+#include "k151_silent_tx_probe.hpp"
+#elif defined(STACKCHAN_K151_QUESTION_ONLY)
 #include "k151_question_trial.hpp"
 #else
 #include "k151_mic_wake_trial.hpp"
@@ -17,7 +19,7 @@
 #include <atomic>
 #include <cstdio>
 
-#ifndef STACKCHAN_K151_QUESTION_ONLY
+#if !defined(STACKCHAN_K151_QUESTION_ONLY) && !defined(STACKCHAN_K151_SILENT_TX_PROBE)
 namespace stackchan::standalone {
 std::span<const uint8_t> linked_mic_trial_model();
 }
@@ -27,7 +29,28 @@ namespace {
 using namespace stackchan::standalone;
 std::atomic_bool owner{false}, stop{false}, reader_done{false};
 
-#if defined(STACKCHAN_K151_QUESTION_ONLY)
+#if defined(STACKCHAN_K151_SILENT_TX_PROBE)
+constexpr char kBootMarker[] = "K151_SILENT_TX_PROBE_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_SILENT_TX_LOCAL_START";
+
+const char* tx_result_name(K151SilentTxResult result) {
+  using Result = K151SilentTxResult;
+  switch (result) {
+    case Result::denied: return "denied";
+    case Result::stopped: return "stopped";
+    case Result::channel_failed: return "channel_failed";
+    case Result::preload_failed: return "preload_failed";
+    case Result::callback_failed: return "callback_failed";
+    case Result::enable_failed: return "enable_failed";
+    case Result::timeout: return "timeout";
+    case Result::invalid_event: return "invalid_event";
+    case Result::clock_fault: return "clock_fault";
+    case Result::cleanup_failed: return "cleanup_failed";
+    case Result::observed: return "two_descriptors_observed";
+  }
+  return nullptr;
+}
+#elif defined(STACKCHAN_K151_QUESTION_ONLY)
 constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_QUESTION_ONLY_NOT_OPERATIONAL";
 constexpr char kChallengeMarker[] = "WAIT_QUESTION_ONLY_START";
 constexpr char kQuestionCue[] = "QUESTION_ONLY_NOW";
@@ -82,7 +105,7 @@ void print_question_report(K151QuestionTrialDiagnostic question) {
 }
 #endif
 
-#ifndef STACKCHAN_K151_QUESTION_ONLY
+#if !defined(STACKCHAN_K151_QUESTION_ONLY) && !defined(STACKCHAN_K151_SILENT_TX_PROBE)
 void announce_listening() {
   std::puts("{\"mic_trial\":\"LISTEN_NOW\",\"operating_admission\":false}");
   (void)std::fflush(stdout);
@@ -147,6 +170,12 @@ extern "C" void app_main() {
   }
   while (!owner.load() && !stop.load()) vTaskDelay(pdMS_TO_TICKS(10));
   if (owner.load() && !stop.load()) {
+#ifdef STACKCHAN_K151_SILENT_TX_PROBE
+    if (const char* result = tx_result_name(run_k151_silent_tx_probe(owner, stop))) {
+      std::printf("{\"tx_dma_probe\":\"K151_SILENT_TX_V1\",\"result\":\"%s\","
+                  "\"operating_admission\":false}\n", result);
+    }
+#else
     // This app has one I2S caller, using the port's exclusive RX allocation.
     // It still checks the two board chips live before opening any channel.
     const K151MicOnlyEvidence evidence{expected_location, true};
@@ -164,6 +193,7 @@ extern "C" void app_main() {
       std::fputs(report.data(), stdout);
 #if defined(STACKCHAN_K151_WAKE_ONLY_CONTROL) || defined(STACKCHAN_K151_QUESTION_TRIAL)
     print_question_report(trial.question_diagnostic());
+#endif
 #endif
 #endif
   }

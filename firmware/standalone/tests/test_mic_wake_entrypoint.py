@@ -30,7 +30,14 @@ def question_only_entrypoint(tmp_path_factory):
     return _build_entrypoint(tmp_path_factory, question=False, question_only=True)
 
 
-def _build_entrypoint(tmp_path_factory, *, question, wake_only_control=False, question_only=False):
+@pytest.fixture(scope="module")
+def silent_tx_entrypoint(tmp_path_factory):
+    return _build_entrypoint(tmp_path_factory, question=False, silent_tx=True)
+
+
+def _build_entrypoint(
+    tmp_path_factory, *, question, wake_only_control=False, question_only=False, silent_tx=False
+):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("C++20 compiler required")
@@ -40,6 +47,7 @@ def _build_entrypoint(tmp_path_factory, *, question, wake_only_control=False, qu
         + (["-DSTACKCHAN_K151_QUESTION_TRIAL=1"] if question else [])
         + (["-DSTACKCHAN_K151_WAKE_ONLY_CONTROL=1"] if wake_only_control else [])
         + (["-DSTACKCHAN_K151_QUESTION_ONLY=1"] if question_only else [])
+        + (["-DSTACKCHAN_K151_SILENT_TX_PROBE=1"] if silent_tx else [])
         + [
             arg
             for include in (
@@ -186,3 +194,38 @@ def test_question_only_starts_without_wakenet(question_only_entrypoint, case, re
         }
     else:
         assert all("mic_question_trial" not in event for event in events)
+
+
+@pytest.mark.parametrize(
+    "case, result",
+    [
+        ("detect", "two_descriptors_observed"),
+        ("stop_during", "stopped"),
+        ("stop_before", None),
+        ("bad_nonce", None),
+        ("slot", None),
+    ],
+)
+def test_silent_tx_uses_scoped_start_and_hold(silent_tx_entrypoint, case, result):
+    done = subprocess.run(
+        [str(silent_tx_entrypoint), case], capture_output=True, text=True, timeout=8
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.startswith("K151_SILENT_TX_PROBE_NOT_OPERATIONAL\n")
+    events = [json.loads(line) for line in done.stdout.splitlines() if line.startswith("{")]
+    assert events[-1] == {"mic_trial": "HOLD_UNTIL_RESET", "operating_admission": False}
+    assert all(
+        event.get("mic_trial") not in {"LISTEN_NOW", "QUESTION_ONLY_NOW"} for event in events
+    )
+    reports = [event for event in events if "tx_dma_probe" in event]
+    if result is None:
+        assert reports == []
+    else:
+        assert events[0]["mic_trial"] == "WAIT_SILENT_TX_LOCAL_START"
+        assert reports == [
+            {
+                "tx_dma_probe": "K151_SILENT_TX_V1",
+                "result": result,
+                "operating_admission": False,
+            }
+        ]

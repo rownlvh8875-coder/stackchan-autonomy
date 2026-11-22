@@ -161,3 +161,27 @@ standalone **592PASS5SKIP90.79s**, 최적화 집중9PASS다. GNU 실제 CI는 �
 확인한다. [검증 기록](validation/2026-11-21-k151-bounded-audio-io.md)을 함께 본다.
 PR Windows3.11은 별도0.1초 시험 lease의 acquire_timeout으로 주입한 check 전에
 실패했다. 해당 기대값을 넓히거나 TTL을 늘리지 않았으며 원인 미확정으로 보존한다.
+
+## 출력 준비 — GPIO에 연결하지 않는 I2S 송신 진단
+
+2026-11-22. 질문 전용 실물 시험에서 발화 종료를 확인한 뒤 스피커
+출력 준비로 진행했다. 새 `k151_silent_tx_probe` 앱은 별도 USB
+START 한 번으로 I2S0 송신 채널만 준비한다. 모든 오디오 GPIO에
+`I2S_GPIO_UNUSED`를 지정하고, 24kHz·16비트 스테레오 240프레임짜리
+DMA 디스크립터 두 개에 모두 0을 미리 채운다. 앱에는 마이크, 앰프,
+Wi-Fi, NVS 및 WakeNet을 연결하지 않는다.
+[고정 IDF의 GPIO 처리](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_driver_i2s/i2s_common.c#L1062-L1094)
+
+미리 채운 바이트 수가 정확하고 실제 드라이버 콜백에 해당하는
+`on_sent`가 서로 다른 두 DMA 버퍼를 보고한 뒤에만 완료로 분류한다.
+콜백은 샘플을 읽거나 내보내지 않는다. I2S 채널 비활성화와 삭제가
+성공하면 `two_descriptors_observed`를 기록한다. 관측은 활성화
+직전부터 100ms 안에 확인해야 한다. 승인 철회, STOP, 시계 역행,
+중복·잘못된 이벤트, 초기화·해제 실패 뒤에는 완료를 보고하지 않는다.
+[고정 IDF의 DMA 미리 채우기](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_driver_i2s/i2s_common.c#L1455-L1507)
+[고정 IDF의 DMA 완료 콜백](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_driver_i2s/i2s_common.c#L781-L813)
+
+관측 범위는 내부 DMA 전달 완료다. 실제 출력 핀의 I2S 타이밍,
+FIFO 비움, AW88298 음소거 및 물리 STOP에는 별도 실물 증거가
+필요하다. 기존 운영 HOLD는 스피커 사용을 계속 차단한다. 합성
+데이터만 사용했고 장치나 유료 API에는 접속하지 않았다.
