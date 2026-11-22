@@ -40,7 +40,7 @@ def runtime_binary(tmp_path_factory):
         '#pragma once\n#include <esp_err.h>\nextern "C" esp_err_t nvs_flash_init();\n'
     )
     binary = folder / "runtime"
-    args = [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic"]
+    args = [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic", "-pthread"]
     args += ["-isystem", str(BASE / "tests/sdk_esp_codec_dev_1_6_2")]
     for directory in (
         folder,
@@ -58,6 +58,7 @@ def runtime_binary(tmp_path_factory):
             str(APP / "k151_voice_runtime.cpp"),
             str(APP / "k151_voice_api_adapter.cpp"),
             str(APP / "k151_voice_bootstrap.cpp"),
+            str(APP / "k151_display_stop.cpp"),
             str(APP / "k151_owner_setup.cpp"),
             str(APP / "nvs_port.cpp"),
             "-o",
@@ -99,6 +100,26 @@ def runtime_binary(tmp_path_factory):
         "bootstrap_no_budget_scope",
         "bootstrap_missing_bus",
         "bootstrap_wrong_bus",
+        "bootstrap_wrong_stop_binding",
+        "bootstrap_stop_irq_bad_id",
+        "bootstrap_stop_irq_bad_direction",
+        "bootstrap_stop_mask_write_failed",
+        "bootstrap_stop_mask_readback_failed",
+        "bootstrap_stop_masks_already_configured",
+        "bootstrap_stop_panel_polling",
+        "bootstrap_stop_probe_busy",
+        "bootstrap_stop_gpio_error",
+        "bootstrap_stop_arming_restore_retry",
+        "bootstrap_stop_held_at_arm",
+        "bootstrap_stop_timer_create",
+        "bootstrap_stop_timer_start",
+        "bootstrap_stop_before_budget",
+        "bootstrap_stop_consent_lost_arming",
+        "bootstrap_display_stop_waiting_network",
+        "bootstrap_display_stop_restore_retry",
+        "bootstrap_display_stop_during_stt",
+        "bootstrap_display_stop_during_gpt",
+        "bootstrap_display_stop_during_tts",
         "bootstrap_bus_lost_at_init",
         "bootstrap_bus_lost_during_restore",
         "bootstrap_first_denied",

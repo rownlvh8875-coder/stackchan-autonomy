@@ -15,12 +15,15 @@ class K151VoiceBootstrap final {
   K151VoiceBootstrap(K151LocalOwnerSetup& setup, const std::atomic_bool& paid_consent,
                      const std::atomic_bool& budget_writes, K151AudioBoardEvidence evidence,
                      i2c_master_bus_handle_t board_bus);
+  ~K151VoiceBootstrap();
   K151VoiceBootstrap(const K151VoiceBootstrap&) = delete;
   K151VoiceBootstrap& operator=(const K151VoiceBootstrap&) = delete;
 
   // A separate local action may initialize an absent budget. Without it,
   // startup requires an existing valid ledger. No USB frame grants either
   // budget permission. The model pack is the static read-only app asset.
+  // Setup must use K151DisplayStop::flag(). The display owner hands off IRQ
+  // reads before start so the GPIO monitor sees every pending STOP.
   bool start(VoiceModelConfig models, std::span<const uint8_t> model_pack,
              bool allow_first_budget);
   NativeVoiceStep poll();
@@ -41,6 +44,7 @@ class K151VoiceBootstrap final {
   K151WifiTimePort network_;
   K151VoiceRuntime voice_;
   bool attempted_ = false;
+  bool display_stop_owned_ = false;
 };
 
 } // namespace stackchan::standalone

@@ -13,6 +13,9 @@ def test_hardware_hold_is_marker_only_in_app_entrypoint():
     assert "K151InstallHold::compiled_link_marker()" in boot
     assert '"k151_install_hold.cpp"' in cmake
     assert '"k151_voice_bootstrap.cpp"' in cmake
+    assert '"k151_display_stop.cpp"' in cmake
+    assert "K151DisplayStop::arm(" not in boot
+    assert "K151DisplayStop::arm(board_bus_)" in bootstrap
     assert boot.count("K151VoiceBootstrap::") == 1
     assert "K151VoiceBootstrap::compiled_link_marker()" in boot
     assert "K151VoiceBootstrap " not in boot

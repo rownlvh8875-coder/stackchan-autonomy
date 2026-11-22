@@ -4,21 +4,28 @@
 #include "k151_voice_bootstrap.hpp"
 #include "k151_install_hold.hpp"
 #include "k151_head_touch_owner.hpp"
+#include "k151_display_stop.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <driver/gpio.h>
 #include <esp_heap_caps.h>
 #include <nvs.h>
 #include <nvs_flash.h>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 using namespace stackchan::standalone;
 
 struct i2c_master_bus_t {};
+struct i2c_master_dev_t {
+  uint16_t address;
+};
+struct esp_timer {};
 
 namespace {
 std::string_view scenario;
@@ -33,6 +40,35 @@ bool codec_running = false, mic_open = false, amp_open = false, model_loaded = f
 bool pending_pcm = false;
 i2c_master_bus_t menu_bus;
 bool board_bus_registered = true;
+i2c_master_dev_t stop_expander{0x58}, stop_panel{0x38};
+i2c_master_dev_handle_t stop_probe = nullptr;
+unsigned stop_probe_closes = 0;
+std::array<uint8_t, 2> stop_masks{}, initial_stop_masks{};
+unsigned stop_mask_writes = 0;
+bool restore_failed_once = false;
+esp_timer stop_timer;
+void (*stop_timer_callback)(void*) = nullptr;
+std::atomic_int stop_gpio_level{1};
+unsigned gpio_configures = 0, gpio_samples = 0, timer_creates = 0;
+bool stop_timer_active = false;
+constexpr std::array kStopDuringRequest{
+    "bootstrap_display_stop_during_stt", "bootstrap_display_stop_during_gpt",
+    "bootstrap_display_stop_during_tts"};
+
+const std::atomic_bool& stop_source() {
+  return scenario.starts_with("bootstrap_") && scenario != "bootstrap_wrong_stop_binding"
+       ? K151DisplayStop::flag() : stop;
+}
+
+void display_press() {
+  assert(stop_timer_active && stop_timer_callback);
+  stop_gpio_level = 0;
+  // Simulate the independent ESP_TIMER_TASK while the caller is blocked.
+  std::thread dispatch([] { stop_timer_callback(nullptr); });
+  dispatch.join();
+  stop_gpio_level = 1;
+  assert(K151DisplayStop::flag());
+}
 int nvs_init_calls = 0, nvs_write_opens = 0, nvs_sets = 0, nvs_commits = 0;
 std::vector<uint8_t> durable_budget, durable_profile{0x7b}, staged;
 bool staged_profile = false;
@@ -67,6 +103,114 @@ const audio_codec_ctrl_if_t control = fake_control();
 }
 
 extern "C" int64_t esp_timer_get_time() { return now_us; }
+
+extern "C" esp_err_t i2c_master_bus_add_device(
+    i2c_master_bus_handle_t bus, const i2c_device_config_t* config,
+    i2c_master_dev_handle_t* device) {
+  assert(bus == &menu_bus && board_bus_registered && !stop_timer_active && !stop_probe);
+  assert(config->dev_addr_length == I2C_ADDR_BIT_LEN_7 && config->scl_speed_hz == 100'000);
+  assert(config->device_address == stop_expander.address ||
+         config->device_address == stop_panel.address);
+  *device = stop_probe = config->device_address == stop_expander.address
+                      ? &stop_expander : &stop_panel;
+  return ESP_OK;
+}
+extern "C" esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t device) {
+  assert(device == stop_probe && !stop_timer_active);
+  if (++stop_probe_closes == 1 && scenario == "bootstrap_stop_probe_busy")
+    return ESP_ERR_INVALID_STATE;
+  stop_probe = nullptr;
+  return ESP_OK;
+}
+extern "C" esp_err_t i2c_master_transmit_receive(
+    i2c_master_dev_handle_t device, const uint8_t* reg, size_t size,
+    uint8_t* value, size_t count, int timeout_ms) {
+  assert(device == stop_probe && !stop_timer_active);
+  assert(size == 1 && count == 1 && timeout_ms == 30);
+  if (nvs_init_calls) assert(device == &stop_expander && (*reg == 0x06 || *reg == 0x07));
+  if (device == &stop_panel) {
+    assert(*reg == 0xa4);
+    *value = scenario == "bootstrap_stop_panel_polling" ? 0 : 1;
+    return ESP_OK;
+  }
+  assert(device == &stop_expander);
+  switch (*reg) {
+    case 0x10: *value = scenario == "bootstrap_stop_irq_bad_id" ? 0 : 0x23; break;
+    case 0x12:
+    case 0x13: *value = 0xff; break;
+    case 0x04: *value = 0x18; break;
+    case 0x05: *value = scenario == "bootstrap_stop_irq_bad_direction" ? 0x08 : 0x0c; break;
+    case 0x06:
+    case 0x07: *value = stop_masks[*reg - 0x06]; break;
+    default: assert(false); // No read of either interrupt-clearing register.
+  }
+  return ESP_OK;
+}
+extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t device,
+                                          const uint8_t* command, size_t len, int timeout_ms) {
+  assert(device == &stop_expander && device == stop_probe && !stop_timer_active);
+  assert(len == 2 && timeout_ms == 30 && (command[0] == 0x06 || command[0] == 0x07));
+  ++stop_mask_writes;
+  const auto port = command[0] - 0x06;
+  if (scenario == "bootstrap_stop_mask_readback_failed" && stop_mask_writes == 2)
+    return ESP_OK;
+  stop_masks[port] = command[1];
+  if (scenario == "bootstrap_stop_mask_write_failed" && stop_mask_writes == 1)
+    return ESP_FAIL; // Error after the simulated device accepted the write.
+  if ((scenario == "bootstrap_display_stop_restore_retry" ||
+       scenario == "bootstrap_stop_arming_restore_retry") && port == 0 &&
+      command[1] == initial_stop_masks[port] && !restore_failed_once) {
+    restore_failed_once = true;
+    return ESP_FAIL;
+  }
+  return ESP_OK;
+}
+extern "C" esp_err_t gpio_config(const gpio_config_t* gpio) {
+  assert(!nvs_init_calls && (!stop_probe || stop_probe == &stop_expander) && !stop_timer_active);
+  assert(gpio->pin_bit_mask == (1UL << GPIO_NUM_21) && gpio->mode == GPIO_MODE_INPUT &&
+         gpio->pull_up_en == GPIO_PULLUP_DISABLE && gpio->pull_down_en == GPIO_PULLDOWN_DISABLE &&
+         gpio->intr_type == GPIO_INTR_DISABLE);
+  ++gpio_configures;
+  if (scenario == "bootstrap_stop_held_at_arm") stop_gpio_level = 0;
+  return scenario == "bootstrap_stop_gpio_error" ||
+         scenario == "bootstrap_stop_arming_restore_retry" ? ESP_FAIL : ESP_OK;
+}
+extern "C" int gpio_get_level(gpio_num_t gpio) {
+  assert(gpio == GPIO_NUM_21 && gpio_configures == 1);
+  assert(!stop_probe || stop_probe == &stop_expander);
+  ++gpio_samples;
+  return stop_gpio_level.load();
+}
+extern "C" esp_err_t esp_timer_create(const esp_timer_create_args_t* args,
+                                       esp_timer_handle_t* handle) {
+  assert(args->callback && !args->arg && args->dispatch_method == ESP_TIMER_TASK &&
+         args->skip_unhandled_events && !stop_timer_callback && gpio_samples == 1);
+  ++timer_creates;
+  if (scenario == "bootstrap_stop_timer_create") return ESP_ERR_NO_MEM;
+  stop_timer_callback = args->callback;
+  *handle = &stop_timer;
+  return ESP_OK;
+}
+extern "C" esp_err_t esp_timer_start_periodic(esp_timer_handle_t timer, uint64_t period_us) {
+  assert(timer == &stop_timer && stop_timer_callback && !stop_timer_active && period_us == 10'000);
+  if (scenario == "bootstrap_stop_timer_start") return ESP_FAIL;
+  stop_timer_active = true;
+  if (scenario == "bootstrap_stop_before_budget") stop_gpio_level = 0;
+  if (scenario == "bootstrap_stop_consent_lost_arming") consent = false;
+  return ESP_OK;
+}
+extern "C" esp_err_t esp_timer_stop(esp_timer_handle_t timer) {
+  assert(timer == &stop_timer && K151DisplayStop::flag());
+  return std::exchange(stop_timer_active, false) ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+extern "C" esp_err_t esp_timer_delete(esp_timer_handle_t timer) {
+  assert(timer == &stop_timer && stop_timer_callback && !stop_timer_active);
+  const auto late_callback = std::exchange(stop_timer_callback, nullptr);
+  const auto reads_before = gpio_samples;
+  late_callback(nullptr);
+  assert(gpio_samples == reads_before); // An already dispatched callback is harmless.
+  return ESP_OK;
+}
 extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
   const bool available = scenario != "low_heap_after_model" || !model_loaded;
   const size_t size = !available ? 0 : (caps & MALLOC_CAP_SPIRAM) ? 5'000'000 : 256'000;
@@ -80,6 +224,9 @@ extern "C" void heap_caps_free(void* pcm) { std::free(pcm); }
 extern "C" bool esp_ptr_external_ram(const void*) { return true; }
 
 extern "C" esp_err_t nvs_flash_init() {
+  if (scenario != "bootstrap_scopes_separate") {
+    assert(stop_timer_active && (stop_masks[0] & 0x18) == 0x18 && (stop_masks[1] & 0x0c) == 0x08);
+  }
   ++nvs_init_calls;
   if (scenario == "bootstrap_bus_lost_at_init") board_bus_registered = false;
   return scenario == "bootstrap_nvs_init_error" ? ESP_FAIL : ESP_OK;
@@ -111,7 +258,7 @@ extern "C" esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const vo
   assert(handle == 2);
   staged_profile = std::string_view{key} == "wake_profile";
   assert(staged_profile ? scenario == "bootstrap_scopes_separate" :
-                          (std::string_view{key} == "budget" && budget_writes && consent && !stop));
+                          (std::string_view{key} == "budget" && budget_writes && consent && !stop_source()));
   assert(!mic_open && !amp_open);
   ++nvs_sets;
   const auto* data = static_cast<const uint8_t*>(bytes);
@@ -123,7 +270,7 @@ extern "C" esp_err_t nvs_commit(nvs_handle_t handle) {
   ++nvs_commits;
   if (scenario == "bootstrap_commit_error") return ESP_FAIL;
   (staged_profile ? durable_profile : durable_budget) = staged;
-  if (scenario == "bootstrap_stop_at_reservation" && nvs_commits == 2) stop = true;
+  if (scenario == "bootstrap_stop_at_reservation" && nvs_commits == 2) display_press();
   return ESP_OK;
 }
 extern "C" void nvs_close(nvs_handle_t handle) { assert(handle == 1 || handle == 2); }
@@ -147,7 +294,7 @@ bool K151CodecPort::prepare(const std::atomic_bool& given_owner,
                            i2c_master_bus_handle_t borrowed_bus) {
   assert(borrowed_bus == &menu_bus);
   if (!is_registered_board_bus(borrowed_bus)) return false;
-  assert(&given_owner == &owner && &given_stop == &stop && owner && !stop && consent);
+  assert(&given_owner == &owner && &given_stop == &stop_source() && owner && !given_stop && consent);
   assert(evidence.verified() && network_polls == 2 && !codec_running);
   ++codec_starts;
   if (scenario == "codec_failure") return false;
@@ -161,7 +308,7 @@ bool K151CodecPort::prepare(const std::atomic_bool& given_owner,
 bool K151CodecPort::playback_available() const { return prepared(); }
 bool K151CodecPort::capture_idle() const { return codec_running && !mic_open && !amp_open; }
 bool K151CodecPort::start_fresh_capture() {
-  assert(capture_idle() && model_loaded && consent && !stop);
+  assert(capture_idle() && model_loaded && consent && !stop_source());
   ++mic_opens;
   capture_reads = 0;
   return mic_open = true;
@@ -176,7 +323,7 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> pcm) {
   return true;
 }
 bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& given_consent) {
-  assert(&given_consent == &consent && consent && !stop && capture_idle() && calls == 3);
+  assert(&given_consent == &consent && consent && !stop_source() && capture_idle() && calls == 3);
   return amp_open = true;
 }
 bool K151CodecPort::play_mono_24k(std::span<const int16_t> pcm) {
@@ -231,15 +378,15 @@ bool K151WifiTimePort::copy_api_key(EphemeralApiKey& out) const {
 bool K151WakeNetPort::prepare_embedded(const std::atomic_bool& given_owner,
                                       const std::atomic_bool& given_stop,
                                       std::span<const uint8_t> supplied) {
-  assert(&given_owner == &owner && &given_stop == &stop && supplied.data() == pack.data());
-  assert(codec_running && !mic_open && !amp_open && consent && !stop);
+  assert(&given_owner == &owner && &given_stop == &stop_source() && supplied.data() == pack.data());
+  assert(codec_running && !mic_open && !amp_open && consent && !given_stop);
   ++model_starts;
   if (scenario == "model_failure") return false;
   format_ = {16000, 160, 1, 16};
   if (scenario == "stop_during_model") stop = true;
   return model_loaded = true;
 }
-bool K151WakeNetPort::ready() const { return model_loaded && owner && !stop; }
+bool K151WakeNetPort::ready() const { return model_loaded && owner && !stop_source(); }
 bool K151WakeNetPort::reset() { return ready(); }
 NativeWakeResult K151WakeNetPort::detect(std::span<int16_t>) {
   return mic_opens == 1 ? NativeWakeResult::detected : NativeWakeResult::none;
@@ -268,6 +415,7 @@ bool K151HttpsVoicePort::post_once(const Request& req, std::string_view,
   out.received_ms = static_cast<uint64_t>(now_us / 1'000);
   if (scenario == "revoke_during_stt") consent = false;
   if (scenario == "bootstrap_revoke_storage_at_stt") budget_writes = false;
+  if (scenario == kStopDuringRequest[calls - 1]) display_press();
   return true;
 }
 bool K151VoiceDecoder::transcription(std::span<const uint8_t>, std::string& out) {
@@ -306,9 +454,9 @@ void exercise_bootstrap() {
     durable_budget = {1, 2, 3};
   }
   const auto initial_budget = durable_budget;
-  K151HeadTouchOwner touch(owner, stop);
+  K151HeadTouchOwner touch(owner, stop_source());
   owner = true;
-  K151LocalOwnerSetup setup(owner, trusted_input, stop);
+  K151LocalOwnerSetup setup(owner, trusted_input, stop_source());
   const std::array<uint8_t, 4> ssid{'t', 'e', 's', 't'};
   assert(setup.arm(1000) && setup.submit_wifi(ssid, "mock-password", 1000));
   assert(setup.submit_api_key("not-a-real-key-test", 1000));
@@ -324,10 +472,18 @@ void exercise_bootstrap() {
     assert(!setup.ready());
   }
   const bool first_provision = !previous && scenario != "bootstrap_first_denied";
-  const bool turn = scenario == "bootstrap_first_turn" ||
+  const auto stop_at = std::ranges::find(kStopDuringRequest, scenario);
+  const bool stop_inside_request = stop_at != kStopDuringRequest.end();
+  const int stop_stage = static_cast<int>(stop_at - kStopDuringRequest.begin()) + 1;
+  const bool turn = stop_inside_request || scenario == "bootstrap_first_turn" ||
                     scenario == "bootstrap_stop_at_reservation" ||
                     scenario == "bootstrap_revoke_storage_at_stt";
-  const bool accepted = previous || turn || scenario == "bootstrap_usb_detached";
+  const bool restore_retry = scenario == "bootstrap_display_stop_restore_retry";
+  const bool stop_waiting_network =
+      restore_retry || scenario == "bootstrap_display_stop_waiting_network";
+  const bool preconfigured = scenario == "bootstrap_stop_masks_already_configured";
+  const bool accepted = previous || turn || stop_waiting_network || preconfigured ||
+                       scenario == "bootstrap_usb_detached";
   assert(bootstrap.start({"stt", "gpt", "tts", "voice"}, pack, first_provision) == accepted);
   assert(durable_profile == std::vector<uint8_t>{0x7b});
   if (!accepted) {
@@ -335,8 +491,17 @@ void exercise_bootstrap() {
     const bool early = scenario == "bootstrap_unconfirmed" || scenario == "bootstrap_hold" ||
                        scenario == "bootstrap_no_budget_scope" ||
                        scenario == "bootstrap_manual_stop" ||
-                       scenario == "bootstrap_missing_bus" || scenario == "bootstrap_wrong_bus";
-    assert(nvs_init_calls == int(!early));
+                       scenario == "bootstrap_missing_bus" || scenario == "bootstrap_wrong_bus" ||
+                       scenario == "bootstrap_wrong_stop_binding";
+    const bool stop_admission_failed = scenario.starts_with("bootstrap_stop_") &&
+                                       scenario != "bootstrap_stop_at_reservation";
+    assert(nvs_init_calls == int(!early && !stop_admission_failed));
+    assert(!stop_probe && !stop_timer_active && !stop_timer_callback);
+    assert(stop_masks == initial_stop_masks);
+    if (early) assert(!gpio_configures && !timer_creates);
+    if (stop_admission_failed) assert(K151DisplayStop::flag() && !setup.ready());
+    if (scenario == "bootstrap_stop_probe_busy") assert(stop_probe_closes == 2);
+    if (scenario == "bootstrap_stop_arming_restore_retry") assert(restore_failed_once);
     const bool during_wifi = scenario.starts_with("bootstrap_wifi_");
     const bool began_writing = during_wifi || scenario == "bootstrap_commit_error" ||
                               scenario == "bootstrap_readback_error";
@@ -351,31 +516,49 @@ void exercise_bootstrap() {
     }
     return;
   }
-  assert(nvs_init_calls == 1 && network_starts == 1 && !setup.ready());
+  assert(nvs_init_calls == 1 && network_starts == 1 && !setup.ready() && stop_timer_active);
   assert(nvs_commits == int(!previous) && codec_starts == 0);
   if (previous) assert(durable_budget == initial_budget);
   if (scenario == "bootstrap_usb_detached") trusted_input = false;
   assert(bootstrap.poll() == NativeVoiceStep::waiting_network);
+  if (stop_waiting_network) {
+    display_press();
+    assert(bootstrap.poll() == NativeVoiceStep::stopped);
+    assert(calls == 0 && codec_starts == 0 && model_starts == 0 && network_stops == 1);
+    assert(!stop_timer_active && !stop_timer_callback && K151DisplayStop::flag());
+    if (restore_retry) {
+      assert(restore_failed_once && stop_probe == &stop_expander);
+      bootstrap.stop();
+    }
+    assert(!stop_probe && stop_masks == initial_stop_masks);
+    return;
+  }
   assert(bootstrap.poll() == NativeVoiceStep::questioning && codec_starts == 1);
   if (turn) {
     const bool stop_at_reservation = scenario == "bootstrap_stop_at_reservation";
     const bool revoke_at_stt = scenario == "bootstrap_revoke_storage_at_stt";
-    const bool interrupted = stop_at_reservation || revoke_at_stt;
+    const bool interrupted = stop_at_reservation || revoke_at_stt || stop_inside_request;
     auto outcome = NativeVoiceStep::questioning;
     for (int i = 0; i < 200 && outcome == NativeVoiceStep::questioning; ++i) {
       now_us += 20'000;
       outcome = bootstrap.poll();
     }
     assert(outcome == (interrupted ? NativeVoiceStep::stopped : NativeVoiceStep::answered));
-    assert(calls == (stop_at_reservation ? 0 : revoke_at_stt ? 1 : 3) &&
+    const int expected_calls =
+        stop_at_reservation ? 0 : revoke_at_stt ? 1 : stop_inside_request ? stop_stage : 3;
+    assert(calls == expected_calls &&
            plays == int(!interrupted));
     const auto stored = BudgetLedger::restore(durable_budget);
     assert(nvs_commits == 2 && stored && stored->count() == 1);
+    if (interrupted) assert(!stop_timer_active && !stop_timer_callback && K151DisplayStop::flag());
   } else {
     budget_writes = false;
     assert(bootstrap.poll() == NativeVoiceStep::stopped);
   }
   bootstrap.stop();
+  assert(!stop_timer_active && !stop_timer_callback && K151DisplayStop::flag());
+  assert(!stop_probe && stop_masks == initial_stop_masks);
+  if (preconfigured) assert(stop_mask_writes == 0);
   assert(!mic_open && !amp_open && codec_stops == 1 && model_stops == 1 && network_stops == 1);
   assert(durable_profile == std::vector<uint8_t>{0x7b});
 }
@@ -383,6 +566,8 @@ void exercise_bootstrap() {
 int main(int argc, char** argv) {
   assert(argc == 2);
   scenario = argv[1];
+  if (scenario == "bootstrap_stop_masks_already_configured") stop_masks = {0xff, 0xfb};
+  initial_stop_masks = stop_masks;
   if (scenario.starts_with("bootstrap_")) {
     exercise_bootstrap();
     return 0;

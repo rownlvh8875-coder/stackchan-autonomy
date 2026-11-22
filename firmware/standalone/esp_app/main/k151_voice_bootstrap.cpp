@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "k151_voice_bootstrap.hpp"
 #include "k151_install_hold.hpp"
+#include "k151_display_stop.hpp"
+#include <esp_log.h>
 #include <esp_timer.h>
 #include <utility>
 
@@ -14,6 +16,10 @@ K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup,
       storage_(setup.owner_, paid_consent, budget_writes, setup.stop_),
       voice_(ledger_, network_, setup.owner_, paid_consent, budget_writes, setup.stop_,
              evidence_, board_bus_) {}
+
+K151VoiceBootstrap::~K151VoiceBootstrap() {
+  if (display_stop_owned_) stop();
+}
 
 bool K151VoiceBootstrap::authorized() const {
   return setup_.owner_.load() && paid_consent_.load() && budget_writes_.load() &&
@@ -30,28 +36,38 @@ bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t>
   if (attempted_ || !K151InstallHold::device_activation_allowed() ||
       !K151CodecPort::playback_enabled_by_build() || !evidence_.verified() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) || !models.valid() || pack.empty() ||
-      !authorized() || !confirmed_setup())
+      &setup_.stop_ != &K151DisplayStop::flag() || !authorized() || !confirmed_setup())
     return false;
   attempted_ = true;
-  if (!storage_.init_without_erase() || !authorized() ||
+  const auto display_stop = K151DisplayStop::arm(board_bus_);
+  display_stop_owned_ = display_stop != K151DisplayStop::ArmResult::unavailable;
+  if (display_stop != K151DisplayStop::ArmResult::armed) {
+    stop();
+    return false;
+  }
+  if (!confirmed_setup() || !authorized() || !storage_.init_without_erase() || !authorized() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) ||
       !ledger_.restore_budget_for_setup(allow_first_budget) || !authorized() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) || !confirmed_setup()) {
-    setup_.stop();
+    stop();
     return false;
   }
   if (!setup_.start_wifi_once(network_)) {
-    setup_.stop();
+    stop();
     return false;
   }
   if (authorized() && voice_.start(std::move(models), pack)) return true;
   (void)network_.shutdown(); // Voice has not adopted the Wi-Fi port.
+  stop();
   return false;
 }
 
 NativeVoiceStep K151VoiceBootstrap::poll() {
-  if (!attempted_) return NativeVoiceStep::stopped;
-  if (authorized()) return voice_.poll();
+  if (!display_stop_owned_) return NativeVoiceStep::stopped;
+  if (authorized()) {
+    const auto result = voice_.poll();
+    if (result != NativeVoiceStep::stopped) return result;
+  }
   stop();
   return NativeVoiceStep::stopped;
 }
@@ -60,6 +76,10 @@ void K151VoiceBootstrap::stop() {
   attempted_ = true;
   setup_.stop();
   voice_.stop();
+  if (display_stop_owned_) {
+    if (K151DisplayStop::disarm()) display_stop_owned_ = false;
+    else ESP_LOGE("k151_bootstrap", "display STOP cleanup incomplete");
+  }
 }
 
 const char* K151VoiceBootstrap::compiled_link_marker() {
