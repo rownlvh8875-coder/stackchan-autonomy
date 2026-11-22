@@ -10,9 +10,9 @@ enum class K151MicWakeStage {
   codec_open, capture_clock, capture_read, wake_input, codec_release, complete,
 };
 
-// Current board and I2S ownership evidence supplied by the local diagnostic.
-// The codec checks the board's power configuration and holds amp reset itself.
-struct K151MicOnlyEvidence {
+// Board identity and I2S ownership supplied by the local owner. The port
+// separately checks current power and reset configuration before codec use.
+struct K151AudioBoardEvidence {
   bool exact_board_verified = false;
   bool exclusive_i2s0_owner_verified = false;
 
@@ -20,5 +20,6 @@ struct K151MicOnlyEvidence {
     return exact_board_verified && exclusive_i2s0_owner_verified;
   }
 };
+using K151MicOnlyEvidence = K151AudioBoardEvidence;
 
 }  // namespace stackchan::standalone

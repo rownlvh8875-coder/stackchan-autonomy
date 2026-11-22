@@ -28,9 +28,9 @@ class K151CodecPort final {
   K151CodecPort& operator=(const K151CodecPort&) = delete;
   ~K151CodecPort();
 
-  bool prepare(bool physical_owner_approval, bool exact_k151_identity,
-               bool amp_reset_and_power_verified);
   // Both atomic flags must outlive this port and latch loss until teardown.
+  bool prepare(std::atomic_bool& owner, std::atomic_bool& stop,
+               const K151AudioBoardEvidence& evidence);
   bool prepare_microphone_only(const std::atomic_bool& owner, const std::atomic_bool& stop,
                                const K151MicOnlyEvidence& evidence);
   bool microphone_on();
@@ -56,13 +56,17 @@ class K151CodecPort final {
   bool cleanup_unverified() const { return cleanup_unverified_; }
 
  private:
-  bool microphone_only() const { return mic_owner_ != nullptr; }
+  bool microphone_only() const { return receive_only_; }
   bool input_allowed() const {
-    return !microphone_only() || (mic_owner_->load() && !mic_stop_->load());
+    // A cold port rejects on prepared() without latching a new I/O fault.
+    return owner_ ? owner_->load() && !stop_->load() : !attempted_;
   }
   bool fail();
   bool prepare_hardware();
-  bool prepare_microphone_board();
+  bool prepare_board();
+  bool attach_board_device(uint16_t address);
+  bool read_board_register(uint8_t reg, uint8_t& value);
+  bool set_amplifier_reset(bool held);
   bool release_board_device();
   bool prepare_i2s();
   bool prepare_i2s_tx();
@@ -70,8 +74,8 @@ class K151CodecPort final {
   bool prepare_output_codec();
   bool prepare_input_codec();
   bool close_microphone(bool* driver_closed = nullptr); // Does not initiate nested cleanup.
-  const std::atomic_bool* mic_owner_ = nullptr;
-  const std::atomic_bool* mic_stop_ = nullptr;
+  const std::atomic_bool* owner_ = nullptr;
+  const std::atomic_bool* stop_ = nullptr;
   i2c_master_bus_handle_t i2c_bus_ = nullptr;
   i2c_master_dev_handle_t board_device_ = nullptr;
   i2s_chan_handle_t tx_ = nullptr;
@@ -88,6 +92,8 @@ class K151CodecPort final {
   esp_codec_dev_handle_t in_dev_ = nullptr;
   esp_codec_dev_handle_t out_dev_ = nullptr;
   bool attempted_ = false;
+  bool receive_only_ = false;
+  bool reset_controlled_ = false;
   bool prepared_ = false;
   bool fault_ = false;
   bool input_open_ = false;

@@ -39,6 +39,19 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     return profile_ == Profile::aw88298_muted_startup &&
            verified_ == (kPowerVerified | kMuteVerified | kAttenuationVerified) && healthy();
   }
+  bool aw88298_standby_verified() {
+    if (profile_ != Profile::aw88298_muted_startup || !healthy()) return false;
+    std::array<uint8_t, 2> value{};
+    const auto read_word = [&](int reg) {
+      return read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK;
+    };
+    // AW88298 datasheet ID, SYSCTRL (I2SEN/AMPPD/PWDN), SYSCTRL2
+    // (HMUTE), and SYSST (SWS). SYSINT is clear-on-read and is not used.
+    return read_word(0x00) && value[0] == 0x18 && value[1] == 0x52 &&
+           read_word(0x04) && (value[1] & 0x43) == 0x03 &&
+           read_word(0x05) && (value[1] & 0x10) != 0 &&
+           read_word(0x01) && (value[0] & 0x01) == 0;
+  }
  private:
   static constexpr uint8_t kPowerVerified = 1, kMuteVerified = 2, kAttenuationVerified = 4;
 

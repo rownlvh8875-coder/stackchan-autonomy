@@ -25,7 +25,7 @@ std::string mode;
 i2s_channel_obj tx,rx;
 i2c_master_bus_t bus;
 i2c_master_dev_t pmic{0x34}, expander{0x58};
-int reset_writes=0, expander_removes=0;
+int reset_writes=0, reset_waits=0, expander_removes=0;
 uint8_t output_latch=0xa7;
 bool reset_read_back=false;
 audio_codec_data_if_t base{};
@@ -145,6 +145,13 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
   assert(h==&controls[0] || h==&controls[1]);const bool out=h==&controls[0];
   assert(reg_len==1 && data && n==(out?2:1));
   auto* bytes=static_cast<uint8_t*>(data);
+  if (out && !write && (reg == 0x00 || reg == 0x01)) {
+    assert((output_latch & 0x04) && reset_waits == 2);
+    bytes[0] = reg == 0x00 ? 0x18 :
+        (mode == "duplex_board_switch_active" && phase == "init" ? 0x01 : 0x00);
+    bytes[1] = reg == 0x00 && mode != "duplex_board_wrong_amp" ? 0x52 : 0x00;
+    return ESP_CODEC_DEV_OK;
+  }
   if (out && (reg == 0x04 || reg == 0x05 || reg == 0x0c)) {
     auto& stored = amp_registers[reg];
     if (write) {
@@ -287,7 +294,7 @@ extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){
 extern "C" esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t h,
                                                const i2c_device_config_t* cfg,
                                                i2c_master_dev_handle_t* out) {
-  assert(h==&bus && h->alive && mic_only() && channels_created==bus_created-1);
+  assert(h==&bus && h->alive && channels_created==bus_created-1);
   assert(cfg->scl_speed_hz==100000 && cfg->dev_addr_length==I2C_ADDR_BIT_LEN_7);
   assert(cfg->device_address==pmic.address || cfg->device_address==expander.address);
   auto& dev=cfg->device_address==pmic.address ? pmic : expander;
@@ -306,10 +313,12 @@ extern "C" esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev) {
 extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
                                                  const uint8_t* reg,size_t n,
                                                  uint8_t* value,size_t bytes,int ms) {
-  assert(dev->open && n==1 && bytes==1 && ms==30 && channels_created==bus_created-1);
+  assert(dev->open && n==1 && bytes==1 && ms==30);
+  if (mic_only() || dev == &pmic) assert(channels_created==bus_created-1);
   if(dev==&pmic) {
     assert(*reg==0x03 || *reg==0x90);
-    *value=*reg==0x03 ? (mode=="mic_only_board_bad_pmic" ? 0 : 0x4a)
+    *value=*reg==0x03 ? (mode=="mic_only_board_bad_pmic" ||
+                        mode=="duplex_board_wrong_pmic" ? 0 : 0x4a)
                      : (mode=="mic_only_board_rails_off" ? 0x01 : 0xbf);
   } else {
     assert(dev==&expander);
@@ -317,6 +326,7 @@ extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
       case 0x10: *value=mode=="mic_only_board_bad_expander" ? 0 : 0x23; break;
       case 0x04: *value=mode=="mic_only_board_input_pin" ? 0x1c : 0x18; break;
       case 0x12: *value=mode=="mic_only_board_led_mode" ? 0xfb : 0xff; break;
+      case 0x11: assert(!mic_only()); *value=mode=="duplex_board_wrong_mode" ? 0 : 0x10; break;
       case 0x02:
         if(mode=="mic_only_board_read_error")return ESP_FAIL;
         *value=output_latch;
@@ -330,8 +340,18 @@ extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
 }
 extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev,const uint8_t* data,
                                          size_t size,int ms) {
-  assert(dev==&expander && dev->open && size==2 && ms==30 && channels_created==0);
-  assert(data[0]==0x02 && data[1]==0xa3 && output_latch==0xa7 && reset_writes==0);
+  assert(dev==&expander && dev->open && size==2 && ms==30 && data[0]==0x02);
+  assert((data[1] ^ output_latch) == 0x04);
+  if (mic_only() || reset_writes==0) {
+    assert(channels_created==0 && data[1]==0xa3 && reset_writes==0);
+  } else if (data[1]==0xa7) {
+    assert(reset_waits==1 && reset_writes==1 && channels_created==1);
+    amp_registers[0x04] = {0x40, 0x03};
+    amp_registers[0x05] = {0x00, static_cast<uint8_t>(
+        mode == "duplex_board_unmuted" ? 0x00 : 0x10)};
+  } else {
+    assert(data[1]==0xa3 && reset_waits==2 && reset_writes==2);
+  }
   ++reset_writes;
   if(mode=="mic_only_board_write_error")return ESP_FAIL;
   output_latch=data[1];
@@ -341,7 +361,8 @@ extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev,const uint8
 extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_t* t,i2s_chan_handle_t* r){
   assert(c->dma_frame_num==240 && r);assert((t==nullptr)==mic_only());
   assert(c->dma_desc_num == 6 && c->auto_clear_after_cb == (t != nullptr));
-  if(mic_only())assert(reset_read_back && output_latch==0xa3 && !pmic.open && !expander.open);
+  assert(reset_read_back && output_latch==0xa3 && !pmic.open);
+  assert(expander.open != mic_only());
   if(channels_created) {
     assert(question_trial() && !rx.alive && rx.deletes==1);
     rx.alive=true;
@@ -359,8 +380,16 @@ extern "C" esp_err_t i2s_channel_register_event_callback(i2s_chan_handle_t h,
   if (mode == "tx_callback_failed") return ESP_FAIL;
   return ESP_OK;
 }
-void vTaskDelay(unsigned) {
-  assert(false && "HOLD must never wait for a speaker transfer");
+void vTaskDelay(unsigned ticks) {
+  assert(!mic_only());
+  if (reset_waits == 0) {
+    assert(ticks == 11 && output_latch == 0xa3 && tx.enabled && rx.enabled);
+    if (mode == "duplex_board_stop_in_reset") local_stop = true;
+  } else {
+    assert(reset_waits == 1 && ticks == 51 && output_latch == 0xa7);
+    if (mode == "duplex_board_stop_after_release") local_stop = true;
+  }
+  ++reset_waits;
 }
 extern "C" esp_err_t i2s_channel_init_tdm_mode(i2s_chan_handle_t h,const i2s_tdm_config_t* c){
   ++tdm_inits;
@@ -486,6 +515,7 @@ extern "C" const audio_codec_ctrl_if_t* audio_codec_new_i2c_ctrl(audio_codec_i2c
   const bool out=cfg->addr==AW88298_CODEC_DEFAULT_ADDR;
   assert(out || cfg->addr==ES7210_CODEC_DEFAULT_ADDR);
   assert(!out || !mic_only());
+  if (out) assert(reset_waits == 2 && output_latch == 0xa7);
   auto* c=&controls[out?0:1];
   assert(!c->is_open);
   ++controls_created;
@@ -879,7 +909,7 @@ int main(int argc,char** argv) {
     }
     assert(port.prepare_microphone_only(local_owner,local_stop,verified));
     assert(port.prepared() && !rx.enabled && controls_created==1 && created==1);
-    assert(!port.prepare(true,true,true) && !port.speaker_on_low_volume());
+    assert(!port.prepare(local_owner,local_stop,{true,true}) && !port.speaker_on_low_volume());
     if(mode=="mic_only_stop_open") {
       assert(!port.microphone_on() && port.faulted() && !rx.enabled && gains==0);
       assert(!port.shutdown());return 0;
@@ -956,28 +986,50 @@ int main(int argc,char** argv) {
     K151MicReader reader{port};assert(!reader.read_10ms(pcm));zero(pcm);assert(created==0);return 0;
   }
   if(mode=="denied") {
-    assert(!port.prepare(false,true,true));assert(!port.capture_mono_24k(pcm));zero(pcm);assert(created==0);return 0;
+    local_owner=false;
+    assert(!port.prepare(local_owner,local_stop,{true,true}));
+    local_owner=true;local_stop=true;
+    assert(!port.prepare(local_owner,local_stop,{true,true}));
+    local_stop=false;
+    assert(!port.prepare(local_owner,local_stop,{false,true}));
+    assert(!port.prepare(local_owner,local_stop,{true,false}));
+    assert(!port.capture_mono_24k(pcm));zero(pcm);
+    assert(created==0 && bus_created==0);return 0;
+  }
+  if (mode.starts_with("duplex_board_")) {
+    assert(!port.prepare(local_owner, local_stop, {true, true}));
+    assert(port.faulted() && !port.prepared() && !port.speaker_on_low_volume());
+    assert(!port.shutdown() && !bus.alive);
+    if (mode=="duplex_board_wrong_pmic" || mode=="duplex_board_wrong_mode") {
+      assert(reset_writes==0 && channels_created==0 && output_latch==0xa7);
+    } else {
+      assert(output_latch==0xa3 && reset_read_back);
+      assert(reset_writes==(mode=="duplex_board_stop_in_reset" ? 1 : 3));
+      assert(!rx.alive && !tx.alive && created==0);
+    }
+    return 0;
   }
   if (mode == "tx_callback_failed") {
-    assert(!port.prepare(true, true, true) && port.faulted());
+    assert(!port.prepare(local_owner, local_stop, {true, true}) && port.faulted());
     assert(tx_callbacks_registered == 1 && created == 0 && tdm_inits == 0);
     assert(!port.shutdown() && !tx.alive && !rx.alive && !bus.alive);
     assert(tx.deletes == 1 && rx.deletes == 1 && bus.deletes == 1);
     return 0;
   }
   if(mode.starts_with("ctrl_") && mode.find("_init_")!=std::string::npos) {
-    assert(!port.prepare(true,true,true));assert(port.faulted() && !port.prepared());
+    assert(!port.prepare(local_owner,local_stop,{true,true}));assert(port.faulted() && !port.prepared());
     assert(!port.capture_mono_24k(pcm));zero(pcm);assert(calls==0);
     assert(!port.shutdown());assert(controls_deleted==controls_created);return 0;
   }
-  assert(port.prepare(true,true,true));
+  assert(port.prepare(local_owner,local_stop,{true,true}));
+  assert(reset_writes==2 && output_latch==0xa7);
   assert(tx_callbacks_registered == 1);
   const auto* api=devices[1].data;
   if(mode.starts_with("release_")) {
     const bool bus_error=mode.starts_with("release_bus_");
     assert(!port.shutdown());assert(port.faulted() && !port.prepared());
     assert(!port.capture_mono_24k(pcm));zero(pcm);assert(calls==0);
-    assert(!port.microphone_on());assert(!port.prepare(true,true,true));
+    assert(!port.microphone_on());assert(!port.prepare(local_owner,local_stop,{true,true}));
     const bool retained_rx=!bus_error && mode!="release_tx";
     const bool retained_tx=mode=="release_tx" || mode=="release_both";
     assert(rx.alive==retained_rx && tx.alive==retained_tx);

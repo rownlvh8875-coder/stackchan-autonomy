@@ -34,15 +34,27 @@ static_assert(k151::kProbeAddresses[k151::index(k151::Device::amp_aw88298)] ==
 constexpr int kLowVolume = 10;
 constexpr int kInputGain = 30;
 constexpr int kI2cPort = 1;
+constexpr int kBoardReadTimeoutMs = 30;
+constexpr uint8_t kAmpResetBit = 1 << 2; // AW9523 P0_2 -> AW88298 RSTN.
+constexpr uint8_t kP0Output = 0x02;
 
 // I2S0 has one TX owner. Keep ISR storage alive even if SDK teardown fails.
 DRAM_ATTR DmaTxTail tx_tail;
+DRAM_ATTR portMUX_TYPE tx_tail_lock = portMUX_INITIALIZER_UNLOCKED;
 std::atomic_flag tx_tail_owned = ATOMIC_FLAG_INIT;
 
 bool IRAM_ATTR observe_codec_tx_tail(i2s_chan_handle_t, i2s_event_data_t* event, void* user) {
   auto& tail = *static_cast<DmaTxTail*>(user);
+  portENTER_CRITICAL_ISR(&tx_tail_lock);
   tail.on_sent(event ? event->dma_buf : nullptr, event ? event->size : 0);
+  portEXIT_CRITICAL_ISR(&tx_tail_lock);
   return false;
+}
+
+void abandon_tx_tail() {
+  portENTER_CRITICAL(&tx_tail_lock);
+  tx_tail.abandon();
+  portEXIT_CRITICAL(&tx_tail_lock);
 }
 
 bool disable_owned_channel(i2s_chan_handle_t channel) {
@@ -69,8 +81,9 @@ bool K151CodecPort::prepare_microphone_only(const std::atomic_bool& owner,
                                             const std::atomic_bool& stop,
                                             const K151MicOnlyEvidence& evidence) {
   if (attempted_ || !owner.load() || stop.load() || !evidence.verified()) return false;
-  mic_owner_ = &owner;
-  mic_stop_ = &stop;
+  owner_ = &owner;
+  stop_ = &stop;
+  receive_only_ = true;
   return prepare_hardware();
 }
 
@@ -82,13 +95,14 @@ bool K151CodecPort::fail() {
   return false;
 }
 
-bool K151CodecPort::prepare(bool physical_owner_approval, bool exact_k151_identity,
-                             bool amp_reset_and_power_verified) {
-  // No network, GPIO reset or peripheral operations if any prerequisite is missing.
-  // These booleans are NOT supplied by a USB frame, configuration blob or app_main.
-  if (attempted_ || !physical_owner_approval || !exact_k151_identity ||
-      !amp_reset_and_power_verified) return false;
-  return prepare_hardware();
+bool K151CodecPort::prepare(std::atomic_bool& owner, std::atomic_bool& stop,
+                             const K151AudioBoardEvidence& evidence) {
+  if (attempted_ || !owner.load() || stop.load() || !evidence.verified()) return false;
+  owner_ = &owner;
+  stop_ = &stop;
+  if (prepare_hardware()) return true;
+  (void)shutdown();
+  return false;
 }
 
 bool K151CodecPort::prepare_hardware() {
@@ -101,57 +115,67 @@ bool K151CodecPort::prepare_hardware() {
   return true;
 }
 
-bool K151CodecPort::prepare_microphone_board() {
-  constexpr int timeout_ms = 30;
+bool K151CodecPort::attach_board_device(uint16_t address) {
+  if (board_device_ || !input_allowed()) return false;
+  i2c_device_config_t cfg{};
+  cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+  cfg.device_address = address;
+  cfg.scl_speed_hz = 100000;
+  return i2c_master_bus_add_device(i2c_bus_, &cfg, &board_device_) == ESP_OK;
+}
+
+bool K151CodecPort::read_board_register(uint8_t reg, uint8_t& value) {
+  return i2c_master_transmit_receive(board_device_, &reg, 1, &value, 1,
+                                     kBoardReadTimeoutMs) == ESP_OK;
+}
+
+bool K151CodecPort::set_amplifier_reset(bool held) {
+  // Holding reset remains available after STOP on the validated duplex pin.
+  const auto allowed = [&] { return (held && reset_controlled_) || input_allowed(); };
+  uint8_t output{};
+  if (!board_device_ || !allowed() || !read_board_register(kP0Output, output) ||
+      !allowed()) return false;
+  const auto desired = static_cast<uint8_t>(held ? output & ~kAmpResetBit :
+                                                   output | kAmpResetBit);
+  const uint8_t command[]{kP0Output, desired};
+  if (output != desired &&
+      i2c_master_transmit(board_device_, command, sizeof(command), kBoardReadTimeoutMs) != ESP_OK)
+    return false;
+  return allowed() && read_board_register(kP0Output, output) &&
+         output == desired && allowed();
+}
+
+bool K151CodecPort::prepare_board() {
   constexpr uint8_t audio_ldo_enable_bits = 0x03; // CoreS3 ALDO1/ALDO2.
-  constexpr uint8_t amp_reset = 1 << 2; // AW9523 P0_2 -> AW88298 RSTN.
-  constexpr uint8_t p0_output = 0x02;
-  constexpr uint8_t p0_direction = 0x04;
-  const auto read = [&](i2c_master_dev_handle_t dev, uint8_t reg, uint8_t& value) {
-    return input_allowed() &&
-           i2c_master_transmit_receive(dev, &reg, 1, &value, 1, timeout_ms) == ESP_OK &&
-           input_allowed();
+  const auto read = [&](uint8_t reg, uint8_t& value) {
+    return input_allowed() && read_board_register(reg, value) && input_allowed();
   };
-  const auto with_device = [&](k151::Device device, const auto& operation) {
-    if (!input_allowed()) return false;
-    i2c_device_config_t cfg{};
-    cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-    cfg.device_address = k151::kProbeAddresses[k151::index(device)];
-    cfg.scl_speed_hz = 100000;
-    if (i2c_master_bus_add_device(i2c_bus_, &cfg, &board_device_) != ESP_OK)
-      return false;
-    const bool checked = operation(board_device_);
-    const bool removed = release_board_device();
-    if (checked && !removed) prepare_stage_ = K151MicWakeStage::board_release;
-    return checked && removed && input_allowed();
-  };
-
-  // Reject unfamiliar or disabled rails without changing the PMIC.
   prepare_stage_ = K151MicWakeStage::board_power;
-  if (!with_device(k151::Device::pmic_axp2101, [&](auto dev) {
-        uint8_t id{}, enable{};
-        return read(dev, 0x03, id) && id == 0x4a &&
-               read(dev, k151::kPmicLdoRegisters.front(), enable) &&
-               (enable & audio_ldo_enable_bits) == audio_ldo_enable_bits;
-      })) return false;
+  if (!attach_board_device(k151::kProbeAddresses[k151::index(k151::Device::pmic_axp2101)]))
+    return false;
+  uint8_t id{}, enable{};
+  const bool rails = read(0x03, id) && id == 0x4a &&
+      read(k151::kPmicLdoRegisters.front(), enable) &&
+      (enable & audio_ldo_enable_bits) == audio_ldo_enable_bits;
+  const bool pmic_released = release_board_device();
+  if (rails && !pmic_released) prepare_stage_ = K151MicWakeStage::board_release;
+  if (!rails || !pmic_released) return false;
 
-  // Keep RSTN asserted even on teardown. Factory initialization will release
-  // it after restore/reboot. Do not change the mode or direction of any pin.
+  // Preserve every unrelated output bit, GPIO mode and direction.
   prepare_stage_ = K151MicWakeStage::amplifier_reset;
-  return with_device(k151::Device::io_aw9523, [&](auto dev) {
-    uint8_t id{}, mode{}, direction{}, output{};
-    if (!read(dev, 0x10, id) || id != 0x23 ||
-        !read(dev, k151::kAw9523P0ModeRegister, mode) || !(mode & amp_reset) ||
-        !read(dev, p0_direction, direction) || (direction & amp_reset) ||
-        !read(dev, p0_output, output)) return false;
-    const uint8_t held = output & ~amp_reset;
-    const uint8_t command[]{p0_output, held};
-    if (output != held &&
-        (!input_allowed() ||
-         i2c_master_transmit(dev, command, sizeof(command), timeout_ms) != ESP_OK))
-      return false;
-    return read(dev, p0_output, output) && output == held;
-  });
+  if (!attach_board_device(k151::kProbeAddresses[k151::index(k151::Device::io_aw9523)]))
+    return false;
+  uint8_t mode{}, direction{}, drive{};
+  const bool gpio = read(0x10, id) && id == 0x23 &&
+      read(k151::kAw9523P0ModeRegister, mode) && (mode & kAmpResetBit) &&
+      read(0x04, direction) && !(direction & kAmpResetBit) &&
+      (microphone_only() || (read(0x11, drive) && (drive & 0x10)));
+  reset_controlled_ = gpio && !microphone_only();
+  const bool held = gpio && set_amplifier_reset(true);
+  if (!microphone_only()) return held && input_allowed(); // Retain expander for teardown.
+  const bool removed = release_board_device();
+  if (held && !removed) prepare_stage_ = K151MicWakeStage::board_release;
+  return held && removed && input_allowed();
 }
 
 bool K151CodecPort::release_board_device() {
@@ -171,7 +195,7 @@ bool K151CodecPort::prepare_i2s() {
   bus_cfg.glitch_ignore_cnt = 7;
   bus_cfg.flags.enable_internal_pullup = 1;
   if (i2c_new_master_bus(&bus_cfg, &i2c_bus_) != ESP_OK) return false;
-  if (microphone_only() && !prepare_microphone_board()) return false;
+  if (!prepare_board()) return false;
 
   prepare_stage_ = K151MicWakeStage::i2s_rx;
   i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
@@ -250,23 +274,33 @@ bool K151CodecPort::prepare_codecs() {
 }
 
 bool K151CodecPort::prepare_output_codec() {
+  // Datasheet defaults after reset are standby and HMUTE. Hold reset through
+  // I2S bring-up, then use the board's 10 ms low and 50 ms settle intervals.
+  if (!input_allowed()) return false;
+  vTaskDelay(pdMS_TO_TICKS(10) + 1);
+  if (!input_allowed() || !set_amplifier_reset(false)) return false;
+  vTaskDelay(pdMS_TO_TICKS(50) + 1);
+  if (!input_allowed()) return false;
+
   audio_codec_i2c_cfg_t i2c_cfg = {};
   i2c_cfg.port = static_cast<i2c_port_t>(kI2cPort);
   i2c_cfg.addr = AW88298_CODEC_DEFAULT_ADDR;
   i2c_cfg.bus_handle = i2c_bus_;
   out_ctrl_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
   gpio_if_ = audio_codec_new_gpio();
-  if (!out_ctrl_ || !gpio_if_ || !out_control_.attach(out_ctrl_)) return false;
+  if (!out_ctrl_ || !gpio_if_ || !out_control_.attach(out_ctrl_) ||
+      !out_control_.aw88298_standby_verified() || !input_allowed()) return false;
 
   aw88298_codec_cfg_t out_cfg = {};
   out_cfg.ctrl_if = out_control_.interface();
   out_cfg.gpio_if = gpio_if_;
-  out_cfg.reset_pin = GPIO_NUM_NC; // External AW9523 reset NOT implemented.
+  out_cfg.reset_pin = GPIO_NUM_NC; // The port owns the external AW9523 reset.
   out_cfg.hw_gain.pa_voltage = 5.0f;
   out_cfg.hw_gain.codec_dac_voltage = 3.3f;
   out_cfg.hw_gain.pa_gain = 1;
   out_codec_ = aw88298_codec_new(&out_cfg);
-  if (!out_codec_ || !out_control_.muted_startup_verified()) return false;
+  if (!out_codec_ || !out_control_.muted_startup_verified() ||
+      !out_control_.aw88298_standby_verified() || !input_allowed()) return false;
 
   esp_codec_dev_cfg_t dev_cfg = {};
   dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_OUT;
@@ -415,7 +449,7 @@ bool K151CodecPort::wait_for_tx_tail(const std::atomic_bool& owner,
            prepared() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT);
   };
   const auto reject = [&] {
-    tx_tail.abandon();
+    abandon_tx_tail();
     return fail();
   };
   i2s_chan_info_t info{};
@@ -423,13 +457,19 @@ bool K151CodecPort::wait_for_tx_tail(const std::atomic_bool& owner,
       info.total_dma_buf_size % DmaTxTail::kDescriptorCount != 0)
     return reject();
   const auto started = esp_timer_get_time();
-  if (!allowed() ||
-      !tx_tail.arm(info.total_dma_buf_size / DmaTxTail::kDescriptorCount, started))
-    return reject();
+  if (!allowed()) return reject();
+  portENTER_CRITICAL(&tx_tail_lock);
+  const bool armed = tx_tail.arm(info.total_dma_buf_size / DmaTxTail::kDescriptorCount,
+                                 started);
+  portEXIT_CRITICAL(&tx_tail_lock);
+  if (!armed) return reject();
 
   for (;;) {
     if (!allowed()) return reject();
+    portENTER_CRITICAL(&tx_tail_lock);
+    // esp_timer_get_time() is lock-free and callable with interrupts masked.
     const auto result = tx_tail.poll(esp_timer_get_time);
+    portEXIT_CRITICAL(&tx_tail_lock);
     if (result == DmaTxTail::Result::observed && allowed()) return true;
     if (result != DmaTxTail::Result::waiting) return reject();
     vTaskDelay(1);
@@ -462,6 +502,10 @@ bool K151CodecPort::shutdown() {
     cleanup_ok = false;
   if (out_codec_ && audio_codec_delete_codec_if(std::exchange(out_codec_, nullptr)) != ESP_CODEC_DEV_OK)
     cleanup_ok = false;
+  if (reset_controlled_) {
+    if (!set_amplifier_reset(true)) cleanup_ok = false;
+    reset_controlled_ = false;
+  }
   // Codec destruction can itself issue register operations whose errors the
   // SDK drops. Observe before detaching/freeing either original control object.
   const bool controls_ok = !in_control_.faulted() && !out_control_.faulted();
@@ -481,13 +525,15 @@ bool K151CodecPort::shutdown() {
     else rx_ = nullptr; // IDF rejects a running channel before freeing it.
   }
   if (tx_) {
-    if (tx_tail_registered_) tx_tail.abandon();
+    if (tx_tail_registered_) abandon_tx_tail();
     if (!disable_owned_channel(tx_)) cleanup_ok = false;
     if (i2s_del_channel(tx_) != ESP_OK) cleanup_ok = false;
     else {
       tx_ = nullptr;
       if (tx_tail_registered_) {
+        portENTER_CRITICAL(&tx_tail_lock);
         tx_tail.reset_after_release();
+        portEXIT_CRITICAL(&tx_tail_lock);
         tx_tail_registered_ = false;
         tx_tail_owned.clear();
       }

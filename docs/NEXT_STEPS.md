@@ -1,5 +1,22 @@
 # Next steps
 
+## 2026-11-22 오프라인 후속 — 앰프 리셋과 음소거 상태 확인
+
+양방향 오디오 준비는 현재 보드의 AXP2101 레일 enable과 AW9523
+GPIO 설정을 확인한다. I2S 준비 중 앰프 리셋을 유지하고, P0_2 한
+비트만 바꿔 리셋을 해제한다. AW88298 ID·전원 차단·HMUTE·스위칭
+상태를 SDK 초기화 전후에 확인한다. 준비 중 STOP이나 불일치가 나면
+앰프 리셋을 다시 건다. 레일 설정 읽기와 스피커 전기 실측은
+별도 증거다. 운영 출력 HOLD는 유지한다.
+[M5Stack 리셋 시퀀스](https://github.com/m5stack/StackChan/blob/28b9f0c8bd6acd81cb3c70f1a93c3e373b39d400/firmware/main/hal/board/stackchan.cc#L213).
+[AW88298 데이터시트](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/K128%20CoreS3/AW88298.PDF#page=31).
+
+7ab304f에서 HOLD와 GPIO 격리 무음 송신은 타깃 빌드를 통과했고,
+PSRAM을 켠 질문 전용 앱은 DMA 상태의 lock-free 단언에서 실패했다.
+DMA 상태를 내부 DRAM의 ESP-IDF 임계 구역으로 보호해 두 빌드
+구성이 같은 경로를 사용하도록 수정했다.
+[7ab304f 타깃 결과](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45032927534).
+
 ## 2026-11-22 오프라인 후속 — 마지막 재생 쓰기 뒤 DMA 완료 관측
 
 K151 송신 어댑터에서 마지막 PCM 쓰기 뒤 실제 GDMA 완료
