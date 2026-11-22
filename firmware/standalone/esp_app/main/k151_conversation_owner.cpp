@@ -48,18 +48,18 @@ K151ConversationOwner::Progress K151ConversationOwner::poll() {
   if (progress_.phase == Phase::showing_trial_result) {
     const auto now_us = esp_timer_get_time();
     if (now_us < trial_result_at_us_ || now_us - trial_result_at_us_ >= 3'000'000)
-      return finish(Phase::trial_complete, NativeVoiceStep::trial_standby);
+      return finish_trial_result(progress_.voice);
     return progress_;
   }
   if (progress_.phase == Phase::voice) {
     const auto result = voice_->poll();
-    if (result == NativeVoiceStep::trial_standby) {
+    if (result == NativeVoiceStep::trial_standby || voice_->keep_failed_trial_frame()) {
       // Bootstrap has already closed audio, model, network and the STOP monitor.
       // Keep the last frame visible briefly. The owner task polls the dwell.
       voice_.reset();
       (void)setup_.poll(); // Clear the remaining local approvals on the STOP latch.
       trial_result_at_us_ = esp_timer_get_time();
-      if (trial_result_at_us_ < 0) return finish(Phase::trial_complete, result);
+      if (trial_result_at_us_ < 0) return finish_trial_result(result);
       return progress_ = {Phase::showing_trial_result, result};
     }
     if (result == NativeVoiceStep::stopped) return finish(Phase::stopped);
@@ -84,6 +84,11 @@ K151ConversationOwner::Progress K151ConversationOwner::poll() {
 
 K151ConversationOwner::Progress K151ConversationOwner::finish(Phase phase, NativeVoiceStep result) {
   return progress_ = shutdown() ? Progress{phase, result} : Progress{Phase::fault};
+}
+
+K151ConversationOwner::Progress K151ConversationOwner::finish_trial_result(NativeVoiceStep result) {
+  return finish(result == NativeVoiceStep::trial_standby ? Phase::trial_complete : Phase::stopped,
+                result);
 }
 
 bool K151ConversationOwner::shutdown() {

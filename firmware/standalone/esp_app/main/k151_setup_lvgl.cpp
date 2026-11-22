@@ -134,7 +134,9 @@ bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
     case K151VoiceStatus::connecting: text = "Connecting to Wi-Fi"; break;
     case K151VoiceStatus::listening: text = "Say Hi StackChan"; break;
     case K151VoiceStatus::question: text = "Say your question"; break;
-    case K151VoiceStatus::processing: text = "Preparing an answer"; break;
+    case K151VoiceStatus::transcribing: text = "Transcribing question"; break;
+    case K151VoiceStatus::generating: text = "Generating answer"; break;
+    case K151VoiceStatus::synthesizing: text = "Synthesizing speech"; break;
     case K151VoiceStatus::playing: text = "Playing AI voice"; break;
     case K151VoiceStatus::returning: text = "Returning to standby"; break;
     case K151VoiceStatus::trial_finished: text = "Standby verified. Trial ended."; break;

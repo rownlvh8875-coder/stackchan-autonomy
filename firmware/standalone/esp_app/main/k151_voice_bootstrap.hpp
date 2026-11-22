@@ -42,6 +42,9 @@ class K151VoiceBootstrap final {
   bool board_release_verified() const {
     return !display_stop_owned_ && voice_.board_release_verified();
   }
+  bool keep_failed_trial_frame() const {
+    return show_failed_trial_ && board_release_verified();
+  }
   static const char* compiled_link_marker();
 
  private:
@@ -55,12 +58,14 @@ class K151VoiceBootstrap final {
   const K151AudioBoardEvidence evidence_;
   const i2c_master_bus_handle_t board_bus_;
   K151SetupLvgl* const view_;
+  const bool one_paid_turn_;
   IsolatedNvs storage_;
   PersistentGuard ledger_;
   K151WifiTimePort network_;
   K151VoiceRuntime voice_;
   bool attempted_ = false;
   bool display_stop_owned_ = false;
+  bool show_failed_trial_ = false;
   std::optional<bool> reviewed_first_budget_;
 };
 

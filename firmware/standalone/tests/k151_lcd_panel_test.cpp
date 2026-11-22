@@ -593,6 +593,13 @@ int main(int argc, char** argv) {
             assert(setup.present_voice_status(Status::listening) && acknowledged_stripes == stripes + 6);
             assert(setup.present_voice_status(Status::question) && acknowledged_stripes == stripes + 12);
             assert(captions[1] == "Say your question" && ft_contact_reads == reads);
+            assert(setup.present_voice_status(Status::transcribing));
+            assert(captions[1] == "Transcribing question");
+            assert(setup.present_voice_status(Status::generating));
+            assert(captions[1] == "Generating answer");
+            assert(setup.present_voice_status(Status::synthesizing));
+            assert(captions[1] == "Synthesizing speech");
+            assert(acknowledged_stripes == stripes + 30 && ft_contact_reads == reads);
           } else {
             assert(transmitted_rows == (stop ? 100 : 150));
             assert(!setup.present_voice_status(Status::question));

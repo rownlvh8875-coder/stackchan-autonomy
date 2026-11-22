@@ -38,6 +38,7 @@ class K151ConversationOwner final {
   ~K151ConversationOwner() = default;
   bool on_owner_task() const;
   Progress finish(Phase phase, NativeVoiceStep result = NativeVoiceStep::stopped);
+  Progress finish_trial_result(NativeVoiceStep result);
 
   K151OwnerSession setup_;
   std::optional<K151VoiceBootstrap> voice_;

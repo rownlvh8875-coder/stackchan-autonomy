@@ -70,9 +70,9 @@ bool K151VoiceRuntime::live_ready() const {
   if (phase_ != Phase::operating || (before_capture && !turn_psram_available()) ||
       !admission_ready()) return false;
   switch (session_.state()) {
-    case State::transcribe:
-    case State::think:
-    case State::synthesize: return publish_status(K151VoiceStatus::processing);
+    case State::transcribe: return publish_status(K151VoiceStatus::transcribing);
+    case State::think: return publish_status(K151VoiceStatus::generating);
+    case State::synthesize: return publish_status(K151VoiceStatus::synthesizing);
     case State::play: return publish_status(K151VoiceStatus::playing);
     default: return true;
   }

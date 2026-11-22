@@ -28,8 +28,9 @@ K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel&
     K151SetupLvgl* view)
     : setup_(setup), panel_(panel), paid_consent_(paid_consent), budget_writes_(budget_writes),
       evidence_(evidence), board_bus_(board_bus), view_(view),
+      one_paid_turn_(mode == K151VoiceMode::one_paid_turn),
       storage_(setup.owner_, paid_consent, budget_writes, setup.stop_),
-      ledger_(storage_, mode == K151VoiceMode::one_paid_turn),
+      ledger_(storage_, one_paid_turn_),
       voice_(ledger_, network_, setup.owner_, paid_consent, budget_writes, setup.stop_,
              evidence_, board_bus_,
              [this](K151VoiceStatus status) { return !view_ || view_->present_voice_status(status); }) {}
@@ -99,6 +100,9 @@ NativeVoiceStep K151VoiceBootstrap::poll() {
       return board_release_verified() ? result : NativeVoiceStep::stopped;
     }
     if (result != NativeVoiceStep::stopped) return result;
+    // Only an internal trial failure can keep the last rendered frame. A
+    // physical STOP or revoked consent takes the immediate shutdown path.
+    show_failed_trial_ = one_paid_turn_ && view_ && authorized();
   }
   stop();
   return NativeVoiceStep::stopped;

@@ -70,6 +70,15 @@ const std::atomic_bool& stop_source() {
 }
 
 bool conversation_case() { return scenario.starts_with("bootstrap_conversation_"); }
+bool realtime_conversation() {
+  return scenario == "bootstrap_conversation_realtime" || scenario == "bootstrap_conversation_tts_failure";
+}
+int failed_conversation_call() {
+  if (scenario == "bootstrap_conversation_stt_failure") return 1;
+  if (scenario == "bootstrap_conversation_gpt_failure") return 2;
+  if (scenario == "bootstrap_conversation_tts_failure") return 3;
+  return 0;
+}
 
 void display_press() {
   assert(stop_timer_active && stop_timer_callback);
@@ -359,10 +368,15 @@ bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
   voice_status.push_back(status);
   if (status == K151VoiceStatus::connecting) assert(!nvs_init_calls && !network_starts);
   if (status == K151VoiceStatus::question) assert(mic_open && !calls);
-  if (status == K151VoiceStatus::processing || status == K151VoiceStatus::playing)
-    assert(!mic_open && !amp_open && calls == (status == K151VoiceStatus::playing ? 3 : 0));
+  switch (status) {
+    case K151VoiceStatus::transcribing: assert(!mic_open && !amp_open && calls == 0); break;
+    case K151VoiceStatus::generating: assert(!mic_open && !amp_open && calls == 1); break;
+    case K151VoiceStatus::synthesizing: assert(!mic_open && !amp_open && calls == 2); break;
+    case K151VoiceStatus::playing: assert(!mic_open && !amp_open && calls == 3); break;
+    default: break;
+  }
   if (status == K151VoiceStatus::trial_finished) assert(mic_open && mic_opens == 3 && plays == 1);
-  if (status == K151VoiceStatus::processing && scenario == "bootstrap_conversation_stop_during_display")
+  if (status == K151VoiceStatus::transcribing && scenario == "bootstrap_conversation_stop_during_display")
     display_press();
   return !K151DisplayStop::flag();
 }
@@ -510,7 +524,7 @@ bool K151HttpsVoicePort::post_once(const Request& req, std::string_view,
   const std::array expected{httpwire::Endpoint::transcription, httpwire::Endpoint::responses,
                             httpwire::Endpoint::speech};
   assert(calls < 3 && req.endpoint == expected[calls]);
-  assert(scenario != "bootstrap_conversation_realtime" || calls < 2);
+  assert(!realtime_conversation() || calls < 2);
   if (calls == 0) {
     if (scenario.starts_with("bootstrap_")) {
       const auto ledger = BudgetLedger::restore(durable_budget);
@@ -521,6 +535,7 @@ bool K151HttpsVoicePort::post_once(const Request& req, std::string_view,
   }
   out.body.assign(1, static_cast<uint8_t>(++calls));
   out.received_ms = static_cast<uint64_t>(now_us / 1'000);
+  if (calls == failed_conversation_call()) return false;
   if (scenario == "revoke_during_stt") consent = false;
   if (scenario == "bootstrap_revoke_storage_at_stt") budget_writes = false;
   if (scenario == kStopDuringRequest[calls - 1]) display_press();
@@ -539,11 +554,12 @@ bool K151RealtimeSpeechPort::synthesize_once(const VoiceApiRequest& request, std
     const std::function<bool()>& network_ready, const std::atomic_bool& paid,
     const std::atomic_bool& stopped, const std::function<bool()>& spend,
     std::vector<uint8_t>& pcm, uint64_t& completed_ms) const {
-  assert(scenario == "bootstrap_conversation_realtime" && calls == 2 && !mic_open && !amp_open);
+  assert(realtime_conversation() && calls == 2 && !mic_open && !amp_open);
   assert(request.fixed_path == "/v1/realtime" && request.model == "gpt-realtime-2.1-mini");
   assert(request.voice == "marin" && request.text == "test reply" && request.pcm24k.empty());
   assert(key == "mock-only-credential" && paid && !stopped && network_ready() && spend() && !spend());
   ++calls;
+  if (calls == failed_conversation_call()) return false;
   pcm = {10, 0};
   completed_ms = static_cast<uint64_t>(now_us / 1'000);
   return true;
@@ -554,7 +570,7 @@ void exercise_conversation() {
   using Phase = K151ConversationOwner::Phase;
   auto& conversation = K151ConversationOwner::instance();
   board_bus_registered = false;
-  const bool realtime = scenario == "bootstrap_conversation_realtime";
+  const bool realtime = realtime_conversation();
   const bool continuous = scenario == "bootstrap_conversation_continuous";
   const VoiceModelConfig models{"stt", "gpt", realtime ? "gpt-realtime-2.1-mini" : "tts",
                                 realtime ? "marin" : "voice"};
@@ -600,7 +616,21 @@ void exercise_conversation() {
   }
   if (scenario == "bootstrap_conversation_stop_during_display") {
     assert(state.phase == Phase::stopped && !calls && !plays && !board_bus_registered);
-    assert(voice_status.back() == K151VoiceStatus::processing);
+    assert(voice_status.back() == K151VoiceStatus::transcribing);
+    return;
+  }
+  if (const auto failed_call = failed_conversation_call()) {
+    assert(state.phase == Phase::showing_trial_result && state.voice == NativeVoiceStep::stopped);
+    const std::array stages{K151VoiceStatus::transcribing, K151VoiceStatus::generating,
+                            K151VoiceStatus::synthesizing};
+    assert(voice_status.back() == stages[failed_call - 1]);
+    assert(calls == failed_call && !plays && !mic_open && !amp_open);
+    assert(board_bus_registered && lvgl_on && !stop_timer_active && network_stops == 1);
+    now_us += 2'999'000;
+    assert(conversation.poll().phase == Phase::showing_trial_result && board_bus_registered);
+    now_us += 1'000;
+    assert(conversation.poll().phase == Phase::stopped);
+    assert(!board_bus_registered && !lvgl_on && calls == failed_call && !request(true, true));
     return;
   }
   assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::answered && calls == 3);
@@ -621,7 +651,8 @@ void exercise_conversation() {
   }
   assert(state.phase == Phase::showing_trial_result && state.voice == NativeVoiceStep::trial_standby);
   const std::vector expected{K151VoiceStatus::connecting, K151VoiceStatus::listening,
-      K151VoiceStatus::question, K151VoiceStatus::processing, K151VoiceStatus::playing,
+      K151VoiceStatus::question, K151VoiceStatus::transcribing, K151VoiceStatus::generating,
+      K151VoiceStatus::synthesizing, K151VoiceStatus::playing,
       K151VoiceStatus::returning, K151VoiceStatus::trial_finished};
   assert(voice_status == expected);
   assert(board_bus_registered && lvgl_on && !stop_timer_active && network_stops == 1);
