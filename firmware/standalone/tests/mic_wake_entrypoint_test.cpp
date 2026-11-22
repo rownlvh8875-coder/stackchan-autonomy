@@ -84,8 +84,10 @@ K151MicWakeTrialResult K151MicWakeTrial::run_embedded(
          owner.load() && !stop.load());
   assert(evidence.verified() && pack.size() == 2 && pack.front() == 1);
   assert(++sessions == 1 && on_listen_);
-#ifdef STACKCHAN_K151_QUESTION_TRIAL
-  assert(on_question_);
+#ifdef STACKCHAN_K151_WAKE_ONLY_CONTROL
+  assert(on_question_ && question_mode_ == K151QuestionTrialMode::wake_only_control);
+#elif defined(STACKCHAN_K151_QUESTION_TRIAL)
+  assert(on_question_ && question_mode_ == K151QuestionTrialMode::standard);
 #else
   assert(!on_question_);
 #endif
@@ -104,7 +106,8 @@ K151MicWakeTrialResult K151MicWakeTrial::run_embedded(
     question_diagnostic_.result = K151QuestionTrialResult::quiet_timeout;
   } else if (on_question_) {
     on_question_();
-    question_diagnostic_.result = K151QuestionTrialResult::endpoint;
+    question_diagnostic_.result = question_mode_ == K151QuestionTrialMode::wake_only_control
+        ? K151QuestionTrialResult::no_endpoint : K151QuestionTrialResult::endpoint;
   }
   return K151MicWakeTrialResult::detected;
 }

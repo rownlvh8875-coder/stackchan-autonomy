@@ -145,7 +145,7 @@ constexpr int64_t kQuestionWindowUs = QuestionCapture::kMaxFrames * 20'000;
 template<class Allowed>
 QuestionResult record_question(K151CodecPort& codec, QuestionCapture& capture,
                                const Allowed& allowed, K151MicWakeTrial::ListenStarted cue,
-                               const std::atomic_bool& stop) {
+                               const std::atomic_bool& stop, K151QuestionTrialMode mode) {
   auto previous_us = esp_timer_get_time();
   if (previous_us < 0) return QuestionResult::clock_fault;
   const auto started_us = previous_us;
@@ -158,7 +158,9 @@ QuestionResult record_question(K151CodecPort& codec, QuestionCapture& capture,
   const std::atomic_bool speaker_busy{false}; // Receive-only port owns no TX.
   K151MicReader mic{codec};
   MicFrameBridge bridge{mic, stop, speaker_busy};
+  const bool wake_only = mode == K151QuestionTrialMode::wake_only_control;
   bool cued = false;
+  size_t observed_frames = 0;
   for (size_t frame = 0; frame < QuestionCapture::kMaxFrames; ++frame) {
     if (!allowed()) return QuestionResult::stopped;
     const auto before = clock();
@@ -171,7 +173,10 @@ QuestionResult record_question(K151CodecPort& codec, QuestionCapture& capture,
     if (progress == CaptureResult::rejected) return QuestionResult::read_failed;
     if (after - started_us > kQuestionWindowUs) break;
     if (progress == CaptureResult::ready) return QuestionResult::endpoint;
-    if (!cued && progress == CaptureResult::listening) {
+    if (cued) {
+      if (wake_only && ++observed_frames == kK151WakeOnlyObservationFrames)
+        return QuestionResult::no_endpoint;
+    } else if (progress == CaptureResult::listening) {
       if (frame + 1 == QuestionCapture::kMaxFrames || after - started_us == kQuestionWindowUs)
         break;
       if (!allowed()) return QuestionResult::stopped;
@@ -179,13 +184,16 @@ QuestionResult record_question(K151CodecPort& codec, QuestionCapture& capture,
       cued = true;
     }
   }
-  return cued ? QuestionResult::no_endpoint : QuestionResult::quiet_timeout;
+  if (!cued) return QuestionResult::quiet_timeout;
+  // A wake-only control must observe the whole short window to complete.
+  return wake_only ? QuestionResult::stopped : QuestionResult::no_endpoint;
 }
 
 K151QuestionTrialDiagnostic capture_question(const std::atomic_bool& owner,
                                               const std::atomic_bool& stop,
                                               const K151MicOnlyEvidence& evidence,
-                                              K151MicWakeTrial::ListenStarted cue) {
+                                              K151MicWakeTrial::ListenStarted cue,
+                                              K151QuestionTrialMode mode) {
   const auto allowed = [&] { return owner.load() && !stop.load(); };
   if (!allowed()) return {QuestionResult::stopped};
   QuestionCapture capture{QuestionCapture::kDefaultMinRms, k151_allocate_question_pcm,
@@ -201,7 +209,7 @@ K151QuestionTrialDiagnostic capture_question(const std::atomic_bool& owner,
   if (codec.prepare_microphone_only(owner, stop, evidence) && allowed()) {
     result = QuestionResult::open_failed;
     if (codec.microphone_on() && allowed()) {
-      result = record_question(codec, capture, allowed, cue, stop);
+      result = record_question(codec, capture, allowed, cue, stop, mode);
     }
   }
   capture.reset(); // Wipe all question PCM before returning any diagnostics.
@@ -317,7 +325,7 @@ K151MicWakeTrialResult K151MicWakeTrial::run_prepared(const std::atomic_bool& ow
     input_counts_ = mic.counts();
   }
   if (result == Result::detected && on_question_)
-    question_diagnostic_ = capture_question(owner, stop, evidence, on_question_);
+    question_diagnostic_ = capture_question(owner, stop, evidence, on_question_, question_mode_);
   return result;
 }
 

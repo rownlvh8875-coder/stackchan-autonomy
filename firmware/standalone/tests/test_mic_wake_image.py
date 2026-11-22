@@ -48,6 +48,24 @@ def test_question_trial_requires_separate_project_and_scope(model_fixture):
         inspect_image(image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, question=True)
 
 
+def test_wake_only_control_has_distinct_identity_and_short_observation(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    app = image(model_fixture, project=b"k151_wake_only_control")
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV, wake_only_control=True)
+    assert manifest["kind"] == "RECEIVE_ONLY_WAKE_ONLY_CONTROL_NOT_OPERATIONAL"
+    assert manifest["observation_frames_20ms"] == 75
+    assert manifest["observation_pcm_ms"] == 1500
+    assert manifest["combined_start_window_ms"] == 10000
+    assert manifest["install_authorized"] is False
+    with pytest.raises(ValueError):
+        inspect_image(app, ELF_SHA, SLOT_CSV, question=True)
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, wake_only_control=True
+        )
+
+
 @pytest.mark.parametrize("failure", ["other_project", "other_slot", "dup_pack", "ram_pack"])
 def test_deny_other_app_or_invalid_pack(model_fixture, failure):
     from check_mic_wake_image import inspect_image

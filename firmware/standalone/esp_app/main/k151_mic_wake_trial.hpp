@@ -12,6 +12,9 @@ namespace stackchan::standalone {
 
 enum class K151MicWakeTrialResult { denied, stopped, not_detected, detected, fault, memory_denied };
 inline constexpr uint32_t kK151MicWakeTrialFrameLimit = 500;
+inline constexpr size_t kK151WakeOnlyObservationFrames = 75; // 1.5s of 20ms PCM frames.
+
+enum class K151QuestionTrialMode { standard, wake_only_control };
 
 enum class K151QuestionTrialResult {
   not_run, stopped, memory_denied, prepare_failed, open_failed, clock_fault,
@@ -52,8 +55,9 @@ class K151MicWakeTrial final {
   using ListenStarted = void (*)();
   // A question cue opts into a distinct receive-only question capture after wake.
   explicit K151MicWakeTrial(ListenStarted on_listen = nullptr,
-                           ListenStarted on_question = nullptr)
-      : on_listen_(on_listen), on_question_(on_question) {}
+                           ListenStarted on_question = nullptr,
+                           K151QuestionTrialMode question_mode = K151QuestionTrialMode::standard)
+      : on_listen_(on_listen), on_question_(on_question), question_mode_(question_mode) {}
 
   // The local owner supplies current board/I2S ownership evidence and the
   // whole linked model pack. The codec checks live board registers separately.
@@ -96,6 +100,7 @@ class K151MicWakeTrial final {
   K151QuestionTrialDiagnostic question_diagnostic_;
   ListenStarted on_listen_;
   ListenStarted on_question_;
+  K151QuestionTrialMode question_mode_;
   bool attempted_ = false;
 };
 

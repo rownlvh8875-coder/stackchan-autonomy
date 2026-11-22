@@ -20,7 +20,12 @@ def question_entrypoint(tmp_path_factory):
     return _build_entrypoint(tmp_path_factory, question=True)
 
 
-def _build_entrypoint(tmp_path_factory, *, question):
+@pytest.fixture(scope="module")
+def control_entrypoint(tmp_path_factory):
+    return _build_entrypoint(tmp_path_factory, question=False, wake_only_control=True)
+
+
+def _build_entrypoint(tmp_path_factory, *, question, wake_only_control=False):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("C++20 compiler required")
@@ -28,6 +33,7 @@ def _build_entrypoint(tmp_path_factory, *, question):
     built = subprocess.run(
         [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pthread"]
         + (["-DSTACKCHAN_K151_QUESTION_TRIAL=1"] if question else [])
+        + (["-DSTACKCHAN_K151_WAKE_ONLY_CONTROL=1"] if wake_only_control else [])
         + [
             arg
             for include in (
@@ -123,3 +129,20 @@ def test_question_trial_entrypoint(question_entrypoint, case):
             "operating_admission": False,
         }
     assert sum(event.get("mic_trial") == "QUESTION_NOW" for event in events) == (case == "detect")
+
+
+def test_wake_only_control_entrypoint(control_entrypoint):
+    done = subprocess.run(
+        [str(control_entrypoint), "detect"], capture_output=True, text=True, timeout=8
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.startswith("K151_RECEIVE_ONLY_WAKE_ONLY_CONTROL_NOT_OPERATIONAL\n")
+    events = [json.loads(line) for line in done.stdout.splitlines() if line.startswith("{")]
+    assert [event.get("mic_trial") for event in events if "mic_trial" in event] == [
+        "WAIT_WAKE_ONLY_CONTROL",
+        "LISTEN_NOW",
+        "QUIET_OBSERVATION_NOW",
+        "HOLD_UNTIL_RESET",
+    ]
+    assert events[-2]["mic_question_trial"] == "MIC_QUESTION_TRIAL_V1"
+    assert events[-2]["result"] == "no_endpoint"

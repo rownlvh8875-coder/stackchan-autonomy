@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Execute actual port against pinned codec headers + no-hardware C ABI doubles.
+#include "bench_gate.hpp"
 #include "k151_codec_port.hpp"
 #include "k151_mic_reader.hpp"
 #include "k151_mic_wake_trial.hpp"
@@ -45,9 +46,15 @@ bool embedded_trial_chain() { return mode.starts_with("mic_only_trial_chain_"); 
 int trial_resets=0, trial_chunks=0, trial_model_drops=0;
 int heap_checks=0;
 int64_t trial_time_us=1000;
+BenchGate question_gate{1, 1};
 constexpr std::string_view question_prefix="mic_only_trial_question_";
 bool question_trial() { return mode.starts_with(question_prefix); }
 std::string_view question_case() { return std::string_view(mode).substr(question_prefix.size()); }
+bool question_control() { return question_case().starts_with("control_"); }
+bool question_with_gate() {
+  return (question_control() && question_case()!="control_local_limit") ||
+         question_case()=="standard_gate_stop";
+}
 int question_reads=0, question_cues=0, question_reads_at_cue=0;
 std::array<int16_t, QuestionCapture::kMaxSamples> question_pcm{};
 bool question_allocated=false, question_freed=false;
@@ -173,6 +180,9 @@ extern "C" void* heap_caps_malloc(size_t size,uint32_t caps) {
   assert(!question_allocated);
   question_allocated=true;
   if (mode=="mic_only_trial_question_no_memory") return nullptr;
+  if (question_with_gate()) {
+    trial_time_us=question_case()=="control_gate_stop"?9'001'000:4'001'000;
+  }
   question_pcm.fill(12345);
   return question_pcm.data();
 }
@@ -331,17 +341,25 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
     assert(question_trial());
     const auto test=question_case();
     ++question_reads;
-    if(test=="wall") trial_time_us+=30000;
+    if(test=="wall" || test=="control_local_limit") trial_time_us+=30000;
     else if(test=="frame_cap") trial_time_us+=1000;
     else trial_time_us+=10000;
 
     const int since_cue=question_reads-question_reads_at_cue;
     const bool before_cue=question_cues==0;
+    if (question_with_gate()) {
+      question_gate.tick(trial_time_us/1000);
+      if (!before_cue && since_cue==150 && test=="control_stop_on_last_read") {
+        for (const char c : std::string_view{"STOP\n"}) question_gate.feed(c,trial_time_us/1000);
+      }
+      if (question_gate.stopped()) local_stop=true;
+    }
     if (!before_cue && since_cue==9 && test=="revoke") local_owner=false;
     if (!before_cue && since_cue==9 && test=="clock") trial_time_us=-1;
     if (before_cue && question_reads==9 && test=="handoff_stop") local_stop=true;
     const bool short_read=(before_cue && question_reads==9 && test=="handoff_short") ||
-                          (!before_cue && since_cue==9 && test=="short");
+                          (!before_cue && since_cue==9 && test=="short") ||
+                          (!before_cue && since_cue==150 && test=="control_short_read");
     *bytes=short_read?n-4:n;
     auto* pcm=static_cast<int16_t*>(p);
     const bool initial_tail=question_reads<=8 &&
@@ -349,9 +367,12 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
     const bool second_burst=test=="interrupted_quiet" && question_reads>56 && question_reads<=62;
     const bool quiet_only_at_deadline=test=="quiet_at_deadline" && question_reads<=750;
     const bool voice=initial_tail || second_burst ||
-        (before_cue ? test=="quiet_timeout" || quiet_only_at_deadline
+        (before_cue ? test=="quiet_timeout" || quiet_only_at_deadline ||
+                      (test=="control_local_limit" && question_reads<=200)
                     : test=="wall" || test=="frame_cap" ||
-                      (test!="wake_tail" && test!="interrupted_quiet" && since_cue<=8));
+                      (test=="control_endpoint" && since_cue>=93 && since_cue<=100) ||
+                      (!question_control() && test!="standard_gate_stop" &&
+                       test!="wake_tail" && test!="interrupted_quiet" && since_cue<=8));
     for(size_t i=0;i<*bytes/4;++i) {
       pcm[2*i]=voice?(i%2==0?1800:-1800):0;
       pcm[2*i+1]=900;
@@ -430,7 +451,7 @@ extern "C" int audio_codec_delete_codec_if(const audio_codec_if_t* c) {
   assert(deleted==created);
   codec_operation(c==&codecs[0]?0:1,"delete");
   return mode=="mic_only_trial_delete_fail" || mode=="mic_only_trial_short_cleanup_bad" ||
-         (mode=="mic_only_trial_question_release_fail" && channels_created==2)
+         (channels_created==2 && (question_case()=="release_fail" || question_case()=="control_release_fail"))
       ?ESP_CODEC_DEV_INVALID_ARG:ESP_CODEC_DEV_OK;
 }
 extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t* c) {
@@ -505,7 +526,12 @@ int main(int argc,char** argv) {
   if(question_trial()) {
     using Result=K151QuestionTrialResult;
     const auto test=question_case();
-    K151MicWakeTrial trial{nullptr,announce_question};
+    if (question_with_gate()) {
+      for (const char c : std::string_view{"START 00000001\n"}) question_gate.feed(c,1);
+      assert(question_gate.running());
+    }
+    K151MicWakeTrial trial{nullptr,announce_question,question_control()
+        ? K151QuestionTrialMode::wake_only_control : K151QuestionTrialMode::standard};
     const auto wake=trial.run(local_owner,local_stop,{true,true},std::make_unique<TrialDetector>());
     const auto question=trial.question_diagnostic();
     if(test=="no_wake") {
@@ -523,7 +549,7 @@ int main(int argc,char** argv) {
       return 0;
     }
     assert(question_freed && bus_created==2 && bus.deletes==2 && rx.deletes==2);
-    assert(question.codec_cleanup_unverified==(test=="release_fail"));
+    assert(question.codec_cleanup_unverified==(test=="release_fail" || test=="control_release_fail"));
     if(test=="quiet_timeout" || test=="quiet_at_deadline" ||
        test=="handoff_stop" || test=="handoff_short") {
       assert(question_cues==0);
@@ -540,7 +566,7 @@ int main(int argc,char** argv) {
     if(test=="wake_tail" || test=="interrupted_quiet")
       assert(question.result!=Result::endpoint && "post-wake energy was accepted as a new question");
     const int expected_cue=test=="wake_tail" || test=="tail_then_question" ? 58
-        : test=="interrupted_quiet" ? 112 : 50;
+        : test=="interrupted_quiet" ? 112 : test=="control_local_limit" ? 250 : 50;
     assert(question_cues==1 && question_reads_at_cue==expected_cue);
     const int after_cue=question_reads-question_reads_at_cue;
     if(test=="endpoint" || test=="release_fail" || test=="tail_then_question") {
@@ -549,6 +575,22 @@ int main(int argc,char** argv) {
     } else if(test=="wake_tail" || test=="interrupted_quiet") {
       assert(question.result==Result::no_endpoint && question_reads==800);
       assert(std::ranges::all_of(question_pcm,[](int16_t sample){return sample==12345;}));
+    } else if(test=="control_complete") {
+      assert(question.result==Result::no_endpoint && "wake-only observation stopped at the combined deadline");
+      assert(after_cue==150 && question_gate.running() && trial_time_us==6'001'000);
+    } else if(test=="control_gate_stop" || test=="standard_gate_stop") {
+      assert(question.result==Result::stopped && question_gate.stopped());
+      assert(after_cue==(test=="control_gate_stop"?51:551));
+    } else if(test=="control_stop_on_last_read") {
+      assert(question.result==Result::stopped && after_cue==150 && question_gate.stopped());
+    } else if(test=="control_short_read") {
+      assert(question.result==Result::read_failed && after_cue==150);
+    } else if(test=="control_endpoint") {
+      assert(question.result==Result::endpoint && after_cue==150);
+    } else if(test=="control_release_fail") {
+      assert(question.result==Result::release_failed && after_cue==150);
+    } else if(test=="control_local_limit") {
+      assert(question.result==Result::stopped && after_cue<150 && !local_stop);
     } else if(test=="wall") {
       assert(trial_time_us==8'081'000 && question_reads==268);
       assert(question.result==Result::no_endpoint);

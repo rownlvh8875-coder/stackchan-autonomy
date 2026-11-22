@@ -21,12 +21,21 @@ namespace {
 using namespace stackchan::standalone;
 std::atomic_bool owner{false}, stop{false}, reader_done{false};
 
-#ifdef STACKCHAN_K151_QUESTION_TRIAL
+#if defined(STACKCHAN_K151_WAKE_ONLY_CONTROL) || defined(STACKCHAN_K151_QUESTION_TRIAL)
+#ifdef STACKCHAN_K151_WAKE_ONLY_CONTROL
+constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_WAKE_ONLY_CONTROL_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_WAKE_ONLY_CONTROL";
+constexpr char kQuestionCue[] = "QUIET_OBSERVATION_NOW";
+constexpr auto kQuestionMode = K151QuestionTrialMode::wake_only_control;
+#else
 constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_QUESTION_TRIAL_NOT_OPERATIONAL";
 constexpr char kChallengeMarker[] = "WAIT_QUESTION_LOCAL_START";
+constexpr char kQuestionCue[] = "QUESTION_NOW";
+constexpr auto kQuestionMode = K151QuestionTrialMode::standard;
+#endif
 
 void announce_question() {
-  std::puts("{\"mic_trial\":\"QUESTION_NOW\",\"operating_admission\":false}");
+  std::printf("{\"mic_trial\":\"%s\",\"operating_admission\":false}\n", kQuestionCue);
   (void)std::fflush(stdout);
 }
 
@@ -117,8 +126,8 @@ extern "C" void app_main() {
     // This app has one I2S caller, using the port's exclusive RX allocation.
     // It still checks the two board chips live before opening any channel.
     const K151MicOnlyEvidence evidence{expected_location, true};
-#ifdef STACKCHAN_K151_QUESTION_TRIAL
-    static K151MicWakeTrial trial{announce_listening, announce_question};
+#if defined(STACKCHAN_K151_WAKE_ONLY_CONTROL) || defined(STACKCHAN_K151_QUESTION_TRIAL)
+    static K151MicWakeTrial trial{announce_listening, announce_question, kQuestionMode};
 #else
     static K151MicWakeTrial trial{announce_listening};
 #endif
@@ -126,7 +135,7 @@ extern "C" void app_main() {
     std::array<char, 256> report{};
     if (format_k151_mic_wake_report(result, trial.diagnostic(), trial.take_input_counts(), report) != 0)
       std::fputs(report.data(), stdout);
-#ifdef STACKCHAN_K151_QUESTION_TRIAL
+#if defined(STACKCHAN_K151_WAKE_ONLY_CONTROL) || defined(STACKCHAN_K151_QUESTION_TRIAL)
     const auto question = trial.question_diagnostic();
     if (const char* name = question_result_name(question.result)) {
       std::printf("{\"mic_question_trial\":\"MIC_QUESTION_TRIAL_V1\",\"result\":\"%s\","

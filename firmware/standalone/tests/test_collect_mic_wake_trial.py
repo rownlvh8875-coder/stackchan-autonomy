@@ -171,6 +171,48 @@ def test_other_trial_cannot_receive_start(receiver, question):
     assert port.writes == [b"HELLO\n"]
 
 
+CONTROL_WAIT = {**WAIT, "mic_trial": "WAIT_WAKE_ONLY_CONTROL"}
+CONTROL_CUE = {**QUESTION_CUE, "mic_trial": "QUIET_OBSERVATION_NOW"}
+
+
+@pytest.mark.parametrize("outcome", ["no_endpoint", "stopped", "endpoint"])
+def test_collect_wake_only_control_result(receiver, outcome):
+    result = {**QUESTION, "result": outcome}
+    port = FakeSerial([CONTROL_WAIT, LISTEN, CONTROL_CUE, WAKE_V2, result, HOLD])
+    prompts = []
+    collected = receiver.receive_once(
+        port,
+        lambda: prompts.append("wake"),
+        announce_question=lambda: prompts.append("wait"),
+        wake_only_control=True,
+    )
+    assert collected == {"wake": WAKE_V2, "question": result}
+    assert prompts == ["wake", "wait"]
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+
+
+@pytest.mark.parametrize("wake_only,marker", [(True, QUESTION_WAIT), (False, CONTROL_WAIT)])
+def test_question_and_control_challenges_are_not_interchangeable(receiver, wake_only, marker):
+    port = FakeSerial([marker])
+    with pytest.raises(ValueError):
+        receiver.receive_once(
+            port, lambda: None, announce_question=lambda: None, wake_only_control=wake_only
+        )
+    assert port.writes == [b"HELLO\n"]
+
+
+def test_control_rejects_positive_question_cue(receiver):
+    port = FakeSerial([CONTROL_WAIT, LISTEN, QUESTION_CUE])
+    with pytest.raises(ValueError):
+        receiver.receive_once(
+            port,
+            lambda: None,
+            announce_question=lambda: pytest.fail("Unexpected question prompt"),
+            wake_only_control=True,
+        )
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n", b"STOP\n"]
+
+
 def test_question_requires_its_own_verified_approval(receiver, tmp_path):
     digest = "a" * 64
     manifest = {"image_sha256": digest, "port": "COM3"}
@@ -202,6 +244,20 @@ def test_question_requires_its_own_verified_approval(receiver, tmp_path):
     assert receiver.verified_port(tmp_path, question=True) == ("COM3", digest)
     with pytest.raises(ValueError):
         receiver.verified_port(tmp_path)
+    with pytest.raises(ValueError):
+        receiver.verified_port(tmp_path, wake_only_control=True)
+
+    manifest.update(
+        kind="REVIEW_ONLY_WAKE_ONLY_CONTROL_V1",
+        scope=receiver.WAKE_ONLY_CONTROL_SCOPE,
+    )
+    write("review-manifest.json", manifest)
+    with pytest.raises(ValueError):
+        receiver.verified_port(tmp_path, wake_only_control=True)
+    write("approval.json", {**approval, "scope": receiver.WAKE_ONLY_CONTROL_SCOPE})
+    assert receiver.verified_port(tmp_path, wake_only_control=True) == ("COM3", digest)
+    with pytest.raises(ValueError):
+        receiver.verified_port(tmp_path, question=True)
 
 
 def test_open_waits_for_port_to_return_without_toggling_control_lines(receiver):

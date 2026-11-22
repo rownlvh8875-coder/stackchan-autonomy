@@ -90,6 +90,7 @@ def _build_port(compiler, binary, app, *, embedded_trial=False):
     for directory in [
         BASE / "tests/codec_io_doubles",
         BASE / "tests/idf_partition_doubles",
+        BASE / "resource_bench/main",
         BASE / "core",
         app,
     ]:
@@ -97,7 +98,6 @@ def _build_port(compiler, binary, app, *, embedded_trial=False):
     if embedded_trial:
         command += ["-DSTACKCHAN_TEST_EMBEDDED_MIC_TRIAL=1"]
         command += ["-I", str(BASE / "tests/sdk_esp_sr_2_4_7")]
-        command += ["-I", str(BASE / "resource_bench/main")]
         sources += [
             BASE / "tests/k151_wakenet_port_test.cpp",
             app / "k151_wakenet_port.cpp",
@@ -365,6 +365,14 @@ def test_mic_trial_attributes_primary_and_cleanup(
         "quiet_at_deadline",
         "handoff_stop",
         "handoff_short",
+        "control_complete",
+        "control_gate_stop",
+        "control_stop_on_last_read",
+        "control_short_read",
+        "control_endpoint",
+        "control_release_fail",
+        "control_local_limit",
+        "standard_gate_stop",
     ],
 )
 def test_question_after_verified_wake(port_binary, case):
