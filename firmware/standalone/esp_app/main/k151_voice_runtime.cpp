@@ -22,9 +22,10 @@ bool turn_psram_available() {
 K151VoiceRuntime::K151VoiceRuntime(
     PersistentGuard& ledger, K151WifiTimePort& network,
     const std::atomic_bool& local_owner, const std::atomic_bool& paid_consent,
-    const std::atomic_bool& stop, K151AudioBoardEvidence evidence)
+    const std::atomic_bool& budget_writes, const std::atomic_bool& stop,
+    K151AudioBoardEvidence evidence)
     : ledger_(ledger), network_(network),
-      owner_(local_owner), consent_(paid_consent), stop_(stop),
+      owner_(local_owner), consent_(paid_consent), budget_writes_(budget_writes), stop_(stop),
       evidence_(evidence), audio_(k151_audio_hooks(codec_, owner_, stop_, consent_, evidence_)),
       mic_(codec_), sink_(codec_, stop, paid_consent, local_owner),
       speaker_(audio_, sink_, stop, paid_consent, busy_,
@@ -46,7 +47,7 @@ K151VoiceRuntime::K151VoiceRuntime(
 K151VoiceRuntime::~K151VoiceRuntime() { stop(); }
 
 bool K151VoiceRuntime::authorized() const {
-  return owner_.load() && consent_.load() && !stop_.load();
+  return owner_.load() && consent_.load() && budget_writes_.load() && !stop_.load();
 }
 
 bool K151VoiceRuntime::admission_ready() const {

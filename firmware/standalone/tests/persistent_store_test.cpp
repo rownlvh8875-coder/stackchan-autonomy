@@ -50,6 +50,27 @@ int main() {
   assert(!no_init.provision_budget(true)); // normal boot with absent ledger is HOLD
   assert(kv.writes == 0);
 
+  TestKv setup_store;
+  PersistentGuard setup(setup_store);
+  assert(!setup.restore_budget_for_setup(false) && setup_store.writes == 0);
+  assert(setup.restore_budget_for_setup(true) && setup_store.writes == 1);
+  assert(setup.admit_builtin_wake(1, true, true) && setup.reserve(now, true, true, 1));
+  const auto reserved_budget = setup_store.data["budget"];
+  PersistentGuard configured(setup_store);
+  assert(configured.restore_budget_for_setup(true));
+  assert(configured.reserved_conversations() == 1);
+  assert(setup_store.writes == 2 && setup_store.data["budget"] == reserved_budget);
+  TestKv corrupt_setup;
+  corrupt_setup.data["budget"] = {1, 2, 3};
+  PersistentGuard corrupt(corrupt_setup);
+  assert(!corrupt.restore_budget_for_setup(true) && corrupt.fatal());
+  assert(corrupt_setup.writes == 0);
+  TestKv failed_setup;
+  failed_setup.next_read_fails = true;
+  PersistentGuard unreadable(failed_setup);
+  assert(!unreadable.restore_budget_for_setup(true) && unreadable.fatal());
+  assert(failed_setup.writes == 0);
+
   TestKv fresh;
   PersistentGuard first(fresh);
   assert(!first.provision_budget(false) && fresh.writes == 0);

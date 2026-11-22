@@ -23,6 +23,22 @@ def runtime_binary(tmp_path_factory):
     )
     (folder / "esp_netif.h").write_text("#pragma once\nstruct esp_netif_t;\n")
     (folder / "freertos/queue.h").write_text("#pragma once\nusing QueueHandle_t = void*;\n")
+    (folder / "nvs.h").write_text(
+        "#pragma once\n#include <cstddef>\n#include <esp_err.h>\n"
+        "using nvs_handle_t = unsigned;\n"
+        "enum nvs_open_mode_t { NVS_READONLY, NVS_READWRITE };\n"
+        "inline constexpr esp_err_t ESP_ERR_NVS_NOT_FOUND = 0x1102;\n"
+        'extern "C" {\n'
+        "esp_err_t nvs_open(const char*, nvs_open_mode_t, nvs_handle_t*);\n"
+        "esp_err_t nvs_get_blob(nvs_handle_t, const char*, void*, size_t*);\n"
+        "esp_err_t nvs_set_blob(nvs_handle_t, const char*, const void*, size_t);\n"
+        "esp_err_t nvs_commit(nvs_handle_t);\n"
+        "void nvs_close(nvs_handle_t);\n"
+        "}\n"
+    )
+    (folder / "nvs_flash.h").write_text(
+        '#pragma once\n#include <esp_err.h>\nextern "C" esp_err_t nvs_flash_init();\n'
+    )
     binary = folder / "runtime"
     args = [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic"]
     args += ["-isystem", str(BASE / "tests/sdk_esp_codec_dev_1_6_2")]
@@ -41,6 +57,9 @@ def runtime_binary(tmp_path_factory):
             str(BASE / "tests/k151_voice_runtime_test.cpp"),
             str(APP / "k151_voice_runtime.cpp"),
             str(APP / "k151_voice_api_adapter.cpp"),
+            str(APP / "k151_voice_bootstrap.cpp"),
+            str(APP / "k151_owner_setup.cpp"),
+            str(APP / "nvs_port.cpp"),
             "-o",
             str(binary),
         ],
@@ -71,6 +90,25 @@ def runtime_binary(tmp_path_factory):
         "model_failure",
         "stop_during_model",
         "low_heap_after_model",
+        "bootstrap_first_turn",
+        "bootstrap_existing",
+        "bootstrap_hold",
+        "bootstrap_unconfirmed",
+        "bootstrap_manual_stop",
+        "bootstrap_no_budget_scope",
+        "bootstrap_first_denied",
+        "bootstrap_nvs_init_error",
+        "bootstrap_nvs_read_error",
+        "bootstrap_corrupt",
+        "bootstrap_revoked_at_open",
+        "bootstrap_commit_error",
+        "bootstrap_readback_error",
+        "bootstrap_stop_at_reservation",
+        "bootstrap_revoke_storage_at_stt",
+        "bootstrap_wifi_revoke_owner",
+        "bootstrap_wifi_revoke_storage",
+        "bootstrap_usb_detached",
+        "bootstrap_scopes_separate",
     ],
 )
 def test_runtime_owner_lifecycle(runtime_binary, scenario):

@@ -5,6 +5,7 @@ namespace stackchan::standalone {
 class K151InstallHold final {
  public:
   static const char* compiled_link_marker();
+  static bool device_activation_allowed();
   static constexpr bool kDeviceActivationEnabled = false;
 };
 }  // namespace stackchan::standalone

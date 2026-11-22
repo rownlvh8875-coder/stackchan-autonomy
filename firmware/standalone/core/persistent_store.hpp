@@ -56,12 +56,19 @@ class PersistentGuard {
   }
 
   bool restore_budget() {
-    auto result = store_.read(kBudgetKey, 818);
-    if (result.code != ReadCode::found) { fatal_ = true; return false; }
-    auto restored = BudgetLedger::restore(result.bytes);
-    if (!restored) { fatal_ = true; return false; }
-    budget_ = std::move(*restored);
-    return true;
+    if (load_budget() == ReadCode::found) return true;
+    fatal_ = true;
+    return false;
+  }
+
+  // Device-local setup may provision an absent budget after explicit
+  // approval. An existing record is restored without writing to storage.
+  bool restore_budget_for_setup(bool allow_first_provision) {
+    if (fatal_) return false;
+    if (budget_) return true;
+    const auto loaded = load_budget();
+    return loaded == ReadCode::found ||
+           (loaded == ReadCode::missing && provision_budget(allow_first_provision));
   }
 
   // Not a normal boot operation. Must only be reached by verified, explicitly
@@ -147,6 +154,19 @@ class PersistentGuard {
   bool permit_active() const { return permit_active_; }
 
  private:
+  ReadCode load_budget() {
+    const auto result = store_.read(kBudgetKey, 818);
+    if (result.code == ReadCode::missing) return ReadCode::missing;
+    if (result.code == ReadCode::found) {
+      if (auto restored = BudgetLedger::restore(result.bytes)) {
+        budget_ = std::move(*restored);
+        return ReadCode::found;
+      }
+    }
+    fatal_ = true;
+    return ReadCode::failure;
+  }
+
   bool verified_commit(std::string_view key, std::span<const uint8_t> wire) {
     if (fatal_) return false;
     // Any write/commit/read-back ambiguity permanently latches failure.

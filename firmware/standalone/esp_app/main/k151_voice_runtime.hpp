@@ -17,7 +17,8 @@ class K151VoiceRuntime final {
  public:
   K151VoiceRuntime(PersistentGuard& ledger, K151WifiTimePort& network,
                    const std::atomic_bool& local_owner, const std::atomic_bool& paid_consent,
-                   const std::atomic_bool& stop, K151AudioBoardEvidence evidence);
+                   const std::atomic_bool& budget_writes, const std::atomic_bool& stop,
+                   K151AudioBoardEvidence evidence);
   K151VoiceRuntime(const K151VoiceRuntime&) = delete;
   K151VoiceRuntime& operator=(const K151VoiceRuntime&) = delete;
   ~K151VoiceRuntime();
@@ -43,6 +44,7 @@ class K151VoiceRuntime final {
   K151WifiTimePort& network_;
   const std::atomic_bool& owner_;
   const std::atomic_bool& consent_;
+  const std::atomic_bool& budget_writes_;
   const std::atomic_bool& stop_;
   const K151AudioBoardEvidence evidence_;
   K151CodecPort codec_;

@@ -47,17 +47,26 @@ ReadValue IsolatedNvs::read(std::string_view key, size_t max_bytes) {
 }
 
 bool IsolatedNvs::commit(std::string_view key, std::span<const uint8_t> bytes) {
-  if (!initialized_ || !approved_ || !allowed_key(key) || bytes.empty() || bytes.size() > 4096) {
+  if (!initialized_ || !write_authorized(key) || bytes.empty() || bytes.size() > 4096) {
     return false;
   }
   const std::string k(key);
   nvs_handle_t handle{};
   const esp_err_t opened = nvs_open(kNamespace, NVS_READWRITE, &handle);
   if (opened != ESP_OK) return false;
-  const esp_err_t set = nvs_set_blob(handle, k.c_str(), bytes.data(), bytes.size());
+  const esp_err_t set = write_authorized(key) ?
+      nvs_set_blob(handle, k.c_str(), bytes.data(), bytes.size()) : ESP_ERR_INVALID_STATE;
+  // Finish an already-admitted update even if authorization is withdrawn
+  // during the SDK call. That attempt cannot authorize any paid dispatch.
   const esp_err_t committed = set == ESP_OK ? nvs_commit(handle) : set;
   nvs_close(handle);
-  return committed == ESP_OK; // Persistence guard independently reads back.
+  return committed == ESP_OK && write_authorized(key); // Read-back belongs to PersistentGuard.
+}
+
+bool IsolatedNvs::write_authorized(std::string_view key) const {
+  if (key == "wake_profile") return approved_;
+  return key == "budget" && owner_ && owner_->load() && paid_consent_->load() &&
+         budget_writes_->load() && !stop_->load();
 }
 
 }  // namespace stackchan::standalone
