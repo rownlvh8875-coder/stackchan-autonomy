@@ -20,6 +20,13 @@ IRQ 핀의 GPIO 입력 설정을 확인한다. 운영 중 화면만 인터럽트
 [AW9523B 인터럽트 명세](https://doc.awinic.com/doc/202403/deffbf3b-7e7b-4ff6-8e91-fd85e2d845d5.pdf)
 [고정 ESP-IDF 타이머](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_timer/include/esp_timer.h)
 
+HOLD 바이너리의 첫 ESP32-S3 빌드는 기본 1MiB 파티션보다
+688바이트 커서 크기 검사에서 멈췄다. HOLD는 기존 진단 빌드와
+마찬가지로 확인된 5,177,344바이트 OTA 슬롯을 크기 검사의 기준으로
+사용한다. 이 변경은 컴파일 단계의 검사에 적용한다. 생성된 파티션 표와
+HOLD 이미지는 설치 대상으로 사용하지 않는다.
+[첫 빌드 기록](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45044573640)
+
 ## 2026-11-23 오프라인 후속 — 로컬 설정과 오디오의 I2C1 공유
 
 설정 센서에 사용한 I2C1 버스를 독립 대화 실행기에 넘긴다. 로컬

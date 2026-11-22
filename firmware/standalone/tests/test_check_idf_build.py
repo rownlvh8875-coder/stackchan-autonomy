@@ -1,5 +1,6 @@
 """Offline test of the ELF/slot gate; does not need ESP-IDF or a device."""
 
+import csv
 import importlib.util
 import struct
 from pathlib import Path
@@ -42,6 +43,27 @@ def test_xtensa_elf_and_app_size(tmp_path, validator):
     app.write_bytes(b"x" * (validator.OBSERVED_K151_OTA_SLOT + 1))
     with pytest.raises(ValueError, match="slot"):
         validator.validate(elf, app, validator.EXPECTED_IDF_SHA)
+
+
+def test_hold_build_checks_observed_app_slots(validator):
+    hold = Path(__file__).resolve().parents[1] / "esp_app"
+    defaults = dict(
+        line.split("=", 1)
+        for line in (hold / "sdkconfig.defaults").read_text().splitlines()
+        if line.startswith("CONFIG_PARTITION_TABLE_")
+    )
+    assert defaults.get("CONFIG_PARTITION_TABLE_CUSTOM") == "y"
+    table = hold / defaults["CONFIG_PARTITION_TABLE_CUSTOM_FILENAME"].strip('"')
+    rows = csv.reader(
+        line for line in table.read_text().splitlines() if line.strip() and not line.startswith("#")
+    )
+    apps = {
+        (label, subtype, int(offset, 0), int(size, 0))
+        for label, kind, subtype, offset, size, _flags in rows
+        if kind == "app"
+    }
+    size = validator.OBSERVED_K151_OTA_SLOT
+    assert apps == {("ota_0", "ota_0", 0x20000, size), ("ota_1", "ota_1", 0x510000, size)}
 
 
 @pytest.mark.parametrize("corruption", ["truncated", "elf64", "big_endian", "invalid_version"])
