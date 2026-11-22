@@ -97,6 +97,17 @@ struct TrialDetector : NativeWakePort {
     if (mode == "mic_only_trial_poll_duration_boundary") trial_time_us += 90000;
     if (mode == "mic_only_trial_transient_rollback") regress_next_trial_clock=true;
     if (mode == "mic_only_trial_model_error") return NativeWakeResult::error;
+    if (question_trial()) {
+      const auto test = question_case();
+      if (test == "wake_paced_deadline" || test == "wake_cue_deadline")
+        return NativeWakeResult::none;
+      if (test == "wake_detect_at_deadline" || test == "wake_detect_over_deadline") {
+        // At 160 resampled samples per read, the 156th chunk fills on read 500.
+        if (trial_chunks < 156) return NativeWakeResult::none;
+        if (test == "wake_detect_over_deadline") ++trial_time_us;
+        return NativeWakeResult::detected;
+      }
+    }
     if (mode == "mic_only_trial_wall" || mode == "mic_only_trial_frame_cap" ||
         mode == "mic_only_trial_window_overrun" || mode == "mic_only_trial_window_boundary" ||
         mode == "mic_only_trial_question_no_wake")
@@ -395,7 +406,11 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
                         mode=="mic_only_trial_chain_short_read";
   *bytes=short_read?n-4:mode=="overcount"?n+4:n;
   if(mic_wake_trial()) {
-    trial_time_us+=mode=="mic_only_trial_wall"?20000:mode=="mic_only_trial_frame_cap"?1000:10000;
+    int read_duration_us = 10000;
+    if (mode == "mic_only_trial_wall") read_duration_us = 20000;
+    if (mode == "mic_only_trial_frame_cap") read_duration_us = 1000;
+    if (mode == "mic_only_trial_question_wake_paced_deadline") read_duration_us = 10300;
+    trial_time_us += read_duration_us;
     if(mode=="mic_only_trial_stop_in_read")local_stop=true;
     if(mode=="mic_only_trial_clock_backwards")trial_time_us=-1;
     if(mode=="mic_only_trial_window_overrun" && calls==500)++trial_time_us;
@@ -556,7 +571,9 @@ int main(int argc,char** argv) {
       for (const char c : std::string_view{"START 00000001\n"}) question_gate.feed(c,1);
       assert(question_gate.running());
     }
-    K151MicWakeTrial trial{nullptr,announce_question,question_control()
+    K151MicWakeTrial trial{[] {
+        if (question_case() == "wake_cue_deadline") ++trial_time_us;
+      }, announce_question, question_control()
         ? K151QuestionTrialMode::wake_only_control : K151QuestionTrialMode::standard};
     const auto wake=trial.run(local_owner,local_stop,{true,true},std::make_unique<TrialDetector>());
     const auto question=trial.question_diagnostic();
@@ -566,7 +583,25 @@ int main(int argc,char** argv) {
       assert(question_cues==0 && question_reads==0 && bus_created==1);
       return 0;
     }
-    assert(wake==K151MicWakeTrialResult::detected && trial.take_input_counts()->frames_read==4);
+    if (test == "wake_paced_deadline" || test == "wake_cue_deadline" ||
+        test == "wake_detect_over_deadline") {
+      const bool paced = test == "wake_paced_deadline";
+      assert(calls == (paced ? 486 : 500));
+      assert(trial_chunks == (paced ? 151 : test == "wake_cue_deadline" ? 155 : 156));
+      assert(wake == K151MicWakeTrialResult::fault && !trial.take_input_counts());
+      assert(trial.diagnostic().stage == K151MicWakeStage::capture_clock);
+      assert(trial.diagnostic().clock_reason == K151MicWakeClockReason::capture_window_exceeded);
+      assert(!trial.diagnostic().codec_cleanup_unverified && !rx.alive && !bus.alive);
+      assert(trial_model_drops == 1 && channels_created == 1);
+      assert(question.result == Result::not_run && !question_allocated);
+      assert(question_cues == 0 && question_reads == 0);
+      return 0;
+    }
+    const auto counts = trial.take_input_counts();
+    const bool detected_at_deadline = test == "wake_detect_at_deadline";
+    assert(wake == K151MicWakeTrialResult::detected && counts);
+    assert(counts->frames_read == (detected_at_deadline ? 500u : 4u));
+    if (detected_at_deadline) assert(trial_chunks == 156);
     assert(trial_model_drops==1 && question_allocated && !bus.alive && !rx.alive);
     assert(tx.deletes==0 && data_deletes==0 && legacy_calls==0);
     if(test=="no_memory" || test=="bad_placement") {
@@ -595,7 +630,8 @@ int main(int argc,char** argv) {
         : test=="interrupted_quiet" ? 112 : test=="control_local_limit" ? 250 : 50;
     assert(question_cues==1 && question_reads_at_cue==expected_cue);
     const int after_cue=question_reads-question_reads_at_cue;
-    if(test=="endpoint" || test=="release_fail" || test=="tail_then_question") {
+    if (test == "endpoint" || test == "release_fail" || test == "tail_then_question" ||
+        detected_at_deadline) {
       assert(after_cue==58);
       assert(question.result==(test=="release_fail"?Result::release_failed:Result::endpoint));
     } else if(test=="wake_tail" || test=="interrupted_quiet") {

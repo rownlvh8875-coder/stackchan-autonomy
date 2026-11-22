@@ -382,6 +382,10 @@ def test_k151_wake_clock_reason(port_binary, case, result, reason, monkeypatch):
     [
         "endpoint",
         "no_wake",
+        "wake_paced_deadline",
+        "wake_cue_deadline",
+        "wake_detect_at_deadline",
+        "wake_detect_over_deadline",
         "no_memory",
         "bad_placement",
         "wall",
