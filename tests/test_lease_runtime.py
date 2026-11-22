@@ -302,13 +302,21 @@ async def test_late_successful_control_io_cannot_authorize_dispatch(monkeypatch,
     )
     executor = ActionExecutor(FakeRobotAdapter(), settings, lease=lease)
     if phase == "check":
+
+        async def wait_for_test_cleanup():
+            await asyncio.Event().wait()
+
+        # Both operations share the expiry. This case observes delayed
+        # verification; the competing renewal deadline has its own test.
+        monkeypatch.setattr(executor, "_renew_control", wait_for_test_cleanup)
         assert await executor.claim_control()
-    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    verified, release, finished = threading.Event(), threading.Event(), threading.Event()
     original = getattr(lease, phase)
 
     def blocked(*args):
-        started.set()
         result = original(*args)
+        if result is not None and result is not False:
+            verified.set()
         release.wait(2)  # Delay delivery after the lease was actually verified.
         try:
             return result
@@ -325,7 +333,7 @@ async def test_late_successful_control_io_cannot_authorize_dispatch(monkeypatch,
         assert executor.control_loss_reason == phase + "_timeout"
         release.set()
         await executor.aclose()
-        assert finished.is_set()
+        assert verified.is_set() and finished.is_set()
         assert ControlLease(settings.state_path, settings.control_resource).acquire() is not None
     finally:
         release.set()
