@@ -31,6 +31,8 @@ size_t format_k151_mic_wake_report(K151MicWakeTrialResult result,
 class K151MicWakeTrial final {
  public:
   static const char* compiled_link_marker();
+  using ListenStarted = void (*)();
+  explicit K151MicWakeTrial(ListenStarted on_listen = nullptr) : on_listen_(on_listen) {}
 
   // The local owner supplies current board/I2S ownership evidence and the
   // whole linked model pack. The codec checks live board registers separately.
@@ -65,6 +67,7 @@ class K151MicWakeTrial final {
 
   NativeWakeInput input_;
   std::optional<K151MicWakeInputCounts> input_counts_;
+  ListenStarted on_listen_;
   bool attempted_ = false;
 };
 

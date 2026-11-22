@@ -148,6 +148,7 @@ K151MicWakeTrialResult K151MicWakeTrial::run_prepared(const std::atomic_bool& ow
   if (prepared && allowed() && input_.matches(*model)) {
     const auto start_us = esp_timer_get_time();
     if (start_us >= 0 && codec.microphone_on()) {
+      if (allowed() && on_listen_) on_listen_();
       result = listen(input_, mic, *model, start_us, allowed);
     }
   }

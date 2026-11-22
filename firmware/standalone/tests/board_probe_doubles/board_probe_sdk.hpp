@@ -6,7 +6,12 @@
 constexpr int ESP_OK = 0, pdPASS = 1, CHIP_ESP32S3 = 9;
 #define pdMS_TO_TICKS(value) (value)
 struct esp_chip_info_t { int model; uint16_t revision; };
-struct esp_partition_t { uint32_t address, size; };
+constexpr int ESP_PARTITION_TYPE_APP = 0, ESP_PARTITION_SUBTYPE_APP_OTA_1 = 17;
+struct esp_partition_t {
+  uint32_t address, size;
+  int type = ESP_PARTITION_TYPE_APP;
+  int subtype = ESP_PARTITION_SUBTYPE_APP_OTA_1;
+};
 struct usb_serial_jtag_driver_config_t { size_t rx_buffer_size, tx_buffer_size; };
 void esp_chip_info(esp_chip_info_t*);
 const esp_partition_t* esp_ota_get_running_partition();

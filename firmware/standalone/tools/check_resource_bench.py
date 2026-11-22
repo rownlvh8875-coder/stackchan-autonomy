@@ -15,8 +15,8 @@ SLOT_OFFSET = 0x510000
 SLOT_BYTES = 5_177_344
 
 
-def inspect_image(app: bytes, elf_sha256: str) -> dict:
-    envelope, regions = inspect_envelope(app, elf_sha256, b"k151_resource_bench")
+def inspect_model_image(app: bytes, elf_sha256: str, project: bytes) -> dict:
+    envelope, regions = inspect_envelope(app, elf_sha256, project)
     start = app.find(PACK_PREFIX)
     if start < 0 or app.find(PACK_PREFIX, start + 1) >= 0:
         raise ValueError("missing or ambiguous embedded model")
@@ -32,11 +32,17 @@ def inspect_image(app: bytes, elf_sha256: str) -> dict:
     ):
         raise ValueError("embedded model is not in a DROM segment")
     return {
-        "kind": "SILENT_RESOURCE_BENCH_NOT_OPERATIONAL",
         **envelope,
         "model_bytes": PACK_BYTES,
         "model_sha256": PACK_SHA256,
         "model_in_readonly_app_segment": True,
+    }
+
+
+def inspect_image(app: bytes, elf_sha256: str) -> dict:
+    return {
+        "kind": "SILENT_RESOURCE_BENCH_NOT_OPERATIONAL",
+        **inspect_model_image(app, elf_sha256, b"k151_resource_bench"),
     }
 
 
