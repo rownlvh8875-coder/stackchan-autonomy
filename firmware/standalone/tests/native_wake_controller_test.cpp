@@ -41,12 +41,13 @@ struct Hardware {
 struct Mic:MonoMicReader {
   Hardware& hw; bool question=false,fail=false; int calls=0;
   std::function<void()> hook;
+  std::function<int16_t(int)> signal;
   explicit Mic(Hardware& h,bool q=false):hw(h),question(q){}
   bool read_10ms(std::span<int16_t> pcm) override {
     assert(hw.mic && !hw.amp && pcm.size()==240);
     if(hook)hook();
     ++calls; if(fail)return false;
-    for(auto& v:pcm)v=question?(calls<=8?2000:0):-7000;
+    for(auto& v:pcm)v=signal?signal(calls):question?(calls<=8?2000:0):-7000;
     return true;
   }
 };
@@ -68,6 +69,7 @@ struct Model:NativeWakePort {
 };
 struct Api:VoiceApiPort {
   Hardware& hw; int calls=0;
+  std::function<void(std::span<const int16_t>)> on_question;
   std::function<void(VoiceApiStage)> on_reply;
   explicit Api(Hardware& h):hw(h){}
   VoiceApiReply request(const VoiceApiRequest& r) override {
@@ -76,6 +78,7 @@ struct Api:VoiceApiPort {
     VoiceApiReply v; v.success=true;v.http_status=200;v.finished_ms=r.started_ms+1;
     if(calls==0){
       assert(r.stage==VoiceApiStage::transcribe);
+      if(on_question)on_question(r.pcm24k);
       for(auto sample:r.pcm24k)assert(sample==0 || sample==2000);
       v.utf8_text="질문";
     }
@@ -127,6 +130,76 @@ struct Fixture {
 int main(int argc,char** argv) {
   assert(argc==2);const std::string_view test=argv[1];
   Fixture x;
+  constexpr int initial_quiet=QuestionCapture::kInitialQuietFrames;
+  if(test=="loop_wake_tail" || test.starts_with("loop_silent_question")) {
+    const bool new_question=test=="loop_wake_tail";
+    const bool stop_on_close=test=="loop_silent_question_stop";
+    const bool fail_close=test=="loop_silent_question_close_fault";
+    constexpr int quiet=initial_quiet;
+    constexpr int endpoint=QuestionCapture::kEndFrames;
+    // An initial wake tail, an almost sufficient quiet run, then one more
+    // transient. The question begins only after a full new quiet run.
+    constexpr int question_at=4+quiet-1+1+quiet;
+    x.question_mic.signal=[=](int read) -> int16_t {
+      const int frame=(read-1)/2;
+      if(new_question && (frame<4 || frame==4+quiet-1))return 7000;
+      return new_question && frame>=question_at && frame<question_at+4?2000:0;
+    };
+    x.api.on_question=[](std::span<const int16_t> pcm) {
+      assert(pcm.size()==4*QuestionCapture::kFrame);
+      for(const auto sample:pcm)assert(sample==2000);
+    };
+    x.session.cloud_enable(true);
+    NativeVoiceLoop loop{x.session,x.ledger,*x.native,x.turn,x.audio,x.model,
+                         x.stop,x.consent,x.busy,[]{return true;}};
+    const auto poll=[&](uint64_t now){return loop.poll(now,1800000000,x.models);};
+    assert(poll(1000)==NativeVoiceStep::listening);
+    assert(poll(1010)==NativeVoiceStep::listening);
+    assert(poll(1020)==NativeVoiceStep::questioning);
+    const auto epoch=x.session.epoch();
+    const auto budget=x.store.budget;
+    if(new_question) {
+      for(int frame=0;frame<question_at;++frame) {
+        assert(poll(1040+uint64_t(frame)*20)==NativeVoiceStep::questioning);
+        assert(x.session.state()==State::ready && !x.turn.has_question_audio());
+        assert(x.api.calls==0 && x.store.budget==budget);
+      }
+      for(int frame=question_at;frame<question_at+4+endpoint-1;++frame)
+        assert(poll(1040+uint64_t(frame)*20)==NativeVoiceStep::questioning);
+      assert(poll(1040+uint64_t(question_at+4+endpoint-1)*20)==NativeVoiceStep::answered);
+      assert(x.api.calls==3 && x.sink.calls==1 && x.ledger.reserved_conversations()==1);
+    } else {
+      for(uint64_t now=1040;now<6020;now+=20)
+        assert(poll(now)==NativeVoiceStep::questioning);
+      const auto reads=x.question_mic.calls;
+      if(stop_on_close)x.hardware.mic_closing=[&]{x.stop=true;};
+      if(fail_close)x.hardware.fail_close=true;
+      const auto result=poll(6020);
+      assert(x.question_mic.calls==reads);
+      assert(x.api.calls==0 && x.sink.calls==0 && x.store.budget==budget);
+      assert(!x.turn.active() && !x.turn.has_question_audio());
+      assert(!x.ledger.reserve(1800000000,true,true,epoch));
+      if(stop_on_close || fail_close) {
+        assert(result==NativeVoiceStep::stopped && x.session.state()==State::stopped);
+        assert(poll(6520)==NativeVoiceStep::stopped);
+        if(fail_close)assert(x.audio.state()==AudioState::fault);
+      } else {
+        assert(result==NativeVoiceStep::cooldown && x.session.state()==State::cooldown);
+        assert(!x.hardware.mic && !x.hardware.amp && x.audio.state()==AudioState::idle);
+        assert(poll(6519)==NativeVoiceStep::cooldown);
+        assert(poll(6520)==NativeVoiceStep::listening);
+        assert(poll(6530)==NativeVoiceStep::listening);
+        assert(poll(6540)==NativeVoiceStep::questioning && x.session.epoch()>epoch);
+      }
+    }
+    std::cout<<"PASS "<<test<<'\n';return 0;
+  }
+  if(test.starts_with("loop_")) {
+    x.question_mic.signal=[](int read) -> int16_t {
+      const int frame=(read-1)/2;
+      return frame>=initial_quiet && frame<initial_quiet+4?2000:0;
+    };
+  }
   if(test.starts_with("loop_lost_during_")) {
     bool measured_ready=true;
     auto revoke=[&]{measured_ready=false;};
@@ -156,7 +229,7 @@ int main(int argc,char** argv) {
         if(test=="loop_lost_during_question_read") {
           x.question_mic.hook=revoke;
         } else {
-          for(int frame=0;frame<28;++frame,loss_poll+=20)
+          for(int frame=0;frame<initial_quiet+28;++frame,loss_poll+=20)
             assert(poll(loss_poll)==NativeVoiceStep::questioning);
           if(test=="loop_lost_during_question_close") {
             x.hardware.mic_closing=revoke;
@@ -220,14 +293,15 @@ int main(int argc,char** argv) {
         assert(loop.poll(1020,1800000000,x.models)==NativeVoiceStep::questioning);
         assert(!x.native->active() && x.turn.active());
         NativeVoiceStep result{};
-        for(int i=0;i<=28;++i)result=loop.poll(1040+uint64_t(i)*20,1800000000,x.models);
+        constexpr uint64_t end=1040+(initial_quiet+28)*20;
+        for(uint64_t now=1040;now<=end;now+=20)result=loop.poll(now,1800000000,x.models);
         if(test=="loop_cloud_off") {
           assert(result==NativeVoiceStep::stopped && x.api.calls==0);
         } else {
           assert(result==NativeVoiceStep::answered && x.api.calls==3 && x.sink.calls==1);
-          assert(loop.poll(1700,1800000000,x.models)==NativeVoiceStep::cooldown);
+          assert(loop.poll(end+100,1800000000,x.models)==NativeVoiceStep::cooldown);
           assert(!x.hardware.mic && !x.hardware.amp);
-          assert(loop.poll(2200,1800000000,x.models)==NativeVoiceStep::listening);
+          assert(loop.poll(end+600,1800000000,x.models)==NativeVoiceStep::listening);
           assert(x.hardware.mic && !x.hardware.amp && !x.turn.active());
         }
       }

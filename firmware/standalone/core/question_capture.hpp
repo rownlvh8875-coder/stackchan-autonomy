@@ -103,6 +103,11 @@ class QuestionCapture final {
         std::span<const int16_t>(samples_.get(), used_) : std::span<const int16_t>{};
   }
   CaptureResult status() const { return state_; }
+  Start start_policy() const { return start_; }
+  void reset(Start start) {
+    start_ = start;
+    reset();
+  }
   void reset() {
     wipe_pcm(used_samples());
     samples_.reset();
@@ -122,7 +127,7 @@ class QuestionCapture final {
   }
   uint32_t min_rms_;
   Allocator allocate_;
-  const Start start_;
+  Start start_;
   Buffer samples_{nullptr, nullptr};
   size_t used_ = 0;
   size_t frames_seen_ = 0;

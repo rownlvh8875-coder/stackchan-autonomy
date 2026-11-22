@@ -40,6 +40,7 @@ class NativeVoiceLoop final {
       const auto result = turn_.poll(now_ms, unix_seconds, models,
                                      [this] { return live_ready(); });
       if (result == VoiceTurnStep::answered) return NativeVoiceStep::answered;
+      if (result == VoiceTurnStep::no_speech) return NativeVoiceStep::cooldown;
       if (result == VoiceTurnStep::aborted || result == VoiceTurnStep::inactive)
         return cancel();
       return NativeVoiceStep::questioning;
@@ -50,7 +51,9 @@ class NativeVoiceLoop final {
     const auto event = wake_.poll(now_ms);
     if (!live_ready()) return cancel();
     if (event.step == NativeWakeStep::detected) {
-      if (!event.epoch || !turn_.arm(*event.epoch, now_ms) || !live_ready())
+      if (!event.epoch ||
+          !turn_.arm(*event.epoch, now_ms, QuestionCapture::Start::after_quiet) ||
+          !live_ready())
         return cancel();
       return NativeVoiceStep::questioning;
     }

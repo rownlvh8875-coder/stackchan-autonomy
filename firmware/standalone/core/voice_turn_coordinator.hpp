@@ -12,7 +12,7 @@
 
 namespace stackchan::standalone {
 
-enum class VoiceTurnStep { inactive, waiting_for_speech, recording, answered, aborted };
+enum class VoiceTurnStep { inactive, waiting_for_speech, recording, answered, no_speech, aborted };
 
 // Orchestrates an ALREADY-approved and initialized audio guard after a wake
 // event. The device transport and real speech models are separate tasks.
@@ -30,15 +30,15 @@ class VoiceTurnCoordinator final {
         speaker_busy_(speaker_busy),
         capture_(QuestionCapture::kDefaultMinRms, allocate_question_pcm) {}
 
-  bool arm(uint64_t epoch, uint64_t now_ms) {
-    if (active_ || faulted_ || stop_.load() || !consent_.load() ||
-        speaker_busy_.load() || audio_.state() != AudioState::idle)
+  bool arm(uint64_t epoch, uint64_t now_ms,
+           QuestionCapture::Start start = QuestionCapture::Start::immediate) {
+    if (active_ || faulted_ || !audio_allowed() || audio_.state() != AudioState::idle)
       return false;
     session_.tick(now_ms);
     if (session_.state() != State::ready || session_.epoch() != epoch)
       return false;
-    if (!capture_.prepare() || stop_.load() || !consent_.load() ||
-        speaker_busy_.load() || !audio_.capture_begin()) {
+    capture_.reset(start);
+    if (!capture_.prepare() || !audio_allowed() || !audio_.capture_begin()) {
       abort();
       return false;
     }
@@ -55,17 +55,29 @@ class VoiceTurnCoordinator final {
                      const std::function<bool()>& live_readiness = {}) {
     if (faulted_) return VoiceTurnStep::aborted;
     if (!active_) return VoiceTurnStep::inactive;
-    if (stop_.load() || !consent_.load() || speaker_busy_.load())
-      return abort();
+    if (!audio_allowed()) return abort();
     session_.tick(now_ms);
-    if (session_.epoch() != epoch_ ||
-        (session_.state() != State::ready && session_.state() != State::record))
+    if (session_.epoch() != epoch_) return abort();
+    if (!speech_started_ && session_.state() == State::cooldown &&
+        capture_.start_policy() == QuestionCapture::Start::after_quiet) {
+      // A native wake without a question expired at the normal ready deadline.
+      // Retire this epoch's unused permission and release the microphone.
+      capture_.reset();
+      ledger_.cancel_permit();
+      if (!audio_.capture_end() || (live_readiness && !live_readiness()) ||
+          !audio_allowed() || session_.epoch() != epoch_ ||
+          session_.state() != State::cooldown)
+        return abort();
+      active_ = false;
+      epoch_ = 0;
+      return VoiceTurnStep::no_speech;
+    }
+    if (session_.state() != State::ready && session_.state() != State::record)
       return abort();
 
     const CaptureResult event = bridge_.capture(capture_);
     if (event == CaptureResult::rejected || (live_readiness && !live_readiness()) ||
-        stop_.load() ||
-        !consent_.load() || speaker_busy_.load())
+        !audio_allowed())
       return abort();
 
     if (event == CaptureResult::speech_started && !speech_started_) {
@@ -92,6 +104,10 @@ class VoiceTurnCoordinator final {
   bool has_question_audio() const { return !capture_.audio().empty(); }
 
  private:
+  bool audio_allowed() const {
+    return !stop_.load() && consent_.load() && !speaker_busy_.load();
+  }
+
   VoiceTurnStep abort() {
     faulted_ = true; // Fail-closed: only new owner-authorized lifecycle may reset.
     active_ = false;

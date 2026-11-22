@@ -44,6 +44,10 @@ def built(tmp_path_factory):
     "case",
     [
         "loop_turn",
+        "loop_wake_tail",
+        "loop_silent_question",
+        "loop_silent_question_stop",
+        "loop_silent_question_close_fault",
         "loop_cloud_off",
         "loop_stop",
         "loop_revoke",
