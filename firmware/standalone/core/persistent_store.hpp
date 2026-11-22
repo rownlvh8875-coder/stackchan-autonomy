@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -62,12 +63,15 @@ class PersistentGuard {
     return false;
   }
 
-  // Device-local setup may provision an absent budget after explicit
-  // approval. An existing record is restored without writing to storage.
-  bool restore_budget_for_setup(bool allow_first_provision) {
+  using BudgetBaselineCheck = std::function<bool(const ReadValue&)>;
+
+  // Match the reviewed durable starting record before restoring or provisioning
+  // a trial budget. A different record may mean the trial has already charged.
+  bool restore_budget_for_setup(bool allow_first_provision,
+                                const BudgetBaselineCheck& baseline = {}) {
     if (fatal_) return false;
-    if (budget_) return true;
-    const auto loaded = load_budget();
+    if (budget_) return !baseline;
+    const auto loaded = load_budget(baseline);
     return loaded == ReadCode::found ||
            (loaded == ReadCode::missing && provision_budget(allow_first_provision));
   }
@@ -158,8 +162,12 @@ class PersistentGuard {
   bool permit_active() const { return permit_active_; }
 
  private:
-  ReadCode load_budget() {
+  ReadCode load_budget(const BudgetBaselineCheck& baseline = {}) {
     const auto result = store_.read(kBudgetKey, 818);
+    if (baseline && !baseline(result)) {
+      fatal_ = true;
+      return ReadCode::failure;
+    }
     if (result.code == ReadCode::missing) return ReadCode::missing;
     if (result.code == ReadCode::found) {
       if (auto restored = BudgetLedger::restore(result.bytes)) {

@@ -25,12 +25,27 @@ int main() {
   policy.paid_scope_approved = true;
   assert(!admit_conversation_boot(policy, facts));
   policy.budget_scope_approved = true;
+  assert(!admit_conversation_boot(policy, facts)); // One paid turn needs a durable baseline.
+  policy.trial_budget_sha256 = facts.factory_identity_sha256; // Synthetic fixture.
   const auto trial = admit_conversation_boot(policy, facts);
   assert(trial && trial->audio.verified() && trial->mode == K151ConversationBuildMode::one_paid_turn);
   assert(!trial->allow_first_budget);
+  assert(matches_reviewed_trial_budget(policy, false, facts.factory_identity_sha256));
+  assert(!matches_reviewed_trial_budget(policy, false, K151BudgetDigest{}));
+  assert(!matches_reviewed_trial_budget(policy, false, std::nullopt));
+  assert(!matches_reviewed_trial_budget(policy, true, std::nullopt));
+  policy.trial_budget_sha256.reset();
+  policy.trial_budget_must_be_missing = true;
+  assert(!admit_conversation_boot(policy, facts)); // First write needs its own scope.
   policy.allow_first_budget = true;
   const auto led = admit_conversation_boot(policy, facts);
   assert(led && led->allow_first_budget);
+  assert(matches_reviewed_trial_budget(policy, true, std::nullopt));
+  assert(!matches_reviewed_trial_budget(policy, false, facts.factory_identity_sha256));
+  policy.trial_budget_sha256 = facts.factory_identity_sha256;
+  assert(!admit_conversation_boot(policy, facts)); // Ambiguous baseline.
+  policy.trial_budget_sha256.reset();
+  policy.trial_budget_must_be_missing = false;
   policy.mode = K151ConversationBuildMode::continuous;
   const auto continuous = admit_conversation_boot(policy, facts);
   assert(continuous && continuous->mode == K151ConversationBuildMode::continuous);

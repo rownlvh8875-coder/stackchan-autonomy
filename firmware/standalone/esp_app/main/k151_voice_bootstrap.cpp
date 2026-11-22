@@ -4,6 +4,9 @@
 #include "k151_display_stop.hpp"
 #include "k151_setup_lvgl.hpp"
 #include "k151_voice_handoff.hpp"
+#ifdef STACKCHAN_K151_CONVERSATION_IMAGE
+#include "k151_conversation_policy.hpp"
+#endif
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <utility>
@@ -60,10 +63,15 @@ bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t>
     stop();
     return false;
   }
+  PersistentGuard::BudgetBaselineCheck baseline;
+#ifdef STACKCHAN_K151_CONVERSATION_IMAGE
+  if (k151_local_conversation_policy().mode == K151ConversationBuildMode::one_paid_turn)
+    baseline = k151_local_trial_budget_matches;
+#endif
   if ((view_ && !view_->present_voice_status(K151VoiceStatus::connecting)) ||
       !confirmed_setup() || !authorized() || !storage_.init_without_erase() || !authorized() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) ||
-      !ledger_.restore_budget_for_setup(allow_first_budget) || !authorized() ||
+      !ledger_.restore_budget_for_setup(allow_first_budget, baseline) || !authorized() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) || !confirmed_setup()) {
     stop();
     return false;

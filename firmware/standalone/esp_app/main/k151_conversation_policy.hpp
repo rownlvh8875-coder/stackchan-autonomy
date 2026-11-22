@@ -5,11 +5,13 @@
 #include "k151_mic_only_evidence.hpp"
 #include "k151_output_evidence.hpp"
 #include <algorithm>
+#include <array>
 #include <optional>
 
 namespace stackchan::standalone {
 
 enum class K151ConversationBuildMode { hold, one_paid_turn, continuous };
+using K151BudgetDigest = std::array<std::uint8_t, 32>;
 
 // A private deployment record supplies measurements and scoped approval.
 // Installation authorization is checked separately against the finished image.
@@ -22,6 +24,10 @@ struct K151ConversationPolicy {
   bool budget_scope_approved = false;
   bool allow_first_budget = false;
   K151ConversationBuildMode mode = K151ConversationBuildMode::hold;
+  // Bind a one-turn deployment to a private snapshot of just sc_gpt/budget.
+  // Missing is a separate, explicitly reviewed first-provisioning case.
+  std::optional<K151BudgetDigest> trial_budget_sha256;
+  bool trial_budget_must_be_missing = false;
 };
 
 // Read-only, observed on each approved boot. Empty fields fail closed.
@@ -49,8 +55,14 @@ struct K151AdmittedConversation {
 };
 
 inline bool local_conversation_scope_complete(const K151ConversationPolicy& policy) {
-  const bool scoped = policy.mode == K151ConversationBuildMode::one_paid_turn ||
-                      policy.mode == K151ConversationBuildMode::continuous;
+  const bool first_budget = policy.trial_budget_must_be_missing &&
+                            policy.allow_first_budget && !policy.trial_budget_sha256;
+  const bool existing_budget = !policy.trial_budget_must_be_missing && policy.trial_budget_sha256 &&
+      std::ranges::any_of(*policy.trial_budget_sha256, [](auto value) { return value != 0; });
+  const bool scoped = policy.mode == K151ConversationBuildMode::one_paid_turn
+      ? first_budget || existing_budget
+      : policy.mode == K151ConversationBuildMode::continuous &&
+        !policy.trial_budget_must_be_missing && !policy.trial_budget_sha256;
   // This final HOLD verdict means the preceding measured-output checks passed.
   const bool measured =
       assess_k151_output(policy.output) == OutputBlock::hold_image_never_enables_audio;
@@ -75,8 +87,19 @@ inline std::optional<K151AdmittedConversation> admit_conversation_boot(
       policy.allow_first_budget, policy.mode};
 }
 
+inline bool matches_reviewed_trial_budget(const K151ConversationPolicy& policy, bool missing,
+                                           const std::optional<K151BudgetDigest>& observed) {
+  if (policy.mode != K151ConversationBuildMode::one_paid_turn ||
+      !local_conversation_scope_complete(policy))
+    return false;
+  return policy.trial_budget_must_be_missing ? missing && !observed
+      : !missing && observed && policy.trial_budget_sha256 == observed;
+}
+
 // These symbols exist only in the separate conversation project configuration.
+struct ReadValue;
 const K151ConversationPolicy& k151_local_conversation_policy();
+bool k151_local_trial_budget_matches(const ReadValue& read);
 bool k151_conversation_boot_armed();
 
 } // namespace stackchan::standalone

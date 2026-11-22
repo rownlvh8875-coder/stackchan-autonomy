@@ -69,6 +69,28 @@ int main() {
   assert(one_turn.admit_builtin_wake(2, true, true));
   assert(!one_turn.reserve(now + 86401, true, true, 2)); // Ledger window has rolled over.
   assert(!one_turn.authorize_step(PaidStage::transcribe, true, true) && setup_store.writes == 3);
+
+  TestKv trial_store;
+  trial_store.data["budget"] = reserved_budget;
+  const auto reviewed_budget = [&reserved_budget](const ReadValue& read) {
+    return read.code == ReadCode::found && read.bytes == reserved_budget;
+  };
+  PersistentGuard reviewed(trial_store, true);
+  assert(reviewed.restore_budget_for_setup(false, reviewed_budget));
+  assert(reviewed.admit_builtin_wake(1, true, true) && reviewed.reserve(now + 1, true, true, 1));
+  assert(reviewed.authorize_step(PaidStage::transcribe, true, true));
+  PersistentGuard rebooted(trial_store, true);
+  assert(!rebooted.restore_budget_for_setup(false, reviewed_budget) && rebooted.fatal());
+  assert(!rebooted.admit_builtin_wake(1, true, true) && trial_store.writes == 1);
+
+  TestKv first_trial_store;
+  const auto reviewed_absence = [](const ReadValue& read) { return read.code == ReadCode::missing; };
+  PersistentGuard first_trial(first_trial_store, true);
+  assert(first_trial.restore_budget_for_setup(true, reviewed_absence));
+  PersistentGuard after_provision(first_trial_store, true);
+  assert(!after_provision.restore_budget_for_setup(true, reviewed_absence) && after_provision.fatal());
+  assert(first_trial_store.writes == 1);
+
   TestKv corrupt_setup;
   corrupt_setup.data["budget"] = {1, 2, 3};
   PersistentGuard corrupt(corrupt_setup);
