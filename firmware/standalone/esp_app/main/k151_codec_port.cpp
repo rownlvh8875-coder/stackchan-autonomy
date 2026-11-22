@@ -103,11 +103,20 @@ bool K151CodecPort::fail() {
   return false;
 }
 
+bool K151CodecPort::is_registered_board_bus(i2c_master_bus_handle_t bus) {
+  i2c_master_bus_handle_t registered = nullptr;
+  return bus && i2c_master_get_bus_handle(I2C_NUM_1, &registered) == ESP_OK && bus == registered;
+}
+
 bool K151CodecPort::prepare(const std::atomic_bool& owner, const std::atomic_bool& stop,
-                             const K151AudioBoardEvidence& evidence) {
-  if (attempted_ || !owner.load() || stop.load() || !evidence.verified()) return false;
+                           const K151AudioBoardEvidence& evidence,
+                           i2c_master_bus_handle_t borrowed_bus) {
+  if (attempted_ || !owner.load() || stop.load() || !evidence.verified() ||
+      (borrowed_bus && !is_registered_board_bus(borrowed_bus)))
+    return false;
   owner_ = &owner;
   stop_ = &stop;
+  i2c_bus_ = borrowed_bus;
   if (prepare_hardware()) return true;
   (void)shutdown();
   return false;
@@ -205,14 +214,17 @@ bool K151CodecPort::release_board_device() {
 
 bool K151CodecPort::prepare_i2s() {
   prepare_stage_ = K151MicWakeStage::i2c_bus;
-  i2c_master_bus_config_t bus_cfg = {};
-  bus_cfg.i2c_port = static_cast<i2c_port_t>(kI2cPort);
-  bus_cfg.sda_io_num = static_cast<gpio_num_t>(k151::kI2cSda);
-  bus_cfg.scl_io_num = static_cast<gpio_num_t>(k151::kI2cScl);
-  bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
-  bus_cfg.glitch_ignore_cnt = 7;
-  bus_cfg.flags.enable_internal_pullup = 1;
-  if (i2c_new_master_bus(&bus_cfg, &i2c_bus_) != ESP_OK) return false;
+  if (!i2c_bus_) {
+    i2c_master_bus_config_t bus_cfg = {};
+    bus_cfg.i2c_port = static_cast<i2c_port_t>(kI2cPort);
+    bus_cfg.sda_io_num = static_cast<gpio_num_t>(k151::kI2cSda);
+    bus_cfg.scl_io_num = static_cast<gpio_num_t>(k151::kI2cScl);
+    bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
+    bus_cfg.glitch_ignore_cnt = 7;
+    bus_cfg.flags.enable_internal_pullup = 1;
+    if (i2c_new_master_bus(&bus_cfg, &i2c_bus_) != ESP_OK) return false;
+    owns_i2c_bus_ = true;
+  }
   if (!prepare_board()) return false;
 
   prepare_stage_ = K151MicWakeStage::i2s_rx;
@@ -623,10 +635,12 @@ bool K151CodecPort::shutdown() {
   }
   if (board_device_ && !release_board_device()) cleanup_ok = false;
   if (i2c_bus_ && !board_device_) {
-    if (i2c_del_master_bus(i2c_bus_) != ESP_OK) cleanup_ok = false;
-    // Pinned IDF can report pin-deinit error after freeing the bus wrapper.
-    // Never retry this ambiguous pointer. Fault remains; reclamation/mute is
-    // NOT proven if deletion failed before free. No automatic reset/recovery.
+    if (owns_i2c_bus_) {
+      if (i2c_del_master_bus(i2c_bus_) != ESP_OK) cleanup_ok = false;
+      // Pinned IDF can report pin-deinit error after freeing the bus wrapper.
+      // Never retry this ambiguous pointer or assume reclamation after failure.
+      owns_i2c_bus_ = false;
+    }
     i2c_bus_ = nullptr;
   }
   prepared_ = false;

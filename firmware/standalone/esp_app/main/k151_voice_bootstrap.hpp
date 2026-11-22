@@ -8,11 +8,13 @@
 namespace stackchan::standalone {
 
 // Call only from the device-local owner task. Setup and the authorization
-// flags outlive this object. The HOLD entrypoint links a marker only.
+// flags and the registered I2C1 bus outlive this object. The owner task
+// serializes all access to the bus. The HOLD entrypoint links a marker only.
 class K151VoiceBootstrap final {
  public:
   K151VoiceBootstrap(K151LocalOwnerSetup& setup, const std::atomic_bool& paid_consent,
-                     const std::atomic_bool& budget_writes, K151AudioBoardEvidence evidence);
+                     const std::atomic_bool& budget_writes, K151AudioBoardEvidence evidence,
+                     i2c_master_bus_handle_t board_bus);
   K151VoiceBootstrap(const K151VoiceBootstrap&) = delete;
   K151VoiceBootstrap& operator=(const K151VoiceBootstrap&) = delete;
 
@@ -33,6 +35,7 @@ class K151VoiceBootstrap final {
   const std::atomic_bool& paid_consent_;
   const std::atomic_bool& budget_writes_;
   const K151AudioBoardEvidence evidence_;
+  const i2c_master_bus_handle_t board_bus_;
   IsolatedNvs storage_;
   PersistentGuard ledger_{storage_};
   K151WifiTimePort network_;

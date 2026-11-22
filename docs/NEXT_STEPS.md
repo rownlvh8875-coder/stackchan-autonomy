@@ -1,5 +1,28 @@
 # Next steps
 
+## 2026-11-23 오프라인 후속 — 로컬 설정과 오디오의 I2C1 공유
+
+설정 센서에 사용한 I2C1 버스를 독립 대화 실행기에 넘긴다. 로컬
+소유자 작업이 버스 수명과 모든 접근을 관리한다. 등록된 핸들을
+예산 처리 전후와 코덱 초기화 직전에 확인한다. 기존 보드와 전원
+검증도 적용한다. STOP과 코덱 초기화 실패 때 코덱이 붙인 장치만
+정리하며 센서와 버스는 유지한다. 단독 진단에는 기존 전용 버스를
+사용한다.
+
+오프라인 모의 시험에서 잘못된 버스와 등록 해제, 초기화 실패,
+STOP, 장치 해제 재시도를 확인했다. 기본 부팅은 HOLD이고,
+실물에서 설정 센서와 코덱을 잇는 작업 및 물리 STOP 검증이 남아 있다.
+
+제조사 도면에서 머리 Si12T와 코덱은 SDA GPIO12, SCL GPIO11을
+공유한다. 전원 보드의 FPC1 2번에서 머리 터치의 `Touch_IRQ`는
+미연결이다. 물리 STOP 후보는 별도의 화면 터치다. 호스트 도면에서
+화면 터치 신호는 AW9523B P1_2에 연결되고, 확장기의 공용
+인터럽트는 GPIO21로 들어간다. 실제 기동 시 인터럽트 설정과
+다른 입력의 영향을 확인한 뒤 STOP에 연결한다.
+[M5Stack 전원 보드 도면](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/SCH_Power.pdf)
+[M5Stack 호스트 도면](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf)
+[M5Stack Si12T 소스](https://github.com/m5stack/StackChan-BSP/blob/e2f3b02dbe7f28e26a02adc72bef3aa2c545e4a0/src/drivers/Si12T/Si12T.h#L9-L12)
+
 ## 2026-11-23 오프라인 후속 — 로컬 설정에서 독립 대화 시작
 
 로컬에서 확인된 설정을 받아 기존 예산을 먼저 불러온 뒤 Wi-Fi와

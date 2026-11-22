@@ -30,6 +30,7 @@ std::string mode;
 i2s_channel_obj tx,rx;
 i2c_master_bus_t bus;
 i2c_master_dev_t pmic{0x34}, expander{0x58};
+i2c_master_dev_t menu_sensor{0x68};
 int reset_writes=0, reset_waits=0, expander_removes=0;
 uint8_t output_latch=0xa7;
 bool reset_read_back=false;
@@ -319,9 +320,15 @@ extern "C" esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t*,i2c_maste
   ++bus_created;
   *h=&bus;return 0;
 }
+extern "C" esp_err_t i2c_master_get_bus_handle(i2c_port_t port,i2c_master_bus_handle_t* handle) {
+  assert(port==I2C_NUM_1);
+  if (mode=="borrowed_bus_unregistered") return ESP_ERR_INVALID_STATE;
+  *handle=&bus;
+  return ESP_OK;
+}
 extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){
   assert(h==&bus && h->alive);++h->deletes;
-  if(pmic.open || expander.open)return ESP_ERR_INVALID_STATE;
+  if(pmic.open || expander.open || menu_sensor.open)return ESP_ERR_INVALID_STATE;
   if(mode=="release_bus_live_error")return ESP_ERR_INVALID_STATE;
   h->alive=false;return mode=="release_bus_freed_error"?ESP_FAIL:ESP_OK;
 }
@@ -341,18 +348,26 @@ extern "C" esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev) {
   assert(dev->open);
   if(dev==&expander && ++expander_removes==1 && mode=="mic_only_board_cleanup_busy")
     return ESP_ERR_INVALID_STATE;
+  if(dev==&expander && expander_removes==1 && mode=="borrowed_bus_busy")
+    return ESP_ERR_INVALID_STATE;
   dev->open=false;
   return mode=="mic_only_board_cleanup" && dev==&expander ? ESP_FAIL : ESP_OK;
 }
 extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
                                                  const uint8_t* reg,size_t n,
                                                  uint8_t* value,size_t bytes,int ms) {
+  if (dev==&menu_sensor) {
+    assert(bus.alive && dev->open && n==1 && *reg==0x10 && bytes==1 && ms==100);
+    *value=0;
+    return ESP_OK;
+  }
   assert(dev->open && n==1 && bytes==1 && ms==30);
   if (mic_only() || dev == &pmic) assert(channels_created==bus_created-1);
   if(dev==&pmic) {
     assert(*reg==0x03 || *reg==0x90);
     *value=*reg==0x03 ? (mode=="mic_only_board_bad_pmic" ||
-                        mode=="duplex_board_wrong_pmic" ? 0 : 0x4a)
+                        mode=="duplex_board_wrong_pmic" ||
+                        mode=="borrowed_bus_bad_pmic" ? 0 : 0x4a)
                      : (mode=="mic_only_board_rails_off" ? 0x01 : 0xbf);
   } else {
     assert(dev==&expander);
@@ -1117,6 +1132,37 @@ int main(int argc,char** argv) {
     assert(!port.prepare(local_owner,local_stop,{true,false}));
     assert(!port.capture_mono_24k(pcm));zero(pcm);
     assert(created==0 && bus_created==0);return 0;
+  }
+  if (mode.starts_with("borrowed_bus_")) {
+    i2c_master_bus_config_t config{};
+    config.i2c_port=I2C_NUM_1;
+    i2c_master_bus_handle_t menu_bus=nullptr;
+    assert(i2c_new_master_bus(&config,&menu_bus)==ESP_OK && menu_bus==&bus);
+    menu_sensor.open=true;
+    i2c_master_bus_t wrong_bus;
+    const auto wanted=mode=="borrowed_bus_wrong" ? &wrong_bus : menu_bus;
+    const bool wrong=mode=="borrowed_bus_wrong" || mode=="borrowed_bus_unregistered";
+    const bool prepared=!wrong && mode!="borrowed_bus_bad_pmic";
+    assert(port.prepare(local_owner,local_stop,{true,true},wanted)==prepared);
+    if (mode=="borrowed_bus_stop") {
+      assert(port.microphone_on());
+      local_stop=true;
+    }
+    const bool busy=mode=="borrowed_bus_busy";
+    assert(port.shutdown()==(wrong || (prepared && !busy)));
+    if (busy) {
+      assert(expander.open && port.cleanup_unverified());
+      assert(!port.shutdown()); // Retrying only the retained device preserves the fault.
+    }
+    assert(!rx.enabled && !tx.enabled && !pmic.open && !expander.open);
+    assert(bus_created==1 && bus.deletes==0 && bus.alive && menu_sensor.open);
+    assert(channels_created==int(prepared));
+    if (prepared) assert(reset_writes==3 && output_latch==0xa3);
+    else assert(reset_writes==0);
+    const uint8_t key=0x10;
+    uint8_t value=0xff;
+    assert(i2c_master_transmit_receive(&menu_sensor,&key,1,&value,1,100)==ESP_OK && value==0);
+    return 0;
   }
   if (mode.starts_with("duplex_board_")) {
     assert(!port.prepare(local_owner, local_stop, {true, true}));

@@ -23,10 +23,11 @@ K151VoiceRuntime::K151VoiceRuntime(
     PersistentGuard& ledger, K151WifiTimePort& network,
     const std::atomic_bool& local_owner, const std::atomic_bool& paid_consent,
     const std::atomic_bool& budget_writes, const std::atomic_bool& stop,
-    K151AudioBoardEvidence evidence)
+    K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus)
     : ledger_(ledger), network_(network),
       owner_(local_owner), consent_(paid_consent), budget_writes_(budget_writes), stop_(stop),
-      evidence_(evidence), audio_(k151_audio_hooks(codec_, owner_, stop_, consent_, evidence_)),
+      evidence_(evidence), board_bus_(board_bus),
+      audio_(k151_audio_hooks(codec_, owner_, stop_, consent_, evidence_, board_bus_)),
       mic_(codec_), sink_(codec_, stop, paid_consent, local_owner),
       speaker_(audio_, sink_, stop, paid_consent, busy_,
                []() -> std::optional<uint64_t> {
@@ -70,7 +71,8 @@ bool K151VoiceRuntime::live_ready() const {
 
 bool K151VoiceRuntime::start(VoiceModelConfig models, std::span<const uint8_t> model_pack) {
   if (phase_ != Phase::cold || !K151CodecPort::playback_enabled_by_build() ||
-      !evidence_.verified() || model_pack.empty() || !models.valid() ||
+      !evidence_.verified() || !K151CodecPort::is_registered_board_bus(board_bus_) ||
+      model_pack.empty() || !models.valid() ||
       !ledger_.has_budget() || ledger_.fatal() || !network_.active() || !authorized())
     return false;
   models_ = std::move(models);

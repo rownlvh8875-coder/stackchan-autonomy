@@ -8,10 +8,12 @@ namespace stackchan::standalone {
 
 K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup,
     const std::atomic_bool& paid_consent, const std::atomic_bool& budget_writes,
-    K151AudioBoardEvidence evidence)
+    K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus)
     : setup_(setup), paid_consent_(paid_consent), budget_writes_(budget_writes),
-      evidence_(evidence), storage_(setup.owner_, paid_consent, budget_writes, setup.stop_),
-      voice_(ledger_, network_, setup.owner_, paid_consent, budget_writes, setup.stop_, evidence) {}
+      evidence_(evidence), board_bus_(board_bus),
+      storage_(setup.owner_, paid_consent, budget_writes, setup.stop_),
+      voice_(ledger_, network_, setup.owner_, paid_consent, budget_writes, setup.stop_,
+             evidence_, board_bus_) {}
 
 bool K151VoiceBootstrap::authorized() const {
   return setup_.owner_.load() && paid_consent_.load() && budget_writes_.load() &&
@@ -27,12 +29,14 @@ bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t>
                                bool allow_first_budget) {
   if (attempted_ || !K151InstallHold::device_activation_allowed() ||
       !K151CodecPort::playback_enabled_by_build() || !evidence_.verified() ||
-      !models.valid() || pack.empty() || !authorized() || !confirmed_setup())
+      !K151CodecPort::is_registered_board_bus(board_bus_) || !models.valid() || pack.empty() ||
+      !authorized() || !confirmed_setup())
     return false;
   attempted_ = true;
   if (!storage_.init_without_erase() || !authorized() ||
-      !ledger_.restore_budget_for_setup(allow_first_budget) ||
-      !authorized() || !confirmed_setup()) {
+      !K151CodecPort::is_registered_board_bus(board_bus_) ||
+      !ledger_.restore_budget_for_setup(allow_first_budget) || !authorized() ||
+      !K151CodecPort::is_registered_board_bus(board_bus_) || !confirmed_setup()) {
     setup_.stop();
     return false;
   }

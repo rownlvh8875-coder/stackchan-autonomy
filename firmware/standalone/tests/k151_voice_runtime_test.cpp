@@ -18,6 +18,8 @@
 
 using namespace stackchan::standalone;
 
+struct i2c_master_bus_t {};
+
 namespace {
 std::string_view scenario;
 std::atomic_bool owner{true}, consent{true}, stop{false};
@@ -29,6 +31,8 @@ int model_starts = 0, model_stops = 0, mic_opens = 0, capture_reads = 0;
 int calls = 0, plays = 0;
 bool codec_running = false, mic_open = false, amp_open = false, model_loaded = false;
 bool pending_pcm = false;
+i2c_master_bus_t menu_bus;
+bool board_bus_registered = true;
 int nvs_init_calls = 0, nvs_write_opens = 0, nvs_sets = 0, nvs_commits = 0;
 std::vector<uint8_t> durable_budget, durable_profile{0x7b}, staged;
 bool staged_profile = false;
@@ -77,6 +81,7 @@ extern "C" bool esp_ptr_external_ram(const void*) { return true; }
 
 extern "C" esp_err_t nvs_flash_init() {
   ++nvs_init_calls;
+  if (scenario == "bootstrap_bus_lost_at_init") board_bus_registered = false;
   return scenario == "bootstrap_nvs_init_error" ? ESP_FAIL : ESP_OK;
 }
 extern "C" esp_err_t nvs_open(const char* space, nvs_open_mode_t mode, nvs_handle_t* handle) {
@@ -96,6 +101,7 @@ extern "C" esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* ou
     assert(*len == durable_budget.size());
     std::memcpy(out, durable_budget.data(), *len);
     if (scenario == "bootstrap_readback_error") static_cast<uint8_t*>(out)[0] ^= 1;
+    if (scenario == "bootstrap_bus_lost_during_restore") board_bus_registered = false;
   }
   *len = durable_budget.size();
   return ESP_OK;
@@ -132,9 +138,15 @@ bool K151HeadTouchOwner::finish_owner_setup(K151LocalOwnerSetup& setup, uint64_t
 K151BoundedI2s::K151BoundedI2s() : audio_codec_data_if_t{} {}
 K151CodecPort::~K151CodecPort() { assert(!codec_running); }
 bool K151CodecPort::playback_enabled_by_build() { return scenario != "hold_build"; }
+bool K151CodecPort::is_registered_board_bus(i2c_master_bus_handle_t bus) {
+  return bus == &menu_bus && board_bus_registered;
+}
 bool K151CodecPort::prepare(const std::atomic_bool& given_owner,
                            const std::atomic_bool& given_stop,
-                           const K151AudioBoardEvidence& evidence) {
+                           const K151AudioBoardEvidence& evidence,
+                           i2c_master_bus_handle_t borrowed_bus) {
+  assert(borrowed_bus == &menu_bus);
+  if (!is_registered_board_bus(borrowed_bus)) return false;
   assert(&given_owner == &owner && &given_stop == &stop && owner && !stop && consent);
   assert(evidence.verified() && network_polls == 2 && !codec_running);
   ++codec_starts;
@@ -286,7 +298,7 @@ void exercise_bootstrap() {
   }
 
   const bool previous = scenario == "bootstrap_existing";
-  if (previous) {
+  if (previous || scenario == "bootstrap_bus_lost_during_restore") {
     auto ledger = BudgetLedger::fresh();
     assert(ledger.reserve(1'795'100'000, true, [](auto) { return true; }));
     durable_budget = ledger.serialize();
@@ -302,7 +314,11 @@ void exercise_bootstrap() {
   assert(setup.submit_api_key("not-a-real-key-test", 1000));
   if (scenario != "bootstrap_unconfirmed") assert(touch.finish_owner_setup(setup, 1000));
   if (scenario == "bootstrap_no_budget_scope") budget_writes = false;
-  K151VoiceBootstrap bootstrap(setup, consent, budget_writes, {true, true});
+  i2c_master_bus_t wrong_bus;
+  auto board_bus = &menu_bus;
+  if (scenario == "bootstrap_missing_bus") board_bus = nullptr;
+  if (scenario == "bootstrap_wrong_bus") board_bus = &wrong_bus;
+  K151VoiceBootstrap bootstrap(setup, consent, budget_writes, {true, true}, board_bus);
   if (scenario == "bootstrap_manual_stop") {
     bootstrap.stop();
     assert(!setup.ready());
@@ -318,7 +334,8 @@ void exercise_bootstrap() {
     assert(bootstrap.poll() == NativeVoiceStep::stopped && calls == 0 && codec_starts == 0);
     const bool early = scenario == "bootstrap_unconfirmed" || scenario == "bootstrap_hold" ||
                        scenario == "bootstrap_no_budget_scope" ||
-                       scenario == "bootstrap_manual_stop";
+                       scenario == "bootstrap_manual_stop" ||
+                       scenario == "bootstrap_missing_bus" || scenario == "bootstrap_wrong_bus";
     assert(nvs_init_calls == int(!early));
     const bool during_wifi = scenario.starts_with("bootstrap_wifi_");
     const bool began_writing = during_wifi || scenario == "bootstrap_commit_error" ||
@@ -379,7 +396,7 @@ int main(int argc, char** argv) {
   if (scenario == "not_owner") owner = false;
   if (scenario == "stop_before_start") stop = true;
   K151VoiceRuntime runtime(ledger, network, owner, consent, budget_writes, stop,
-                           {scenario != "wrong_board", true});
+                           {scenario != "wrong_board", true}, &menu_bus);
   const VoiceModelConfig models{"stt", "gpt", "tts", "voice"};
   if (scenario == "hold_build" || scenario == "not_owner" ||
       scenario == "no_consent" || scenario == "wrong_board" || scenario == "no_budget" || stop) {
@@ -398,12 +415,15 @@ int main(int argc, char** argv) {
   assert(runtime.poll() == NativeVoiceStep::waiting_network);
   assert(network_polls == 1 && codec_starts == 0 && !model_loaded);
   if (scenario == "stop_waiting") stop = true;
+  if (scenario == "bus_lost_waiting") board_bus_registered = false;
   const bool revoke_stt = scenario == "revoke_during_stt";
   if (scenario != "end_to_end" && !revoke_stt) {
     assert(runtime.poll() == NativeVoiceStep::stopped);
     assert(runtime.poll() == NativeVoiceStep::stopped && !runtime.start(models, pack));
     assert(network_stops == 1 && !mic_open && !amp_open && calls == 0);
-    const bool expected_codec = scenario != "stop_waiting" && scenario != "codec_failure";
+    if (scenario == "bus_lost_waiting") assert(codec_starts == 0 && model_starts == 0);
+    const bool expected_codec = scenario != "stop_waiting" && scenario != "codec_failure" &&
+                                scenario != "bus_lost_waiting";
     assert(codec_stops == int(expected_codec));
     assert(model_stops == int(scenario == "stop_during_model" || scenario == "low_heap_after_model"));
     return 0;

@@ -19,6 +19,7 @@ struct i2c_master_bus_config_t {i2c_port_t i2c_port;gpio_num_t sda_io_num,scl_io
 struct i2c_device_config_t {int dev_addr_length;uint16_t device_address;uint32_t scl_speed_hz;};
 extern "C" {
 esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t*,i2c_master_bus_handle_t*);
+esp_err_t i2c_master_get_bus_handle(i2c_port_t,i2c_master_bus_handle_t*);
 esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t);
 esp_err_t i2c_master_probe(i2c_master_bus_handle_t,uint16_t,int);
 esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t,const i2c_device_config_t*,i2c_master_dev_handle_t*);

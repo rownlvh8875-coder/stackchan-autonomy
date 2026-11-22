@@ -29,8 +29,12 @@ class K151CodecPort final {
   ~K151CodecPort();
 
   // Both atomic flags must outlive this port and latch loss until teardown.
+  // A borrowed board bus must outlive the port. Use it from the same owner
+  // task that serializes all board I2C access.
   bool prepare(const std::atomic_bool& owner, const std::atomic_bool& stop,
-               const K151AudioBoardEvidence& evidence);
+               const K151AudioBoardEvidence& evidence,
+               i2c_master_bus_handle_t borrowed_bus = nullptr);
+  static bool is_registered_board_bus(i2c_master_bus_handle_t bus);
   bool prepare_microphone_only(const std::atomic_bool& owner, const std::atomic_bool& stop,
                                const K151MicOnlyEvidence& evidence);
   bool microphone_on();
@@ -90,6 +94,7 @@ class K151CodecPort final {
   const std::atomic_bool* owner_ = nullptr;
   const std::atomic_bool* stop_ = nullptr;
   i2c_master_bus_handle_t i2c_bus_ = nullptr;
+  bool owns_i2c_bus_ = false;
   i2c_master_dev_handle_t board_device_ = nullptr;
   i2s_chan_handle_t tx_ = nullptr;
   i2s_chan_handle_t rx_ = nullptr;

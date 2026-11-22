@@ -12,13 +12,14 @@ namespace stackchan::standalone {
 
 // One owner task takes over a locally provisioned Wi-Fi/time port and owns
 // the codec and AudioGuard. The physical STOP producer is independent.
-// The ledger, network and flags outlive this object.
+// The ledger, network, flags and existing I2C1 board bus outlive this object.
+// Only the board owner task may access devices on that bus.
 class K151VoiceRuntime final {
  public:
   K151VoiceRuntime(PersistentGuard& ledger, K151WifiTimePort& network,
                    const std::atomic_bool& local_owner, const std::atomic_bool& paid_consent,
                    const std::atomic_bool& budget_writes, const std::atomic_bool& stop,
-                   K151AudioBoardEvidence evidence);
+                   K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus);
   K151VoiceRuntime(const K151VoiceRuntime&) = delete;
   K151VoiceRuntime& operator=(const K151VoiceRuntime&) = delete;
   ~K151VoiceRuntime();
@@ -47,6 +48,7 @@ class K151VoiceRuntime final {
   const std::atomic_bool& budget_writes_;
   const std::atomic_bool& stop_;
   const K151AudioBoardEvidence evidence_;
+  const i2c_master_bus_handle_t board_bus_;
   K151CodecPort codec_;
   AudioGuard audio_;
   std::atomic_bool busy_{false};
