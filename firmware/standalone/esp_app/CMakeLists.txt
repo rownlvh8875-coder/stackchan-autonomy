@@ -3,8 +3,25 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(K151_CONVERSATION_REVIEW)
+    if(K151_CONVERSATION_PRIVATE_POLICY AND DEFINED ENV{CI})
+        message(FATAL_ERROR "Build K151 images with private evidence locally")
+    endif()
+    if(CMAKE_BINARY_DIR STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/build")
+        message(FATAL_ERROR "Use a separate build directory for the K151 conversation image")
+    endif()
+    set(SDKCONFIG "${CMAKE_BINARY_DIR}/sdkconfig")
+    set(SDKCONFIG_DEFAULTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults;${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.conversation.defaults")
+elseif(K151_CONVERSATION_PRIVATE_POLICY)
+    message(FATAL_ERROR "A private policy is only allowed in the K151 conversation build")
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(stackchan_standalone_hold)
+if(K151_CONVERSATION_REVIEW)
+    project(k151_conversation_review)
+else()
+    project(stackchan_standalone_hold)
+endif()
 
 # The pinned SDK's WebSocket upgrade writer can log Authorization even at
 # error level. Compile out that component's logs in this app.

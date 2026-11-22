@@ -11,6 +11,9 @@
 #include "board_evidence.hpp"
 #include "audio_wipe.hpp"
 #include "k151_dma_tx_tail.hpp"
+#ifdef STACKCHAN_K151_CONVERSATION_IMAGE
+#include "k151_conversation_policy.hpp"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -446,11 +449,15 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
 
 bool K151CodecPort::playback_enabled_by_build() {
   if constexpr (speaker_probe_build()) return true;
+#ifdef STACKCHAN_K151_CONVERSATION_IMAGE
+  return k151_conversation_boot_armed();
+#else
   // Source-derived AW9523/AXP2101 sequence is not a measured K151 power-up.
   // The DMA observer still needs physical reset, mute and codec-idle evidence.
   if (!kK151PhysicalOutputEnabledInHoldImage ||
       !kK151SafeDmaDrainDriverAvailable) return false;
   return true;
+#endif
 }
 
 bool K151CodecPort::playback_available() const {
