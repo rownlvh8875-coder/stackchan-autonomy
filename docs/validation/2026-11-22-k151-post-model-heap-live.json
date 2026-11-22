@@ -65,7 +65,7 @@
     "ota_selection_matches_at_all_three_stages": true,
     "factory_boot_request_elapsed_s": 0.685,
     "com3_returned": true,
-    "factory_screen_user_confirmed": null
+    "factory_screen_user_confirmed": true
   },
   "real_audio_captured_or_sent": false,
   "paid_api_calls": 0,

@@ -164,6 +164,8 @@ def _build_port(compiler, binary, app):
         "mic_only_wakenet_late_stop",
         "mic_only_stop_before_read",
         "mic_only_trial_ok",
+        "mic_only_trial_input_counts",
+        "mic_only_trial_unread_counts_after_denial",
         "mic_only_trial_evidence",
         "mic_only_trial_owner",
         "mic_only_trial_format",

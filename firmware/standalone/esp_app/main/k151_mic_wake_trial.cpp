@@ -3,6 +3,7 @@
 #include "k151_mic_wake_memory.hpp"
 #include "k151_mic_reader.hpp"
 #include <esp_timer.h>
+#include <limits>
 #include <utility>
 
 namespace stackchan::standalone {
@@ -12,8 +13,32 @@ constexpr int64_t kCaptureWindowUs = 5'000'000;
 constexpr int64_t kMaxPollGapUs = 100'000;
 constexpr unsigned kMaxFrames = 500;  // 10 ms of 24 kHz PCM per frame.
 
+class CountedMicReader final : public MonoMicReader {
+ public:
+  explicit CountedMicReader(K151CodecPort& codec) : mic_(codec) {}
+
+  bool read_10ms(std::span<int16_t> pcm) override {
+    if (!mic_.read_10ms(pcm)) return false;
+    bool all_zero = true;
+    for (const int16_t sample : pcm) {
+      all_zero &= sample == 0;
+      counts_.full_scale_samples += sample == std::numeric_limits<int16_t>::min() ||
+                                    sample == std::numeric_limits<int16_t>::max();
+    }
+    ++counts_.frames_read;
+    counts_.all_zero_frames += all_zero;
+    return true;
+  }
+
+  K151MicWakeInputCounts counts() const { return counts_; }
+
+ private:
+  K151MicReader mic_;
+  K151MicWakeInputCounts counts_;
+};
+
 template<class Allowed>
-Result listen(NativeWakeInput& input, K151MicReader& mic, NativeWakePort& model,
+Result listen(NativeWakeInput& input, MonoMicReader& mic, NativeWakePort& model,
               int64_t start_us, const Allowed& allowed) {
   auto last_poll_us = start_us;
   auto last_clock_us = start_us;
@@ -45,6 +70,10 @@ Result listen(NativeWakeInput& input, K151MicReader& mic, NativeWakePort& model,
 }
 }  // namespace
 
+std::optional<K151MicWakeInputCounts> K151MicWakeTrial::take_input_counts() {
+  return std::exchange(input_counts_, std::nullopt);
+}
+
 K151MicWakeTrialResult K151MicWakeTrial::run(const std::atomic_bool& owner,
                                            const std::atomic_bool& stop,
                                            const K151MicOnlyEvidence& evidence,
@@ -70,12 +99,12 @@ K151MicWakeTrialResult K151MicWakeTrial::run_prepared(const std::atomic_bool& ow
   }
 
   K151CodecPort codec;
+  CountedMicReader mic{codec};
   const bool prepared = codec.prepare_microphone_only(owner, stop, evidence);
   auto result = allowed() ? Result::fault : Result::stopped;
   if (prepared && allowed() && input_.matches(*model)) {
     const auto start_us = esp_timer_get_time();
     if (start_us >= 0 && codec.microphone_on()) {
-      K151MicReader mic{codec};
       result = listen(input_, mic, *model, start_us, allowed);
     }
   }
@@ -83,7 +112,10 @@ K151MicWakeTrialResult K151MicWakeTrial::run_prepared(const std::atomic_bool& ow
   const bool codec_released = codec.shutdown();
   model.reset();
   if (!codec_released || result == Result::fault) return Result::fault;
-  return allowed() ? result : Result::stopped;
+  if (!allowed() || result == Result::stopped) return Result::stopped;
+  if (result == Result::detected || result == Result::not_detected)
+    input_counts_ = mic.counts();
+  return result;
 }
 
 }  // namespace stackchan::standalone

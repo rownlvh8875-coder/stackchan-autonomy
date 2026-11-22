@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstring>
 #include <esp_heap_caps.h>
+#include <limits>
 #include <memory>
 #include <string>
 using namespace stackchan::standalone;
@@ -56,7 +57,8 @@ struct TrialDetector : NativeWakePort {
     assert(samples.size() == 512 && rx.enabled);
     if (++trial_chunks == 1) {
       assert(samples[0] == 0);
-      assert(samples[159] > 100 && samples[159] < 160);
+      if (mode == "mic_only_trial_input_counts") assert(samples[159] == 0);
+      else assert(samples[159] > 100 && samples[159] < 160);
     }
     if (mode == "mic_only_trial_stop_in_detect") local_stop = true;
     if (mode == "mic_only_trial_revoke_in_detect") local_owner = false;
@@ -200,7 +202,15 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
     if(mode=="mic_only_trial_clock_backwards")trial_time_us=-1;
   }
   auto* pcm=static_cast<int16_t*>(p);
-  for(size_t i=0;i<std::min(*bytes,n)/4;++i){pcm[2*i]=static_cast<int16_t>(i-100);pcm[2*i+1]=900;}
+  const bool input_counts = mode == "mic_only_trial_input_counts";
+  for(size_t i=0;i<std::min(*bytes,n)/4;++i) {
+    pcm[2*i]=input_counts && calls==1 ? 0 : static_cast<int16_t>(i-100);
+    pcm[2*i+1]=input_counts ? std::numeric_limits<int16_t>::max() : 900;
+  }
+  if (input_counts && calls>1) {
+    pcm[0]=std::numeric_limits<int16_t>::min();
+    pcm[2]=std::numeric_limits<int16_t>::max();
+  }
   if(mode=="base_lost")base_open=false;
   if(mode=="mic_only_revoke")local_owner=false;
   if(mode=="mic_only_stop_read" || mode=="mic_only_release_latched")local_stop=true;
@@ -261,6 +271,7 @@ int main(int argc,char** argv) {
   if(mic_wake_trial()) {
     using Outcome = K151MicWakeTrialResult;
     K151MicWakeTrial trial;
+    assert(!trial.take_input_counts());
     const bool missing = mode == "mic_only_trial_evidence";
     const bool no_owner = mode == "mic_only_trial_owner";
     const bool bad_format = mode == "mic_only_trial_format";
@@ -275,6 +286,22 @@ int main(int argc,char** argv) {
     local_stop = stop_before;
     const K151MicOnlyEvidence evidence{true,true,!missing,true};
     const auto outcome = trial.run(local_owner,local_stop,evidence,std::make_unique<TrialDetector>());
+    if (mode == "mic_only_trial_unread_counts_after_denial") {
+      assert(outcome == Outcome::detected && calls == 4);
+      assert(trial.run(local_owner,local_stop,evidence,std::make_unique<TrialDetector>()) == Outcome::denied);
+      assert(!trial.take_input_counts() && calls == 4 && trial_model_drops == 2);
+      return 0;
+    }
+    const auto counts = trial.take_input_counts();
+    const bool completed = outcome == Outcome::detected || outcome == Outcome::not_detected;
+    assert(static_cast<bool>(counts) == completed);
+    assert(!trial.take_input_counts());
+    if (counts) {
+      const bool injected = mode == "mic_only_trial_input_counts";
+      assert(counts->frames_read == static_cast<unsigned>(calls));
+      assert(counts->all_zero_frames == (injected ? 1u : 0u));
+      assert(counts->full_scale_samples == (injected ? 6u : 0u));
+    }
     assert(trial_model_drops == 1);
     if (missing || no_owner || stop_before || bad_format || reset_fail || stop_on_reset) {
       const auto expected = stop_before || stop_on_reset ? Outcome::stopped :
@@ -300,7 +327,7 @@ int main(int argc,char** argv) {
       assert(outcome == Outcome::not_detected);
       assert(calls == (wall ? 250 : 500));
       assert(trial_chunks == (wall ? 78 : 156));
-    } else if (mode == "mic_only_trial_ok") {
+    } else if (mode == "mic_only_trial_ok" || mode == "mic_only_trial_input_counts") {
       assert(outcome == Outcome::detected && calls == 4 && trial_chunks == 1);
     } else {
       const bool stop_after = mode == "mic_only_trial_stop_in_detect" ||
@@ -313,6 +340,7 @@ int main(int argc,char** argv) {
       assert(trial_chunks == (stop_on_open || stop_in_read || read_error ? 0 : 1));
     }
     assert(trial.run(local_owner,local_stop,evidence,std::make_unique<TrialDetector>()) == Outcome::denied);
+    assert(!trial.take_input_counts());
     assert(trial_model_drops == 2 && bus_created == 1 && trial_resets == 1);
     return 0;
   }

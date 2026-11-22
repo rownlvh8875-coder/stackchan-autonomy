@@ -11,6 +11,12 @@ namespace stackchan::standalone {
 
 enum class K151MicWakeTrialResult { denied, stopped, not_detected, detected, fault, memory_denied };
 
+struct K151MicWakeInputCounts {
+  uint32_t frames_read = 0;
+  uint32_t all_zero_frames = 0;
+  uint32_t full_scale_samples = 0;
+};
+
 // Dormant diagnostic, one synchronous run per instance across both entry points.
 // Keep the input buffer off small task stacks. STOP and ownership loss must latch
 // through teardown. No PCM leaves the trial.
@@ -30,10 +36,15 @@ class K151MicWakeTrial final {
                             const K151MicOnlyEvidence& evidence,
                             std::unique_ptr<NativeWakePort> model);
 
+  // Whole-trial counts are available once after clean detected/not_detected
+  // completion. An attempt that stops, faults or is denied leaves no counts.
+  std::optional<K151MicWakeInputCounts> take_input_counts();
+
  private:
   std::optional<K151MicWakeTrialResult> begin(const std::atomic_bool& owner,
                                              const std::atomic_bool& stop,
                                              const K151MicOnlyEvidence& evidence) {
+    input_counts_.reset();
     if (attempted_) return K151MicWakeTrialResult::denied;
     attempted_ = true;
     if (stop.load()) return K151MicWakeTrialResult::stopped;
@@ -45,6 +56,7 @@ class K151MicWakeTrial final {
                                      std::unique_ptr<NativeWakePort> model);
 
   NativeWakeInput input_;
+  std::optional<K151MicWakeInputCounts> input_counts_;
   bool attempted_ = false;
 };
 
