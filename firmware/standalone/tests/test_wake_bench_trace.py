@@ -210,3 +210,40 @@ def test_mic_wake_v2_rejects_unapproved_or_inconsistent_diagnostics(change):
     assert parse_mic_wake_trial_report(record) == record
     with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
         parse_mic_wake_trial_report(record | change)
+
+
+CLOCK_FAULT_V3 = {
+    "mic_wake_trial": "MIC_WAKE_TRIAL_V3",
+    "result": "fault",
+    "operating_admission": False,
+    "stage": "capture_clock",
+    "codec_cleanup_unverified": False,
+    "clock_reason": "clock_rollback",
+}
+
+
+def test_mic_wake_clock_fault_requires_reason_in_v3_only():
+    legacy = dict(CLOCK_FAULT_V3, mic_wake_trial="MIC_WAKE_TRIAL_V2")
+    del legacy["clock_reason"]
+    assert parse_mic_wake_trial_report(legacy) == legacy
+    assert parse_mic_wake_trial_report(CLOCK_FAULT_V3) == CLOCK_FAULT_V3
+    with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
+        parse_mic_wake_trial_report(legacy | {"mic_wake_trial": "MIC_WAKE_TRIAL_V3"})
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"mic_wake_trial": "MIC_WAKE_TRIAL_V2"},
+        {"clock_reason": "untrusted driver output"},
+        {"clock_reason": []},
+        {"clock_reason": None},
+        {"stage": "capture_read"},
+        {"result": "stopped"},
+        {"raw_audio": "discard"},
+        {"frames_read": 1},
+    ],
+)
+def test_mic_wake_v3_rejects_invalid_clock_diagnostics(change):
+    with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
+        parse_mic_wake_trial_report(CLOCK_FAULT_V3 | change)

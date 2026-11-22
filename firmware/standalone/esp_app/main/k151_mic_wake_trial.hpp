@@ -32,11 +32,17 @@ struct K151MicWakeInputCounts {
   uint32_t full_scale_samples = 0;
 };
 
+enum class K151MicWakeClockReason {
+  none, invalid_start, clock_rollback, poll_gap_exceeded, poll_duration_exceeded,
+  capture_window_exceeded,
+};
+
 struct K151MicWakeDiagnostic {
   K151MicWakeStage stage = K151MicWakeStage::admission;
   // This is independent of the primary failure. A prior fault alone does
   // not make a later successful teardown unverified.
   bool codec_cleanup_unverified = false;
+  K151MicWakeClockReason clock_reason = K151MicWakeClockReason::none;
 };
 
 // Fixed diagnostic JSON line. Returns zero and clears the first byte on

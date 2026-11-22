@@ -293,7 +293,7 @@ def test_embedded_pack_to_mic_report(
     assert trial.returncode == 0, trial.stderr
     report = parse_mic_wake_trial_report(json.loads(trial.stdout))
     assert report["result"] == result
-    assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V2"
+    assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V3"
     assert report["stage"] == stage
     assert report["codec_cleanup_unverified"] is False
     assert report.get("frames_read") == frames
@@ -342,6 +342,39 @@ def test_mic_trial_attributes_primary_and_cleanup(
     assert report["result"] == result and report["stage"] == stage
     assert report["codec_cleanup_unverified"] is cleanup
     assert "frames_read" not in report
+
+
+@pytest.mark.parametrize(
+    ("case", "result", "reason"),
+    [
+        ("invalid_start", "fault", "invalid_start"),
+        ("clock_backwards", "fault", "clock_rollback"),
+        ("transient_rollback", "fault", "clock_rollback"),
+        ("poll_gap", "fault", "poll_gap_exceeded"),
+        ("slow_detect", "fault", "poll_duration_exceeded"),
+        ("window_overrun", "fault", "capture_window_exceeded"),
+        ("poll_gap_boundary", "detected", None),
+        ("poll_duration_boundary", "detected", None),
+        ("window_boundary", "not_detected", None),
+    ],
+)
+def test_k151_wake_clock_reason(port_binary, case, result, reason, monkeypatch):
+    monkeypatch.syspath_prepend(str(BASE / "tools"))
+    from wake_bench_trace import parse_mic_wake_trial_report
+
+    attempt = subprocess.run(
+        [str(port_binary), "mic_only_trial_" + case, "--report"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert attempt.returncode == 0, attempt.stderr
+    report = parse_mic_wake_trial_report(json.loads(attempt.stdout))
+    assert report["result"] == result
+    assert report.get("clock_reason") == reason
+    assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V3"
+    assert report["stage"] == ("capture_clock" if reason else "complete")
+    assert ("frames_read" in report) is (reason is None)
 
 
 @pytest.mark.parametrize(

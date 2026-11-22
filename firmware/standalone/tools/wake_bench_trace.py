@@ -28,6 +28,15 @@ _MIC_RESULTS = _MIC_CLEAN | {"denied", "stopped", "fault", "memory_denied"}
 _MIC_FIELDS = frozenset({"mic_wake_trial", "result", "operating_admission"})
 _MIC_COUNT_FIELDS = frozenset({"frames_read", "all_zero_frames", "full_scale_samples"})
 _MIC_DIAGNOSTIC_FIELDS = frozenset({"stage", "codec_cleanup_unverified"})
+_MIC_CLOCK_REASONS = frozenset(
+    {
+        "invalid_start",
+        "clock_rollback",
+        "poll_gap_exceeded",
+        "poll_duration_exceeded",
+        "capture_window_exceeded",
+    }
+)
 _MIC_MEMORY_STAGES = frozenset({"baseline_memory", "resident_memory"})
 _MIC_FAULT_STAGES = frozenset(
     {
@@ -62,7 +71,8 @@ def parse_mic_wake_trial_report(record: object) -> dict:
     """Validate the fixed per-trial record emitted by the microphone diagnostic."""
     if (
         not isinstance(record, dict)
-        or record.get("mic_wake_trial") not in ("MIC_WAKE_TRIAL_V1", "MIC_WAKE_TRIAL_V2")
+        or record.get("mic_wake_trial")
+        not in ("MIC_WAKE_TRIAL_V1", "MIC_WAKE_TRIAL_V2", "MIC_WAKE_TRIAL_V3")
         or record.get("operating_admission") is not False
         or not isinstance(record.get("result"), str)
         or record["result"] not in _MIC_RESULTS
@@ -70,9 +80,13 @@ def parse_mic_wake_trial_report(record: object) -> dict:
         raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
     clean = record["result"] in _MIC_CLEAN
     fields = _MIC_FIELDS | _MIC_COUNT_FIELDS if clean else _MIC_FIELDS
-    has_diagnostic = record["mic_wake_trial"] == "MIC_WAKE_TRIAL_V2"
+    version = record["mic_wake_trial"]
+    has_diagnostic = version != "MIC_WAKE_TRIAL_V1"
+    has_clock_reason = version == "MIC_WAKE_TRIAL_V3" and record.get("stage") == "capture_clock"
     if has_diagnostic:
         fields |= _MIC_DIAGNOSTIC_FIELDS
+    if has_clock_reason:
+        fields |= {"clock_reason"}
     if set(record) != fields:
         raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
     if has_diagnostic:
@@ -85,6 +99,14 @@ def parse_mic_wake_trial_report(record: object) -> dict:
             or (cleanup and result != "fault")
             or (cleanup and stage in ("model_prepare", "model_reset"))
             or (result == "fault" and stage == "codec_release" and not cleanup)
+        ):
+            raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
+    if has_clock_reason:
+        reason = record["clock_reason"]
+        if (
+            record["result"] != "fault"
+            or not isinstance(reason, str)
+            or reason not in _MIC_CLOCK_REASONS
         ):
             raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
     if clean:

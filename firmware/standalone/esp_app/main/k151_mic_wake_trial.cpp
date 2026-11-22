@@ -13,6 +13,7 @@ namespace stackchan::standalone {
 namespace {
 using Result = K151MicWakeTrialResult;
 using Stage = K151MicWakeStage;
+using ClockReason = K151MicWakeClockReason;
 constexpr int64_t kCaptureWindowUs = 5'000'000;
 constexpr int64_t kMaxPollGapUs = 100'000;
 
@@ -52,8 +53,23 @@ const char* stage_name(Stage stage) {
   return nullptr;
 }
 
+const char* clock_reason_name(ClockReason reason) {
+  switch (reason) {
+    case ClockReason::none: return nullptr;
+    case ClockReason::invalid_start: return "invalid_start";
+    case ClockReason::clock_rollback: return "clock_rollback";
+    case ClockReason::poll_gap_exceeded: return "poll_gap_exceeded";
+    case ClockReason::poll_duration_exceeded: return "poll_duration_exceeded";
+    case ClockReason::capture_window_exceeded: return "capture_window_exceeded";
+  }
+  return nullptr;
+}
+
 bool diagnostic_matches(Result result, K151MicWakeDiagnostic diagnostic) {
   const auto stage = diagnostic.stage;
+  if (stage == Stage::capture_clock)
+    return result == Result::fault && clock_reason_name(diagnostic.clock_reason);
+  if (diagnostic.clock_reason != ClockReason::none) return false;
   const bool cleanup = diagnostic.codec_cleanup_unverified;
   const bool memory = stage == Stage::baseline_memory || stage == Stage::resident_memory;
   switch (result) {
@@ -101,8 +117,8 @@ class CountedMicReader final : public MonoMicReader {
 
 template<class Allowed>
 Result listen(NativeWakeInput& input, CountedMicReader& mic, NativeWakePort& model,
-              int64_t start_us, const Allowed& allowed, Stage& stage) {
-  stage = Stage::wake_input;
+              int64_t start_us, const Allowed& allowed, K151MicWakeDiagnostic& diagnostic) {
+  diagnostic.stage = Stage::wake_input;
   auto last_poll_us = start_us;
   auto last_clock_us = start_us;
   const auto clock = [&] {
@@ -112,26 +128,33 @@ Result listen(NativeWakeInput& input, CountedMicReader& mic, NativeWakePort& mod
     return now;
   };
 
+  const auto clock_fault = [&](ClockReason reason) {
+    diagnostic.stage = Stage::capture_clock;
+    diagnostic.clock_reason = reason;
+    return Result::fault;
+  };
+
   for (unsigned frame = 0; frame < kK151MicWakeTrialFrameLimit; ++frame) {
     if (!allowed()) return Result::stopped;
     const auto before = clock();
-    if (before < 0 || before - last_poll_us > kMaxPollGapUs) {
-      stage = Stage::capture_clock;
-      return Result::fault;
-    }
+    if (before < 0) return clock_fault(ClockReason::clock_rollback);
+    if (before - last_poll_us > kMaxPollGapUs)
+      return clock_fault(ClockReason::poll_gap_exceeded);
     if (before - start_us >= kCaptureWindowUs) break;
     last_poll_us = before;
+    auto clock_reason = ClockReason::none;
     const auto within_time = [&] {
+      // Preserve a failure seen inside poll even if a later clock read would pass.
+      if (clock_reason != ClockReason::none) return false;
       const auto now = clock();
-      return now >= 0 && now - before <= kMaxPollGapUs &&
-             now - start_us <= kCaptureWindowUs;
+      if (now < 0) clock_reason = ClockReason::clock_rollback;
+      else if (now - before > kMaxPollGapUs) clock_reason = ClockReason::poll_duration_exceeded;
+      else if (now - start_us > kCaptureWindowUs) clock_reason = ClockReason::capture_window_exceeded;
+      return clock_reason == ClockReason::none;
     };
     const auto result = input.poll(mic, model, [&] { return within_time() && allowed(); });
-    if (!within_time()) {
-      stage = Stage::capture_clock;
-      return Result::fault;
-    }
-    if (mic.read_failed()) stage = Stage::capture_read;
+    if (!within_time()) return clock_fault(clock_reason);
+    if (mic.read_failed()) diagnostic.stage = Stage::capture_read;
     if (!allowed()) return Result::stopped;
     if (result == NativeWakeResult::error) return Result::fault;
     if (result == NativeWakeResult::detected) return Result::detected;
@@ -234,6 +257,7 @@ size_t format_k151_mic_wake_report(K151MicWakeTrialResult result,
   output.front() = '\0';
   const char* name = result_name(result);
   const char* stage = stage_name(diagnostic.stage);
+  const char* clock_reason = clock_reason_name(diagnostic.clock_reason);
   const bool clean = result == Result::detected || result == Result::not_detected;
   if (!name || !stage || !diagnostic_matches(result, diagnostic) ||
       clean != counts.has_value()) return 0;
@@ -244,18 +268,23 @@ size_t format_k151_mic_wake_report(K151MicWakeTrialResult result,
            (counts->frames_read - counts->all_zero_frames) * kPcmFramesPerTenMs)) return 0;
 
   const int prefix = std::snprintf(output.data(), output.size(),
-      "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V2\",\"result\":\"%s\","
+      "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V3\",\"result\":\"%s\","
       "\"operating_admission\":false,\"stage\":\"%s\",\"codec_cleanup_unverified\":%s",
       name, stage, diagnostic.codec_cleanup_unverified ? "true" : "false");
   if (prefix > 0 && static_cast<size_t>(prefix) < output.size()) {
     const auto tail = output.subspan(static_cast<size_t>(prefix));
-    const int suffix = counts ?
-        std::snprintf(tail.data(), tail.size(),
-                      ",\"frames_read\":%u,\"all_zero_frames\":%u,\"full_scale_samples\":%u}\n",
-                      static_cast<unsigned>(counts->frames_read),
-                      static_cast<unsigned>(counts->all_zero_frames),
-                      static_cast<unsigned>(counts->full_scale_samples)) :
-        std::snprintf(tail.data(), tail.size(), "}\n");
+    int suffix;
+    if (counts) {
+      suffix = std::snprintf(tail.data(), tail.size(),
+                             ",\"frames_read\":%u,\"all_zero_frames\":%u,\"full_scale_samples\":%u}\n",
+                             static_cast<unsigned>(counts->frames_read),
+                             static_cast<unsigned>(counts->all_zero_frames),
+                             static_cast<unsigned>(counts->full_scale_samples));
+    } else if (clock_reason) {
+      suffix = std::snprintf(tail.data(), tail.size(), ",\"clock_reason\":\"%s\"}\n", clock_reason);
+    } else {
+      suffix = std::snprintf(tail.data(), tail.size(), "}\n");
+    }
     if (suffix > 0 && static_cast<size_t>(suffix) < tail.size()) return prefix + suffix;
   }
   output.front() = '\0';
@@ -301,13 +330,15 @@ K151MicWakeTrialResult K151MicWakeTrial::run_prepared(const std::atomic_bool& ow
   if (prepared && allowed()) {
     diagnostic_.stage = Stage::input_format;
     if (input_.matches(*model)) {
-      diagnostic_.stage = Stage::capture_clock;
       const auto start_us = esp_timer_get_time();
-      if (start_us >= 0) {
+      if (start_us < 0) {
+        diagnostic_.stage = Stage::capture_clock;
+        diagnostic_.clock_reason = ClockReason::invalid_start;
+      } else {
         diagnostic_.stage = Stage::codec_open;
         if (codec.microphone_on()) {
           if (allowed() && on_listen_) on_listen_();
-          result = listen(input_, mic, *model, start_us, allowed, diagnostic_.stage);
+          result = listen(input_, mic, *model, start_us, allowed, diagnostic_);
         }
       }
     }

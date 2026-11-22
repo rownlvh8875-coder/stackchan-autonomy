@@ -46,6 +46,7 @@ bool embedded_trial_chain() { return mode.starts_with("mic_only_trial_chain_"); 
 int trial_resets=0, trial_chunks=0, trial_model_drops=0;
 int heap_checks=0;
 int64_t trial_time_us=1000;
+bool regress_next_trial_clock=false;
 BenchGate question_gate{1, 1};
 constexpr std::string_view question_prefix="mic_only_trial_question_";
 bool question_trial() { return mode.starts_with(question_prefix); }
@@ -93,8 +94,11 @@ struct TrialDetector : NativeWakePort {
     if (mode == "mic_only_trial_stop_in_detect") local_stop = true;
     if (mode == "mic_only_trial_revoke_in_detect") local_owner = false;
     if (mode == "mic_only_trial_slow_detect") trial_time_us += 100001;
+    if (mode == "mic_only_trial_poll_duration_boundary") trial_time_us += 90000;
+    if (mode == "mic_only_trial_transient_rollback") regress_next_trial_clock=true;
     if (mode == "mic_only_trial_model_error") return NativeWakeResult::error;
     if (mode == "mic_only_trial_wall" || mode == "mic_only_trial_frame_cap" ||
+        mode == "mic_only_trial_window_overrun" || mode == "mic_only_trial_window_boundary" ||
         mode == "mic_only_trial_question_no_wake")
       return NativeWakeResult::none;
     return NativeWakeResult::detected;
@@ -167,7 +171,14 @@ void zero(std::span<const int16_t> pcm) { for(auto sample:pcm)assert(sample==0);
 }
 extern "C" int64_t esp_timer_get_time() {
   ++timer_calls;
-  if(mic_wake_trial())return trial_time_us;
+  if(mic_wake_trial()) {
+    if(mode=="mic_only_trial_invalid_start" && timer_calls==1)return -1;
+    if(regress_next_trial_clock) {
+      regress_next_trial_clock=false;
+      return trial_time_us-1;
+    }
+    return trial_time_us;
+  }
   if(mode=="clock_negative")return -1;
   if(timer_calls==1)return 1000;
   if(mode=="clock_backwards")return 999;
@@ -387,6 +398,7 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
     trial_time_us+=mode=="mic_only_trial_wall"?20000:mode=="mic_only_trial_frame_cap"?1000:10000;
     if(mode=="mic_only_trial_stop_in_read")local_stop=true;
     if(mode=="mic_only_trial_clock_backwards")trial_time_us=-1;
+    if(mode=="mic_only_trial_window_overrun" && calls==500)++trial_time_us;
   }
   auto* pcm=static_cast<int16_t*>(p);
   const bool input_counts = mode == "mic_only_trial_input_counts";
@@ -470,7 +482,10 @@ int main(int argc,char** argv) {
   assert(argc==2 || (argc==3 && std::string_view(argv[2])=="--report"));mode=argv[1];
   report_trial=argc==3;
   if (report_trial) {
-    K151MicWakeTrial trial;
+    K151MicWakeTrial trial{[] {
+      if (mode=="mic_only_trial_poll_gap") trial_time_us+=100001;
+      if (mode=="mic_only_trial_poll_gap_boundary") trial_time_us+=100000;
+    }};
     const auto result=trial.run(local_owner,local_stop,{true,true},std::make_unique<TrialDetector>());
     std::array<char,256> line{};
     assert(format_k151_mic_wake_report(result,trial.diagnostic(),trial.take_input_counts(),line)!=0);
@@ -505,6 +520,17 @@ int main(int argc,char** argv) {
     assert(format_k151_mic_wake_report(Outcome::fault,{Stage::codec_release},std::nullopt,json)==0);
     assert(format_k151_mic_wake_report(Outcome::fault,{Stage::model_prepare,true},std::nullopt,json)==0);
     assert(format_k151_mic_wake_report(Outcome::fault,{static_cast<Stage>(90)},std::nullopt,json)==0);
+    using ClockReason = K151MicWakeClockReason;
+    assert(format_k151_mic_wake_report(Outcome::fault,{Stage::capture_clock},std::nullopt,json)==0);
+    assert(format_k151_mic_wake_report(
+        Outcome::fault,{Stage::capture_clock,false,static_cast<ClockReason>(99)},
+        std::nullopt,json)==0);
+    assert(format_k151_mic_wake_report(
+        Outcome::fault,{Stage::capture_read,false,ClockReason::clock_rollback},
+        std::nullopt,json)==0);
+    assert(format_k151_mic_wake_report(
+        Outcome::stopped,{Stage::capture_clock,false,ClockReason::clock_rollback},
+        std::nullopt,json)==0);
     assert(format_k151_mic_wake_report(Outcome::detected,complete,observed,
                                       std::span(json).first(8))==0);
     assert(json[0]=='\0');

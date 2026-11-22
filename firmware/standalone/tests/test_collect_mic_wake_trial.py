@@ -201,6 +201,26 @@ def test_question_and_control_challenges_are_not_interchangeable(receiver, wake_
     assert port.writes == [b"HELLO\n"]
 
 
+def test_control_collects_v3_clock_fault_before_observation(receiver):
+    fault = {
+        "mic_wake_trial": "MIC_WAKE_TRIAL_V3",
+        "result": "fault",
+        "stage": "capture_clock",
+        "clock_reason": "capture_window_exceeded",
+        "codec_cleanup_unverified": False,
+        "operating_admission": False,
+    }
+    question = {**QUESTION, "result": "not_run"}
+    port = FakeSerial([CONTROL_WAIT, LISTEN, fault, question, HOLD])
+    assert receiver.receive_once(
+        port,
+        lambda: None,
+        announce_question=lambda: pytest.fail("Unexpected observation prompt"),
+        wake_only_control=True,
+    ) == {"wake": fault, "question": question}
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+
+
 def test_control_rejects_positive_question_cue(receiver):
     port = FakeSerial([CONTROL_WAIT, LISTEN, QUESTION_CUE])
     with pytest.raises(ValueError):
