@@ -1,5 +1,15 @@
 # Next steps
 
+## 2026-11-23 오프라인 후속 — 첫 HTTPS 응답 대기
+
+ESP-IDF 6.1에서 헤더나 본문 수신이 잠시 지연되면 `EAGAIN`이
+반환된다. 같은 연결과 파서에서 수신을 이어가고, 매번 기존 30초
+기한과 네트워크·동의·STOP을 다시 확인한다. SDK의 개별 I/O 대기
+설정은 1.5초다. 예산 차감, 연결 열기, POST 전송은 각 단계에서 한 번이다.
+합성 응답으로 헤더와 본문 지연, STOP, 기한 초과와 실제 수신 오류를
+확인했다. 실물 연결이나 유료 요청을 사용하지 않았다.
+[고정 ESP-IDF의 HTTPS 수신 구현](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_http_client/esp_http_client.c#L1416)
+
 ## 2026-11-23 오프라인 후속 — 한 턴 시험의 Windows 콘솔
 
 `paid_trial_operator.py`는 승인된 ROM 실행기에 기존 암호화 USB 설정
