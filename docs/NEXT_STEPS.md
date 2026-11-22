@@ -1,5 +1,25 @@
 # Next steps
 
+## 2026-11-23 오프라인 후속 — 시험 직전 예산 기준값
+
+승인된 사전 확인에서 확보한 16,384바이트 NVS 스냅샷으로 다음
+명령을 실행한다. 입력과 출력은 로컬에 보관한다.
+
+~~~powershell
+uv run --offline --frozen python firmware/standalone/tools/check_trial_budget_snapshot.py `
+  --idf-dir .local/idf61 --snapshot .local/pretrial-nvs.bin `
+  --out .local/pretrial-budget-baseline.json
+~~~
+
+도구는 고정 ESP-IDF의 파서를 사용해 `sc_gpt/budget`의 존재
+여부와 기존 값의 SHA256만 기록한다. 다른 NVS 값이나 예산 기록
+본문은 출력하지 않는다. 페이지나 예산 데이터의 상태가 모호하면
+결과 생성을 거부한다. 기존 기록이면 비공개 빌드 검토에 그 해시를
+사용한다. 기록이 없으면 실제 기기와 스냅샷을 대조하고 첫 예산
+생성의 별도 동의 여부를 확인한다. 출고 백업의 예산 상태는 현재
+기기의 상태로 사용하지 않는다.
+[고정 ESP-IDF NVS 파서](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/nvs_flash/nvs_partition_tool/nvs_parser.py)
+
 ## 2026-11-23 오프라인 후속 — 한 턴 시험의 실패·복구 순서
 
 `paid_trial_sequence.py`는 검토된 설치·원본 OTA1 복구 범위, 유료
