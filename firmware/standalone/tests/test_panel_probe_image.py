@@ -8,9 +8,15 @@ import pytest
 
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / "tools"))
-from check_board_probe import main  # noqa: E402
+from check_board_probe import main, verify_panel_symbols  # noqa: E402
 from test_board_probe_image import TABLE  # noqa: E402
 from test_resource_bench_image import ELF_SHA, image  # noqa: E402
+
+
+@pytest.mark.parametrize("symbol", ["i2s_new_channel", "esp_codec_dev_open", "nvs_flash_init"])
+def test_panel_rejects_linked_io_even_if_transitive(symbol):
+    with pytest.raises(ValueError, match="unexpected operational symbol"):
+        verify_panel_symbols(f"40380000 T app_main\n40380020 T {symbol}\n")
 
 
 def test_panel_image_applies_only_to_reviewed_slot(tmp_path, monkeypatch):
@@ -25,6 +31,12 @@ def test_panel_image_applies_only_to_reviewed_slot(tmp_path, monkeypatch):
         "check_board_probe.validate",
         lambda *_: {"elf": {"sha256": ELF_SHA}, "idf_commit": "fixture-idf"},
     )
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "check_board_probe.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="40380000 T app_main\n"),
+    )
     from esp_app_image import inspect_envelope
 
     fields, _ = inspect_envelope(app.read_bytes(), ELF_SHA, b"k151_panel_probe")
@@ -35,6 +47,8 @@ def test_panel_image_applies_only_to_reviewed_slot(tmp_path, monkeypatch):
         [
             "check_board_probe.py",
             "--panel",
+            "--nm",
+            "fixture-nm",
             "--elf",
             str(elf),
             "--bin",
@@ -58,6 +72,7 @@ def test_panel_image_applies_only_to_reviewed_slot(tmp_path, monkeypatch):
     assert report["install_authorized"] is False
     assert report["operating_admission"] is False
     assert report["physical_panel_head_stop_verified"] is False
+    assert report["no_operational_symbols_verified"] is True
     assert report["write_bytes"] == app.stat().st_size
     assert report["selected_partition"] == "ota_1"
 

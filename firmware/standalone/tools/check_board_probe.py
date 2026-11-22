@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import json
+import subprocess
 from pathlib import Path
 
 from check_idf_build import validate
@@ -97,6 +98,26 @@ def inspect_image(
     }
 
 
+def verify_panel_symbols(nm_listing: str) -> None:
+    symbols = {line.split()[-1] for line in nm_listing.splitlines() if line.split()}
+    if "app_main" not in symbols:
+        raise ValueError("missing diagnostic app_main in ELF symbol table")
+    prefixes = (
+        "i2s_",
+        "esp_codec_dev_",
+        "es7210_",
+        "aw88298_",
+        "esp_wifi_",
+        "esp_http_client_",
+        "nvs_flash_",
+        "esp_partition_write",
+        "esp_partition_erase",
+        "esp_ota_set_boot_partition",
+    )
+    if any(name.startswith(prefixes) for name in symbols):
+        raise ValueError("unexpected operational symbol in panel probe ELF")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--elf", required=True, type=Path)
@@ -107,7 +128,10 @@ def main():
     parser.add_argument("--partition-csv", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--panel", action="store_true")
+    parser.add_argument("--nm", help="Pinned Xtensa nm, required for the panel probe")
     args = parser.parse_args()
+    if args.panel and not args.nm:
+        parser.error("--panel requires --nm to check the linked ELF")
     validate_source_head(args.source_head)
     base = validate(args.elf, args.bin, args.idf_head)
     result = inspect_image(
@@ -122,6 +146,16 @@ def main():
         elf=base["elf"],
         source_head=bind_source_head(result["app_version"], args.source_head),
     )
+    if args.panel:
+        symbols = subprocess.run(
+            [args.nm, "--defined-only", str(args.elf)],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        verify_panel_symbols(symbols.stdout)
+        result["no_operational_symbols_verified"] = True
     with args.out.open("x", encoding="utf-8") as output:
         output.write(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, separators=(",", ":")))

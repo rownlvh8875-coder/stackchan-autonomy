@@ -56,6 +56,7 @@ jobs:
           python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
             "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
           python3 firmware/standalone/tools/check_board_probe.py --panel \
+            --nm xtensa-esp32s3-elf-nm \
             --elf "$OUT/k151_panel_probe.elf" --bin "$OUT/k151_panel_probe.bin" \
             --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
             --write-offset 0x510000 --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" \

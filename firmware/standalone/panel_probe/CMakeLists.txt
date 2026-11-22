@@ -6,7 +6,9 @@ set(COMPONENTS main)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(k151_panel_probe)
 idf_build_get_property(probe_components BUILD_COMPONENTS)
-foreach(forbidden nvs_flash esp_wifi esp_http_client esp_driver_i2s esp_codec_dev
+# esp_lcd declares esp_driver_i2s even when only its SPI objects are used.
+# The review build checks for I2S symbols in the linked ELF.
+foreach(forbidden nvs_flash esp_wifi esp_http_client esp_codec_dev
                   espressif__esp_codec_dev espressif__esp-sr)
     if(forbidden IN_LIST probe_components)
         message(FATAL_ERROR "Panel probe must not link ${forbidden}")
