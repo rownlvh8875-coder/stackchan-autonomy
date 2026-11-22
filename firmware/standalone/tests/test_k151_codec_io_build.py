@@ -59,7 +59,16 @@ def port_binary(tmp_path_factory):
     return _build_port(compiler, binary, BASE / "esp_app/main")
 
 
-def _build_port(compiler, binary, app):
+@pytest.fixture(scope="module")
+def embedded_trial_binary(tmp_path_factory):
+    compiler = shutil.which("g++")
+    if not compiler:
+        pytest.skip("C++20 compiler required")
+    binary = tmp_path_factory.mktemp("embedded-mic-trial") / "embedded-mic-trial"
+    return _build_port(compiler, binary, BASE / "esp_app/main", embedded_trial=True)
+
+
+def _build_port(compiler, binary, app, *, embedded_trial=False):
     sources = [
         BASE / "tests/k151_codec_io_test.cpp",
         app / "k151_codec_port.cpp",
@@ -80,6 +89,18 @@ def _build_port(compiler, binary, app):
     command += ["-isystem", str(SDK)]  # Unmodified vendor C anonymous unions.
     for directory in [BASE / "tests/codec_io_doubles", BASE / "core", app]:
         command += ["-I", str(directory)]
+    if embedded_trial:
+        command += ["-DSTACKCHAN_TEST_EMBEDDED_MIC_TRIAL=1"]
+        for directory in ("idf_partition_doubles", "sdk_esp_sr_2_4_7"):
+            command += ["-I", str(BASE / "tests" / directory)]
+        command += ["-I", str(BASE / "resource_bench/main")]
+        sources += [
+            BASE / "tests/k151_wakenet_port_test.cpp",
+            app / "k151_wakenet_port.cpp",
+            app / "k151_model_assets.cpp",
+            app / "k151_embedded_assets.cpp",
+            app / "k151_mic_wake_trial_embedded.cpp",
+        ]
     result = subprocess.run(
         command + [str(p) for p in sources] + ["-o", str(binary)],
         capture_output=True,
@@ -229,6 +250,34 @@ def test_firmware_mic_report_matches_host_contract(port_binary, monkeypatch):
         trial = subprocess.run([str(port_binary), case], capture_output=True, text=True, timeout=10)
         assert trial.returncode == 0, trial.stderr
         assert parse_mic_wake_trial_report(json.loads(trial.stdout)) == expected
+
+
+@pytest.mark.parametrize(
+    ("case", "result", "frames"),
+    [
+        ("ok", "detected", 4),
+        ("bad_hash", "fault", None),
+        ("memory", "memory_denied", None),
+        ("short_read", "fault", None),
+        ("stop_in_detect", "stopped", None),
+    ],
+)
+def test_embedded_pack_to_mic_report(embedded_trial_binary, monkeypatch, case, result, frames):
+    monkeypatch.syspath_prepend(str(BASE / "tools"))
+    from wake_bench_trace import parse_mic_wake_trial_report
+
+    trial = subprocess.run(
+        [str(embedded_trial_binary), "mic_only_trial_chain_" + case],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert trial.returncode == 0, trial.stderr
+    report = parse_mic_wake_trial_report(json.loads(trial.stdout))
+    assert report["result"] == result
+    assert report.get("frames_read") == frames
+    if frames is not None:
+        assert report["all_zero_frames"] == report["full_scale_samples"] == 0
 
 
 @pytest.mark.parametrize("operation", ["read_reg", "write_reg"])

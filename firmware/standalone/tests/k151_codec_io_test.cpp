@@ -12,6 +12,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 using namespace stackchan::standalone;
 struct i2s_channel_obj { bool enabled=false; bool alive=true; int disables=0,deletes=0; };
 struct i2c_master_bus_t { bool alive=true; int deletes=0; };
@@ -34,6 +35,7 @@ bool base_open=true;
 bool mic_only() { return mode.starts_with("mic_only_"); }
 std::atomic_bool local_owner{true}, local_stop{false};
 bool mic_wake_trial() { return mode.starts_with("mic_only_trial_"); }
+bool embedded_trial_chain() { return mode.starts_with("mic_only_trial_chain_"); }
 int trial_resets=0, trial_chunks=0, trial_model_drops=0;
 int heap_checks=0;
 int64_t trial_time_us=1000;
@@ -141,8 +143,15 @@ extern "C" int64_t esp_timer_get_time() {
 }
 extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
   assert(caps==(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-  assert(++heap_checks==1 && trial_resets==1 && bus_created==0 && !local_stop && local_owner);
+  ++heap_checks;
+  assert(bus_created==0 && !local_stop && local_owner);
   *info={128*1024,32*1024};
+  if (embedded_trial_chain()) {
+    assert(heap_checks<=2);
+    if (mode=="mic_only_trial_chain_memory" && heap_checks==2) --info->total_free_bytes;
+    return;
+  }
+  assert(heap_checks==1 && trial_resets==1);
   if (mode=="mic_only_trial_live_low_memory") --info->total_free_bytes;
   if (mode=="mic_only_trial_live_fragmented") --info->largest_free_block;
   if (mode=="mic_only_trial_live_bad_metrics") info->largest_free_block=info->total_free_bytes+1;
@@ -196,7 +205,9 @@ extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
 extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){assert(h->alive);if(mode=="info_fail" || (mode=="release_rx_info" && h==&rx))return ESP_FAIL;info->is_enabled=h->enabled;info->pair_chan=mode=="mic_only_peer"?&tx:nullptr;return 0;}
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
-  *bytes=(mode=="short" || mode=="mic_only_short" || mode=="mic_only_trial_short"?n-4:mode=="overcount"?n+4:n);
+  const bool short_read=mode=="short" || mode=="mic_only_short" || mode=="mic_only_trial_short" ||
+                        mode=="mic_only_trial_chain_short_read";
+  *bytes=short_read?n-4:mode=="overcount"?n+4:n;
   if(mic_wake_trial()) {
     trial_time_us+=mode=="mic_only_trial_wall"?20000:mode=="mic_only_trial_frame_cap"?1000:10000;
     if(mode=="mic_only_trial_stop_in_read")local_stop=true;
@@ -267,8 +278,26 @@ extern "C" int audio_codec_delete_codec_if(const audio_codec_if_t* c) {
 extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t* c){assert(c==&controls[0] || c==&controls[1]);++controls_deleted;return 0;}
 extern "C" int audio_codec_delete_gpio_if(const audio_codec_gpio_if_t*){return 0;}
 extern "C" int audio_codec_delete_data_if(const audio_codec_data_if_t* h){assert(h==&base && deleted==created);++data_deletes;return 0;}
+#ifdef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
+std::string run_mic_trial_with_embedded_model_double(
+    std::string_view, std::atomic_bool&, std::atomic_bool&);
+#endif
 int main(int argc,char** argv) {
   assert(argc==2);mode=argv[1];
+#ifdef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
+  if (embedded_trial_chain()) {
+    const auto report=run_mic_trial_with_embedded_model_double(mode,local_owner,local_stop);
+    const bool bad_hash=mode=="mic_only_trial_chain_bad_hash";
+    const bool before_codec=bad_hash || mode=="mic_only_trial_chain_memory";
+    const bool short_read=mode=="mic_only_trial_chain_short_read";
+    assert(heap_checks==(bad_hash?1:2));
+    assert(bus_created==(before_codec?0:1) && bus.deletes==bus_created);
+    assert(rx.deletes==bus_created && tx.deletes==0 && legacy_calls==0 && data_deletes==0);
+    assert(calls==(before_codec?0:short_read?1:4));
+    std::printf("%s",report.c_str());
+    return 0;
+  }
+#endif
   if (mode=="mic_report") {
     using Outcome = K151MicWakeTrialResult;
     std::array<char, 256> json{};

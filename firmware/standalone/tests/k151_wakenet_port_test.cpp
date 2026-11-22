@@ -50,7 +50,10 @@ int detects=0,cleans=0,creates=0,ret=0;
 srmodel_list_t* shared=nullptr;
 std::atomic_bool owner{true},stop{false};
 int finds=0,hashes=0;
+#ifndef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
 int mic_trial_handoffs=0, heap_checks=0;
+#endif
+std::atomic_bool* chain_stop=nullptr;
 std::array<uint8_t,292607> embedded{};
 esp_partition_t partition{};
 model_iface_data_t* create(const void* n,det_mode_t mode) {
@@ -94,12 +97,16 @@ int chunk(model_iface_data_t*) {
   if(scenario=="chunk_negative")return -1;
   if(scenario=="chunk_small")return 159;
   if(scenario=="chunk_large")return 2049;
-  if(scenario=="bench_reset_bridge")return 512;
+  if(scenario=="bench_reset_bridge" || scenario.starts_with("mic_only_trial_chain_"))return 512;
   if(scenario=="reset_changed_chunk" && creates==2)return 512;
   return 480;
 }
 wakenet_state_t detect(model_iface_data_t* d,int16_t* p) {
   assert(d==active_data && p);++detects;++d->consumed;
+  if (scenario.starts_with("mic_only_trial_chain_")) {
+    assert(d->consumed==1 && creates==2 && p[0]==0 && p[159]>100 && p[159]<160);
+    if (chain_stop) chain_stop->store(true);
+  }
   return static_cast<wakenet_state_t>(ret);
 }
 void clean(model_iface_data_t* d){assert(d==active_data);++cleans;}
@@ -111,6 +118,7 @@ void destroy(model_iface_data_t* d) {
 }
 extern "C" bool esp_ptr_external_ram(const void*) {return scenario=="embedded_psram";}
 extern "C" bool esp_ptr_in_drom(const void*) {return scenario!="embedded_mutable";}
+#ifndef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
 extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
   assert(caps==(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   assert(++heap_checks==1 && hashes==0 && events.empty());
@@ -119,6 +127,7 @@ extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
   if (scenario=="mic_trial_fragmented") --info->largest_free_block;
   if (scenario=="mic_trial_stop_during_memory_check") stop=true;
 }
+#endif
 extern "C" psa_status_t psa_crypto_init() {
   if(scenario=="embedded_crypto_revoke_init")owner=false;
   return scenario=="embedded_crypto_init_error"?-1:PSA_SUCCESS;
@@ -131,7 +140,8 @@ extern "C" psa_status_t psa_hash_compute(psa_algorithm_t alg,const uint8_t* p,si
     0x02,0x55,0x85,0x5e,0x56,0xbf,0x72,0xd1,0xe0,0x72,0xd2,0xe0,0xcb,0xee,0x4f,0xb3,
     0xce,0x1a,0xc2,0xc4,0x8f,0x7f,0xee,0x6c,0x8c,0xd5,0x91,0xf8,0x3e,0x59,0xed,0x95};
   std::copy(expected.begin(),expected.end(),hash);
-  if(scenario=="embedded_bad_hash" || scenario=="mic_trial_bad_hash")hash[31]^=1;
+  if(scenario=="embedded_bad_hash" || scenario=="mic_trial_bad_hash" ||
+     scenario=="mic_only_trial_chain_bad_hash")hash[31]^=1;
   if(scenario=="embedded_revoke_hash" || scenario=="mic_trial_revoke_hash")owner=false;
   return scenario=="embedded_hash_error"?-1:0;
 }
@@ -160,6 +170,50 @@ extern "C" const esp_wn_iface_t* esp_wn_handle_from_name(const char* n) {
   assert(std::strcmp(n,name)==0);events+='h';return scenario=="missing_iface"?nullptr:&iface;
 }
 
+namespace {
+void configure_sdk_double(std::string_view requested_case) {
+  scenario=requested_case;
+  list.num=scenario=="multiple"?2:1;list.model_name=names;
+  iface.create=create;iface.get_samp_rate=rate;iface.get_channel_num=channel;
+  iface.get_samp_chunksize=chunk;iface.get_word_num=words;
+  iface.detect=detect;iface.clean=clean;iface.destroy=destroy;
+  if(scenario=="no_create")iface.create=nullptr;
+  if(scenario=="no_rate")iface.get_samp_rate=nullptr;
+  if(scenario=="no_channel")iface.get_channel_num=nullptr;
+  if(scenario=="no_chunk")iface.get_samp_chunksize=nullptr;
+  if(scenario=="no_words")iface.get_word_num=nullptr;
+  if(scenario=="no_detect")iface.detect=nullptr;
+  if(scenario=="no_clean")iface.clean=nullptr;
+  if(scenario=="no_destroy")iface.destroy=nullptr;
+}
+}
+
+#ifdef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
+std::string run_mic_trial_with_embedded_model_double(
+    std::string_view requested_case, std::atomic_bool& local_owner, std::atomic_bool& local_stop) {
+  configure_sdk_double(requested_case);
+  const bool bad_hash=scenario=="mic_only_trial_chain_bad_hash";
+  const bool detected=scenario=="mic_only_trial_chain_ok";
+  const bool stopped=scenario=="mic_only_trial_chain_stop_in_detect";
+  if (stopped) chain_stop=&local_stop;
+  ret=WAKENET_DETECTED;
+  const K151MicOnlyEvidence evidence{true,true,true,true}; // Host driver test only.
+  K151MicWakeTrial trial;
+  const auto result=trial.run_embedded(local_owner,local_stop,evidence,embedded);
+  chain_stop=nullptr;
+  assert(hashes==1 && finds==0 && cleans==0 && !active_data && !shared);
+  assert(creates==(bad_hash?0:2) && events==(bad_hash?"":"efhcdcdb"));
+  assert(detects==(detected || stopped?1:0) && local_stop.load()==stopped);
+  const auto counts=trial.take_input_counts();
+  assert(counts.has_value()==detected);
+  assert(trial.run_embedded(local_owner,local_stop,evidence,embedded)==K151MicWakeTrialResult::denied);
+  assert(hashes==1 && !trial.take_input_counts());
+  std::array<char, 256> line{};
+  const auto length=format_k151_mic_wake_report(result,counts,line);
+  assert(length!=0);
+  return {line.data(),length};
+}
+#else
 // The codec suite executes the real consumer. This seam observes the handoff
 // after the concrete WakeNet port's DROM/SHA/SDK preparation on this side.
 K151MicWakeTrialResult K151MicWakeTrial::run_prepared(
@@ -174,19 +228,7 @@ K151MicWakeTrialResult K151MicWakeTrial::run_prepared(
 }
 
 int main(int argc,char** argv) {
-  assert(argc==2);scenario=argv[1];
-  list.num=scenario=="multiple"?2:1;list.model_name=names;
-  iface.create=create;iface.get_samp_rate=rate;iface.get_channel_num=channel;
-  iface.get_samp_chunksize=chunk;iface.get_word_num=words;
-  iface.detect=detect;iface.clean=clean;iface.destroy=destroy;
-  if(scenario=="no_create")iface.create=nullptr;
-  if(scenario=="no_rate")iface.get_samp_rate=nullptr;
-  if(scenario=="no_channel")iface.get_channel_num=nullptr;
-  if(scenario=="no_chunk")iface.get_samp_chunksize=nullptr;
-  if(scenario=="no_words")iface.get_word_num=nullptr;
-  if(scenario=="no_detect")iface.detect=nullptr;
-  if(scenario=="no_clean")iface.clean=nullptr;
-  if(scenario=="no_destroy")iface.destroy=nullptr;
+  assert(argc==2);configure_sdk_double(argv[1]);
   if(scenario.starts_with("mic_trial_")) {
     using Result = K151MicWakeTrialResult;
     owner=scenario!="mic_trial_no_owner";
@@ -405,3 +447,4 @@ int main(int argc,char** argv) {
   }
   std::cout<<"SDK ABI/lifecycle PASS; no device/inference/API\n";
 }
+#endif
