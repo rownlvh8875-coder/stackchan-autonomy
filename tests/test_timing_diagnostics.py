@@ -238,11 +238,13 @@ async def test_soak_opt_in_report_keeps_failures_and_no_monitor_task_leak():
 async def test_measured_slow_lease_worker_still_fails_closed_without_retry(
     monkeypatch, stall_delivery
 ):
-    from stackchan_autonomy import soak
+    from types import SimpleNamespace
+
+    from stackchan_autonomy import action, soak
     from stackchan_autonomy.control import ControlLease
     from stackchan_autonomy.timing_diagnostics import StorageTrace, TimingProbe, _label
 
-    original_engine = soak.AutonomyEngine
+    original_lease_io = action.ActionExecutor._lease_io
     original_check = ControlLease.check
     original_advance = StorageTrace.advance
     original_interruption = TimingProbe.note_interruption
@@ -253,11 +255,14 @@ async def test_measured_slow_lease_worker_still_fails_closed_without_retry(
     check_ready = threading.Event()
     submission_observed = False
     calls = 0
+    observation_delay = 0.0
 
-    def short_test_lease(robot, provider, settings, **kwargs):
-        return original_engine(
-            robot, provider, settings.model_copy(update={"lease_ttl_s": 0.1}), **kwargs
-        )
+    async def short_check_deadline(executor, operation, *args, extends=False):
+        if operation == executor.lease.check:
+            # Leave the cold acquisition at its normal validity. Give the
+            # first verification a short remaining lifetime after setup.
+            executor._authorized_until = action.time.monotonic() + 0.1
+        return await original_lease_io(executor, operation, *args, extends=extends)
 
     def slow_check(self, handle):
         nonlocal calls
@@ -270,9 +275,14 @@ async def test_measured_slow_lease_worker_still_fails_closed_without_retry(
         return original_check(self, handle)
 
     def submit_with_check_barrier(executor, operation, *args):
-        nonlocal submission_observed
+        nonlocal observation_delay, submission_observed
         future = original_submit(executor, operation, *args)
-        if _label.get() == "lease_check":
+        label = _label.get()
+        if label == "lease_acquire":
+            # Exercise late acquisition delivery without stalling the actual
+            # loop monitor or altering the expiry written by real SQLite.
+            observation_delay = 0.15
+        if label == "lease_check":
             # Decide which point the worker reaches before the loop can run
             # the timeout callback. The submitted operation runs independently.
             observed = check_ready if stall_delivery else check_started
@@ -289,7 +299,10 @@ async def test_measured_slow_lease_worker_still_fails_closed_without_retry(
         if label == "lease_check":
             check_interrupted.set()
 
-    monkeypatch.setattr(soak, "AutonomyEngine", short_test_lease)
+    monkeypatch.setattr(action.ActionExecutor, "_lease_io", short_check_deadline)
+    monkeypatch.setattr(
+        action, "time", SimpleNamespace(monotonic=lambda: time.monotonic() + observation_delay)
+    )
     monkeypatch.setattr(ControlLease, "check", slow_check)
     monkeypatch.setattr(loop, "run_in_executor", submit_with_check_barrier)
     if stall_delivery:

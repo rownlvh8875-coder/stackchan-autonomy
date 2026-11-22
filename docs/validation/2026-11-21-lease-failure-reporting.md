@@ -1,5 +1,21 @@
 # Windows lease 실패 근거와 실패 전용 계측
 
+## 2026-11-23 획득과 검증 지연 주입 분리
+
+`2cd615f`의 PR Windows Python 3.11은 root 시험 501개 통과,
+1개 실패, 2개 건너뜀으로 끝났고 가상 soak까지 도달하지 않았다.
+검증 워커에 지연을 주입하는 시험은 설정에도 100ms TTL을 사용했다.
+첫 lease 결과가 도착했을 때 이미 만료되어 `acquire_timeout`으로
+종료했고 의도한 `lease_check`에 도달하지 못했다.
+[실패한 Windows 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45057994380/job/137317414704)
+
+Windows에서 획득 결과 처리에 150ms를 더한 제어 시계로 같은 오류를
+두 시험 사례에서 재현했다. 시험의 짧은 남은 유효 기간을 실제
+검증 요청 직전에만 적용한 뒤 두 사례가 통과했다. 실제 SQLite와
+워커를 사용해 실행 중 중단과 완료 후 전달 지연을 각각 구분한다.
+운영 획득·갱신·검증 제한은 기존 값이다. 과거 가상 soak 시간
+초과의 원인을 이 수정으로 설명할 수는 없다.
+
 ## 2026-11-23 정책 시험에서 실제 SQLite 지연 분리
 
 `b3d2205`의 PR Windows Python 3.12 작업은 root 시험 500개를
