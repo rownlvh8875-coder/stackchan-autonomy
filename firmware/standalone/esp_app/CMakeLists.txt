@@ -18,6 +18,8 @@ elseif(K151_CONVERSATION_PRIVATE_POLICY)
 endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 if(K151_CONVERSATION_REVIEW)
+    # IDF expands component requirements in a separate CMake process.
+    idf_build_set_property(K151_CONVERSATION_REVIEW ON)
     project(k151_conversation_review)
 else()
     project(stackchan_standalone_hold)
