@@ -128,8 +128,8 @@ bool K151ScpsUsbPort::poll_once(uint64_t now,bool lvgl_lock_held) {
   }
   if(state_==State::pending_local_review) {
     const auto review=display_.poll_pairing_review(now,lvgl_lock_held);
-    if(review==K151SetupLvgl::PairingReview::fault)return fault();
-    if(review==K151SetupLvgl::PairingReview::approved) {
+    if(review==K151SetupLvgl::ReviewResult::fault)return fault();
+    if(review==K151SetupLvgl::ReviewResult::approved) {
       if(!touch_.start_scps_final_touch(true,now))return fault();
       state_=State::waiting_touch;
     }

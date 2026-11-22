@@ -87,12 +87,22 @@ class K151DisplayStop {
 };
 class K151ScpsUsbPort {
  public:
-  using Review = K151SetupLvgl::PairingReview;
+  using Review = K151SetupLvgl::ReviewResult;
   static bool begin(K151SetupLvgl& setup, uint64_t now, bool locked = true) {
     return setup.begin_pairing_review(now, locked);
   }
   static Review poll(K151SetupLvgl& setup, uint64_t now, bool locked = true) {
     return setup.poll_pairing_review(now, locked);
+  }
+};
+class K151OwnerSession {
+ public:
+  using Review = K151SetupLvgl::ReviewResult;
+  static bool begin_voice(K151SetupLvgl& setup, uint64_t now, bool first_budget) {
+    return setup.begin_voice_review(now, first_budget, true);
+  }
+  static Review poll_voice(K151SetupLvgl& setup, uint64_t now) {
+    return setup.poll_voice_review(now, true);
   }
 };
 bool K151InstallHold::display_activation_allowed() { return scenario != "hold"; }
@@ -376,6 +386,7 @@ extern "C" void lv_refr_now(lv_display_t* disp) {
   const int limit = scenario == "short_frame" || (scenario == "sas_short_frame" && frames == 3)
                      || (scenario == "review_short_frame" && frames == 4)
                      || (scenario == "review_final_short_frame" && frames == 5)
+                     || (scenario == "review_voice_banner_failure" && frames == 7)
                  ? 230 : 240;
   for (int y = 0; y < limit; y += 10) {
     lv_area_t area{11, y, 318, y + 9};
@@ -420,6 +431,11 @@ extern "C" void lv_label_set_text(lv_obj_t* label, const char* value) {
   assert(index >= 0 && index < 3);
   // Only the compiled-in mock pairing value is examined while it is live.
   if (index == 1 && std::strlen(value) == 8) assert(std::string_view(value) == "12345678");
+  if (index == 1 && std::string_view(value).starts_with("Send question audio to OpenAI")) {
+    assert(scenario.starts_with("review_voice_"));
+    assert(std::string_view(value).ends_with(scenario == "review_voice_existing"
+        ? "Update existing NVS budget log" : "Create or update NVS budget log"));
+  }
   captions[index] = index == 0 ? std::string_view(value) : std::string_view{};
 }
 
@@ -511,7 +527,34 @@ int main(int argc, char** argv) {
       screen_contacts = contacts;
       return K151ScpsUsbPort::poll(setup, ms, locked);
     };
-    if (scenario == "review_ok" || scenario == "review_final_short_frame") {
+    if (scenario.starts_with("review_voice_")) {
+      assert(!K151OwnerSession::begin_voice(setup, 1000, true));
+      assert(poll(1000, 0) == Review::waiting);
+      for (uint64_t ms = 1100; ms <= 2100; ms += 100) assert(poll(ms, 1) == Review::waiting);
+      assert(poll(2200, 0) == Review::approved && frames == 5);
+      assert(setup.present(TouchConsentPhase::consumed, OwnerSetupPhase::ready, true, false, true));
+      const bool expect_banner = scenario != "review_voice_banner_failure";
+      assert(K151OwnerSession::begin_voice(setup, 2400, scenario != "review_voice_existing")
+             == expect_banner);
+      if (expect_banner) {
+        assert(captions[0] == "PAID OPENAI VOICE");
+        assert(!K151OwnerSession::begin_voice(setup, 2400, true));
+        assert(K151ScpsUsbPort::poll(setup, 2400) == Review::fault);
+        const auto voice = [&](uint64_t now, uint8_t count) {
+          screen_contacts = count;
+          return K151OwnerSession::poll_voice(setup, now);
+        };
+        for (uint64_t now = 2400; now <= 3500; now += 100)
+          assert(voice(now, 1) == Review::waiting); // Already-held touch cannot approve.
+        assert(voice(3600, 0) == Review::waiting);
+        for (uint64_t now = 3700; now <= 4700; now += 100)
+          assert(voice(now, 1) == Review::waiting);
+        assert(voice(4800, 0) == Review::approved && captions[0] == "VOICE APPROVED");
+        assert(voice(4900, 0) == Review::fault);
+      } else {
+        assert(K151OwnerSession::poll_voice(setup, 2400) == Review::fault);
+      }
+    } else if (scenario == "review_ok" || scenario == "review_final_short_frame") {
       assert(poll(1000, 0) == Review::waiting);
       for (uint64_t ms = 1100; ms <= 2100; ms += 100) assert(poll(ms, 1) == Review::waiting);
       const auto expected = scenario == "review_ok" ? Review::approved : Review::fault;

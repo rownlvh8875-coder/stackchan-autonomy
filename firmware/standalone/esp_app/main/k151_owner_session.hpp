@@ -6,6 +6,7 @@
 #include "k151_owner_setup.hpp"
 #include "k151_scps_usb.hpp"
 #include "k151_setup_lvgl.hpp"
+#include "k151_voice_handoff.hpp"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -17,12 +18,7 @@ namespace stackchan::standalone {
 // only leave setup through the existing voice bootstrap on that task.
 class K151OwnerSession final {
  public:
-  enum class Step { idle, head_touch, pairing, ready, stopped, fault };
-  struct ReadySetup {
-    K151LocalOwnerSetup& setup;
-    K151LcdPanel& panel;
-    i2c_master_bus_handle_t bus;
-  };
+  enum class Step { idle, head_touch, pairing, ready, voice_review, voice_ready, stopped, fault };
 
   K151OwnerSession();
   ~K151OwnerSession();
@@ -32,9 +28,14 @@ class K151OwnerSession final {
   // Both inputs are independently established for this board before start.
   // A successful SPI transfer alone cannot attest the physical screen.
   bool start(bool exact_board_verified, bool physical_lcd_verified);
+  // Called by the pinned owner task with the approved deployment scope, only
+  // after the encrypted USB session closed. The local display is the sole
+  // gesture input for enabling paid voice and budget writes.
+  bool request_voice_review(bool paid_scope_approved, bool budget_scope_approved,
+                            bool allow_first_budget);
   Step poll();
   // Borrow until voice and its independent STOP monitor have shut down.
-  std::optional<ReadySetup> handoff();
+  std::optional<K151VoiceHandoff> handoff();
   // Remain on the owner task; a failed release may be retried before teardown.
   bool shutdown();
   static const char* compiled_link_marker();
@@ -46,6 +47,8 @@ class K151OwnerSession final {
   const std::atomic_bool& stop_;
   std::atomic_bool owner_{false};
   std::atomic_bool setup_input_{false};
+  std::atomic_bool paid_consent_{false};
+  std::atomic_bool budget_writes_{false};
   K151LcdPanel panel_{stop_};
   K151SetupLvgl view_{stop_};
   K151HeadTouchOwner touch_{owner_, stop_};
@@ -55,10 +58,13 @@ class K151OwnerSession final {
   TaskHandle_t task_ = nullptr;
   int core_ = -1;
   uint64_t last_sample_ms_ = 0;
+  uint64_t voice_review_started_ms_ = 0;
   bool owns_lvgl_ = false;
   bool board_verified_ = false;
   bool lcd_verified_ = false;
   bool handoff_taken_ = false;
+  bool allow_first_budget_ = false;
+  bool bus_release_unverified_ = false;
   Step step_ = Step::idle;
 };
 

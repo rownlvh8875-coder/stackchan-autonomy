@@ -2,11 +2,19 @@
 #include "k151_voice_bootstrap.hpp"
 #include "k151_install_hold.hpp"
 #include "k151_display_stop.hpp"
+#include "k151_voice_handoff.hpp"
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <utility>
 
 namespace stackchan::standalone {
+
+K151VoiceBootstrap::K151VoiceBootstrap(const K151VoiceHandoff& handoff,
+                                       K151AudioBoardEvidence evidence)
+    : K151VoiceBootstrap(handoff.setup, handoff.panel, handoff.paid_consent,
+                         handoff.budget_writes, evidence, handoff.bus) {
+  reviewed_first_budget_ = handoff.allow_first_budget;
+}
 
 K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel& panel,
     const std::atomic_bool& paid_consent, const std::atomic_bool& budget_writes,
@@ -34,6 +42,7 @@ bool K151VoiceBootstrap::confirmed_setup() {
 bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t> pack,
                                bool allow_first_budget) {
   if (attempted_ || !K151InstallHold::device_activation_allowed() ||
+      (allow_first_budget && !reviewed_first_budget_.value_or(true)) ||
       !K151CodecPort::playback_enabled_by_build() || !evidence_.verified() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) || !models.valid() || pack.empty() ||
       &setup_.stop_ != &K151DisplayStop::flag() || !authorized() || !confirmed_setup())
@@ -62,6 +71,10 @@ bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t>
   return false;
 }
 
+bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t> pack) {
+  return start(std::move(models), pack, reviewed_first_budget_.value_or(false));
+}
+
 NativeVoiceStep K151VoiceBootstrap::poll() {
   if (!display_stop_owned_) return NativeVoiceStep::stopped;
   if (authorized()) {
@@ -83,7 +96,8 @@ void K151VoiceBootstrap::stop() {
 }
 
 const char* K151VoiceBootstrap::compiled_link_marker() {
-  auto volatile start = &K151VoiceBootstrap::start;
+  using Start = bool (K151VoiceBootstrap::*)(VoiceModelConfig, std::span<const uint8_t>);
+  auto volatile start = static_cast<Start>(&K151VoiceBootstrap::start);
   auto volatile poll = &K151VoiceBootstrap::poll;
   (void)start;
   (void)poll;

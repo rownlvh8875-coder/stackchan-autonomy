@@ -86,25 +86,63 @@ bool K151SetupLvgl::begin_pairing_review(uint64_t now, bool lvgl_lock_held) {
   lv_label_set_text(title_, "Codes match? Hold screen 1 sec");
   lv_label_set_text(second_, "Then release the screen");
   if (!panel_->present_now() || stop_.load()) return false;
-  last_review_ms_ = now;
-  review_ = ReviewPhase::wait_clear;
+  wait_for_fresh_contact(now);
   return true;
 }
 
-K151SetupLvgl::PairingReview K151SetupLvgl::poll_pairing_review(
+K151SetupLvgl::ReviewResult K151SetupLvgl::poll_pairing_review(
+    uint64_t now, bool lvgl_lock_held) {
+  if (!sas_visible_) return ReviewResult::fault;
+  const auto result = poll_contact(now, lvgl_lock_held);
+  if (result == ReviewResult::approved && !show_final_touch_prompt())
+    return ReviewResult::fault;
+  return result;
+}
+
+bool K151SetupLvgl::begin_voice_review(uint64_t now, bool allow_first_budget, bool lvgl_lock_held) {
+  if (voice_review_started_ || review_ != ReviewPhase::closed || sas_visible_ ||
+      !lvgl_lock_held || !attached()) return false;
+  voice_review_started_ = true;
+  lv_label_set_text(title_, "PAID OPENAI VOICE");
+  lv_label_set_text(first_, allow_first_budget
+      ? "Send question audio to OpenAI\nCreate or update NVS budget log"
+      : "Send question audio to OpenAI\nUpdate existing NVS budget log");
+  lv_label_set_text(second_, "Hold screen 1 sec and release");
+  if (!panel_->present_now() || stop_.load()) return false;
+  wait_for_fresh_contact(now);
+  return true;
+}
+
+K151SetupLvgl::ReviewResult K151SetupLvgl::poll_voice_review(
+    uint64_t now, bool lvgl_lock_held) {
+  if (!voice_review_started_) return ReviewResult::fault;
+  const auto result = poll_contact(now, lvgl_lock_held);
+  if (result != ReviewResult::approved) return result;
+  lv_label_set_text(title_, "VOICE APPROVED");
+  lv_label_set_text(first_, "Starting when ready");
+  lv_label_set_text(second_, "Tap the screen to stop");
+  return panel_->present_now() && !stop_.load() ? ReviewResult::approved : ReviewResult::fault;
+}
+
+void K151SetupLvgl::wait_for_fresh_contact(uint64_t now) {
+  last_review_ms_ = now;
+  review_ = ReviewPhase::wait_clear;
+}
+
+K151SetupLvgl::ReviewResult K151SetupLvgl::poll_contact(
     uint64_t now, bool lvgl_lock_held) {
   uint8_t contacts{};
   if (review_ == ReviewPhase::idle || review_ == ReviewPhase::closed)
-    return PairingReview::fault;
-  if (!sas_visible_ || !lvgl_lock_held || !attached() || now < last_review_ms_ ||
+    return ReviewResult::fault;
+  if (!lvgl_lock_held || !attached() || now < last_review_ms_ ||
       now - last_review_ms_ > kReviewMaxGapMs || !panel_->read_contact_count(contacts)) {
     review_ = ReviewPhase::closed;
-    return PairingReview::fault;
+    return ReviewResult::fault;
   }
   last_review_ms_ = now;
   if (contacts == 2) {
     review_ = ReviewPhase::wait_clear;
-    return PairingReview::waiting;
+    return ReviewResult::waiting;
   }
   switch (review_) {
     case ReviewPhase::wait_clear:
@@ -123,14 +161,14 @@ K151SetupLvgl::PairingReview K151SetupLvgl::poll_pairing_review(
     case ReviewPhase::wait_release:
       if (contacts == 0) {
         review_ = ReviewPhase::closed;
-        return show_final_touch_prompt() ? PairingReview::approved : PairingReview::fault;
+        return ReviewResult::approved;
       }
       break;
     case ReviewPhase::idle:
     case ReviewPhase::closed:
-      return PairingReview::fault;
+      return ReviewResult::fault;
   }
-  return PairingReview::waiting;
+  return ReviewResult::waiting;
 }
 
 bool K151SetupLvgl::show_final_touch_prompt() {

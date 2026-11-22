@@ -53,4 +53,4 @@ def test_only_the_physical_lcd_review_can_arm_head_confirmation():
     assert poll.index("display_.poll_pairing_review(") < poll.index(
         "touch_.start_scps_final_touch("
     )
-    assert "review==K151SetupLvgl::PairingReview::approved" in poll
+    assert "review==K151SetupLvgl::ReviewResult::approved" in poll

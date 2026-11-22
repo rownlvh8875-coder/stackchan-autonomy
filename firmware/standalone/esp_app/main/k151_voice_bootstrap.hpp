@@ -4,16 +4,19 @@
 #include "k151_owner_setup.hpp"
 #include "k151_voice_runtime.hpp"
 #include "nvs_port.hpp"
+#include <optional>
 
 namespace stackchan::standalone {
 
 class K151LcdPanel;
+struct K151VoiceHandoff;
 
 // Call only from the device-local owner task. Setup and the authorization
 // flags, the panel and the registered I2C1 bus outlive this object. The owner task
 // serializes all access to the bus. The HOLD entrypoint links a marker only.
 class K151VoiceBootstrap final {
  public:
+  explicit K151VoiceBootstrap(const K151VoiceHandoff& handoff, K151AudioBoardEvidence evidence);
   K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel& panel,
                      const std::atomic_bool& paid_consent,
                      const std::atomic_bool& budget_writes, K151AudioBoardEvidence evidence,
@@ -29,6 +32,7 @@ class K151VoiceBootstrap final {
   // before start. The IRQ monitor owns the line after the panel's final acknowledgment.
   bool start(VoiceModelConfig models, std::span<const uint8_t> model_pack,
              bool allow_first_budget);
+  bool start(VoiceModelConfig models, std::span<const uint8_t> model_pack);
   NativeVoiceStep poll();
   void stop();
   static const char* compiled_link_marker();
@@ -49,6 +53,7 @@ class K151VoiceBootstrap final {
   K151VoiceRuntime voice_;
   bool attempted_ = false;
   bool display_stop_owned_ = false;
+  std::optional<bool> reviewed_first_budget_;
 };
 
 } // namespace stackchan::standalone

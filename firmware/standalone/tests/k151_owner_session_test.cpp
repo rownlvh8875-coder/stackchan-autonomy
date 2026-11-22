@@ -24,6 +24,7 @@ uint64_t head_started{};
 bool i2c = false, lvgl = false, lcd = false, view = false, head = false, usb = false;
 bool head_window = false, panel_reviewed = false, pairing_complete = false, ready_page = false;
 bool retry_failed = false;
+uint64_t voice_prompt_at = 0;
 unsigned touches = 0, receive_calls = 0, activations = 0;
 }
 
@@ -52,7 +53,7 @@ extern "C" esp_err_t i2c_master_get_bus_handle(i2c_port_t port, i2c_master_bus_h
 extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t bus) {
   assert(bus == &board_bus && i2c && !lcd && !head && !view && !usb);
   i2c = false;
-  return ESP_OK;
+  return scenario == "ambiguous_bus_release" ? ESP_FAIL : ESP_OK;
 }
 
 namespace stackchan::standalone {
@@ -80,6 +81,20 @@ bool K151SetupLvgl::present(TouchConsentPhase phase, OwnerSetupPhase ready,
   return true;
 }
 bool K151SetupLvgl::detach(bool lock) { assert(lock && !usb); view = false; return true; }
+bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first_budget, bool lock) {
+  assert(now == ms && lock && view && ready_page && !usb);
+  assert(first_budget == (scenario != "existing_ledger_scope"));
+  voice_prompt_at = now;
+  return scenario != "voice_frame_failed";
+}
+K151SetupLvgl::ReviewResult K151SetupLvgl::poll_voice_review(uint64_t now, bool lock) {
+  assert(now == ms && lock && view && voice_prompt_at && !usb);
+  if (scenario == "voice_read_failed") return ReviewResult::fault;
+  if (scenario == "voice_review_timeout" || now - voice_prompt_at < 1200U)
+    return ReviewResult::waiting;
+  if (scenario == "stop_during_voice_review") stopped = true;
+  return ReviewResult::approved;
+}
 bool K151HeadTouchOwner::attach_for_setup(i2c_master_bus_handle_t bus, bool exact, bool exclusive) {
   assert(i2c && lcd && view && bus == &board_bus && exact && exclusive);
   head_started = ms;
@@ -166,6 +181,7 @@ int main(int argc, char* argv[]) {
   assert(started && i2c && lvgl && head && !usb);
   assert(!session.start(true, true));
   using Step = K151OwnerSession::Step;
+  assert(!session.request_voice_review(true, true, true));
   if (scenario == "wrong_task" || scenario == "wrong_core") {
     if (scenario == "wrong_task") current_task = &other_task;
     else core = 1;
@@ -190,20 +206,51 @@ int main(int argc, char* argv[]) {
     assert(session.poll() == terminal && touches == previous);
     assert(!session.handoff());
   }
-  if (scenario == "handoff" || scenario == "cleanup_retry" || scenario == "stop_after_handoff") {
+  if (terminal == Step::ready) {
     assert(terminal == Step::ready && i2c && head && lcd && !usb);
+    assert(!session.handoff() && !voice_prompt_at);
+    assert(!session.request_voice_review(false, true, true) && !voice_prompt_at);
+    assert(!session.request_voice_review(true, false, true) && !voice_prompt_at);
+    const bool first = scenario != "existing_ledger_scope";
+    if (scenario == "voice_frame_failed") {
+      assert(!session.request_voice_review(true, true, first));
+      assert(session.poll() == Step::fault && !i2c && !session.handoff());
+      return 0;
+    }
+    assert(session.request_voice_review(true, true, first) && voice_prompt_at == ms);
+    assert(!session.request_voice_review(true, true, first));
+    const unsigned previous = touches;
+    const unsigned previous_usb = receive_calls;
+    for (unsigned i = 0; i < 610; ++i) {
+      ms += 50;
+      terminal = session.poll();
+      if (terminal != Step::voice_review) break;
+      assert(!session.handoff());
+    }
+    assert(touches == previous && receive_calls == previous_usb);
+    if (scenario == "voice_read_failed" || scenario == "voice_review_timeout" ||
+        scenario == "stop_during_voice_review") {
+      assert(terminal == (stopped ? Step::stopped : Step::fault));
+      assert(!session.handoff() && !i2c);
+      return 0;
+    }
+    assert(terminal == Step::voice_ready);
     const auto handoff = session.handoff();
     assert(handoff && handoff->setup.ready() && handoff->bus == &board_bus);
+    assert(handoff->paid_consent && handoff->budget_writes && handoff->allow_first_budget == first);
     assert(!session.handoff());
-    const unsigned previous = touches;
     ms += 1000;
-    assert(session.poll() == Step::ready && touches == previous && !usb);
+    assert(session.poll() == Step::voice_ready && touches == previous && !usb);
     if (scenario == "stop_after_handoff") {
       stopped = true;
       assert(session.poll() == Step::stopped && i2c && head && lcd && !handoff->setup.ready());
+      assert(!handoff->paid_consent && !handoff->budget_writes);
     }
     if (scenario == "cleanup_retry") assert(!session.shutdown() && i2c && retry_failed);
-    assert(session.shutdown() && !session.handoff() && !handoff->setup.ready());
+    const bool released = scenario != "ambiguous_bus_release";
+    assert(session.shutdown() == released && !session.handoff() && !handoff->setup.ready());
+    assert(session.shutdown() == released);
+    assert(!handoff->paid_consent && !handoff->budget_writes);
   } else {
     const bool requested = scenario == "usb_stop" || scenario == "stop_while_draining";
     assert(terminal == (requested ? Step::stopped : Step::fault) && !session.handoff());

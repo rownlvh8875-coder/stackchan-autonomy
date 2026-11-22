@@ -76,7 +76,13 @@ def owner_binary(tmp_path_factory):
         "ack_failed",
         "stop_while_draining",
         "stop_after_handoff",
+        "existing_ledger_scope",
+        "voice_frame_failed",
+        "voice_read_failed",
+        "voice_review_timeout",
+        "stop_during_voice_review",
         "cleanup_retry",
+        "ambiguous_bus_release",
     ],
 )
 def test_owner_session(owner_binary, case):

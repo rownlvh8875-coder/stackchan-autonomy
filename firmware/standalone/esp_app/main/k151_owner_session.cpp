@@ -6,10 +6,12 @@
 #include "k151_install_hold.hpp"
 #include <esp_timer.h>
 #include <sdkconfig.h>
+#include <utility>
 
 namespace stackchan::standalone {
 namespace {
 constexpr uint64_t kPollIntervalMs = 50;
+constexpr uint64_t kVoiceReviewTimeoutMs = 30'000;
 #if defined(CONFIG_ESP_CONSOLE_UART_DEFAULT) && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
 constexpr bool kSeparateUartConsole = true;
 #else
@@ -53,16 +55,42 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
   return false;
 }
 
+bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budget_scope_approved,
+                                              bool allow_first_budget) {
+  if (!on_owner_task() || step_ != Step::ready || !setup_.ready() || usb_.running() ||
+      !paid_scope_approved || !budget_scope_approved || stop_.load())
+    return false;
+  const auto now_us = esp_timer_get_time();
+  if (now_us < 0 || static_cast<uint64_t>(now_us / 1000) < last_sample_ms_) {
+    (void)abort_setup();
+    return false;
+  }
+  const auto now = static_cast<uint64_t>(now_us / 1000);
+  if (!view_.begin_voice_review(now, allow_first_budget, true)) {
+    (void)abort_setup();
+    return false;
+  }
+  voice_review_started_ms_ = last_sample_ms_ = now;
+  allow_first_budget_ = allow_first_budget;
+  step_ = Step::voice_review;
+  return true;
+}
+
 K151OwnerSession::Step K151OwnerSession::poll() {
   if (!task_) return Step::idle;
   if (!on_owner_task()) return Step::fault;
   if (step_ == Step::stopped || step_ == Step::fault) return step_;
   // The borrower must stop voice and its monitor before releasing the bus.
-  if (handoff_taken_) return stop_.load() ? Step::stopped : step_;
+  if (handoff_taken_) {
+    if (!stop_.load()) return step_;
+    paid_consent_.store(false);
+    budget_writes_.store(false);
+    return Step::stopped;
+  }
   if (stop_.load()) return abort_setup();
   // Do not poll head touch or USB after handoff. Voice owns further access to
   // the display STOP input, and setup timeouts no longer govern the session.
-  if (step_ == Step::ready) return step_;
+  if (step_ == Step::ready || step_ == Step::voice_ready) return step_;
   const auto now_us = esp_timer_get_time();
   if (now_us < 0) return abort_setup();
   const auto now = static_cast<uint64_t>(now_us / 1000);
@@ -70,6 +98,19 @@ K151OwnerSession::Step K151OwnerSession::poll() {
     return abort_setup();
   if (now - last_sample_ms_ < kPollIntervalMs) return step_;
   last_sample_ms_ = now;
+
+  if (step_ == Step::voice_review) {
+    if (!setup_.ready() || now - voice_review_started_ms_ >= kVoiceReviewTimeoutMs)
+      return abort_setup();
+    const auto review = view_.poll_voice_review(now, true);
+    if (review == K151SetupLvgl::ReviewResult::fault || stop_.load()) return abort_setup();
+    if (review == K151SetupLvgl::ReviewResult::approved) {
+      paid_consent_.store(true);
+      budget_writes_.store(true);
+      step_ = Step::voice_ready;
+    }
+    return step_;
+  }
 
   const auto event = touch_.poll_once(now);
   if (stop_.load() || event == TouchConsentEvent::invalidated) return abort_setup();
@@ -94,17 +135,20 @@ K151OwnerSession::Step K151OwnerSession::poll() {
   return step_;
 }
 
-std::optional<K151OwnerSession::ReadySetup> K151OwnerSession::handoff() {
-  if (!on_owner_task() || handoff_taken_ || step_ != Step::ready || !setup_.ready())
+std::optional<K151VoiceHandoff> K151OwnerSession::handoff() {
+  if (!on_owner_task() || handoff_taken_ || step_ != Step::voice_ready || !setup_.ready() ||
+      !paid_consent_.load() || !budget_writes_.load() || stop_.load())
     return std::nullopt;
   handoff_taken_ = true;
-  return ReadySetup{setup_, panel_, bus_};
+  return K151VoiceHandoff{setup_, panel_, bus_, paid_consent_, budget_writes_, allow_first_budget_};
 }
 
 bool K151OwnerSession::shutdown() {
   if (!task_) return true;
   if (!on_owner_task()) return false;
   step_ = Step::stopped;
+  paid_consent_.store(false);
+  budget_writes_.store(false);
   setup_input_.store(false);
   setup_.stop();
   if (!usb_.shutdown()) return false;
@@ -115,9 +159,11 @@ bool K151OwnerSession::shutdown() {
     owns_lvgl_ = false;
   }
   if (!head_released || !panel_released) return false;
-  if (bus_ && i2c_del_master_bus(bus_) != ESP_OK) return false;
-  bus_ = nullptr;
-  return true;
+  // IDF can report pin-deinit failure after releasing the bus wrapper.
+  // Discard the ambiguous pointer and keep the cleanup failure latched.
+  if (bus_ && i2c_del_master_bus(std::exchange(bus_, nullptr)) != ESP_OK)
+    bus_release_unverified_ = true;
+  return !bus_release_unverified_;
 }
 
 K151OwnerSession::Step K151OwnerSession::abort_setup() {
@@ -129,8 +175,12 @@ K151OwnerSession::Step K151OwnerSession::abort_setup() {
 const char* K151OwnerSession::compiled_link_marker() {
   auto volatile start = &K151OwnerSession::start;
   auto volatile poll = &K151OwnerSession::poll;
+  auto volatile review = &K151OwnerSession::request_voice_review;
+  auto volatile handoff = &K151OwnerSession::handoff;
   (void)start;
   (void)poll;
+  (void)review;
+  (void)handoff;
   return "K151 local setup owner task linked; NOT STARTED";
 }
 

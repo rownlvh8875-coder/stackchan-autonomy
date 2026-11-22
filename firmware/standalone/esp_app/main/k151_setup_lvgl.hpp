@@ -10,6 +10,7 @@
 namespace stackchan::standalone {
 
 class K151LcdPanel;
+class K151OwnerSession;
 
 class K151SetupLvgl final {
  public:
@@ -34,10 +35,15 @@ class K151SetupLvgl final {
 
  private:
   friend class K151ScpsUsbPort;
-  enum class PairingReview : uint8_t { waiting, approved, fault };
+  friend class K151OwnerSession;
+  enum class ReviewResult : uint8_t { waiting, approved, fault };
   enum class ReviewPhase : uint8_t { idle, wait_clear, wait_press, holding, wait_release, closed };
   bool begin_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
-  PairingReview poll_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
+  ReviewResult poll_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
+  bool begin_voice_review(uint64_t now_ms, bool allow_first_budget, bool lvgl_lock_held);
+  ReviewResult poll_voice_review(uint64_t now_ms, bool lvgl_lock_held);
+  void wait_for_fresh_contact(uint64_t now_ms);
+  ReviewResult poll_contact(uint64_t now_ms, bool lvgl_lock_held);
   bool show_final_touch_prompt();
 
   const std::atomic_bool& stop_;
@@ -50,6 +56,7 @@ class K151SetupLvgl final {
   uint64_t hold_since_ms_ = 0;
   ReviewPhase review_ = ReviewPhase::idle;
   bool sas_visible_ = false;
+  bool voice_review_started_ = false;
   bool attempted_ = false;
 };
 } // namespace stackchan::standalone
