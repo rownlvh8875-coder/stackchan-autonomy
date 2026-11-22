@@ -72,6 +72,38 @@ jobs:
             firmware/standalone/silent_tx_probe/build/ESP-IDF-LICENSE
           if-no-files-found: error
           retention-days: 14
+      - name: Build one-shot synthetic speaker probe (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          PROBE=firmware/standalone/speaker_probe
+          OUT="$PROBE/build"
+          idf.py -C "$PROBE" -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
+          idf.py -C "$PROBE" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_mic_wake_image.py --speaker \
+            --elf "$OUT/k151_speaker_probe.elf" --bin "$OUT/k151_speaker_probe.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
+          cp "$IDF_PATH/LICENSE" "$OUT/ESP-IDF-LICENSE"
+          cp firmware/standalone/tests/sdk_esp_codec_dev_1_6_2/LICENSE "$OUT/ESP-CODEC-DEV-LICENSE"
+      - name: Publish synthetic speaker probe for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-speaker-probe-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/speaker_probe/build/k151_speaker_probe.bin
+            firmware/standalone/speaker_probe/build/k151_speaker_probe.elf
+            firmware/standalone/speaker_probe/build/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/speaker_probe/build/validation-manifest.json
+            firmware/standalone/speaker_probe/build/ESP-IDF-LICENSE
+            firmware/standalone/speaker_probe/build/ESP-CODEC-DEV-LICENSE
+          if-no-files-found: error
+          retention-days: 14
       - name: Build question-only diagnostic for review (NO INSTALL)
         shell: bash
         run: |

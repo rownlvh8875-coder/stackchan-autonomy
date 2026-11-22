@@ -406,11 +406,35 @@ def test_question_only_scope_is_separate(receiver, tmp_path):
 
 
 SILENT_TX_WAIT = {**WAIT, "mic_trial": "WAIT_SILENT_TX_LOCAL_START"}
+SPEAKER_WAIT = {**WAIT, "mic_trial": "WAIT_SPEAKER_LOCAL_START"}
+SPEAKER_REPORT = {
+    "speaker_probe": "K151_SPEAKER_V1",
+    "result": "dma_and_mute_observed",
+    "operating_admission": False,
+}
 SILENT_TX_REPORT = {
     "tx_dma_probe": "K151_SILENT_TX_V1",
     "result": "two_descriptors_observed",
     "operating_admission": False,
 }
+
+
+@pytest.mark.parametrize(
+    "outcome", ["dma_and_mute_observed", "stopped", "mute_confirmation_failed"]
+)
+def test_speaker_report_and_hold_without_voice_cue(receiver, outcome):
+    report = SPEAKER_REPORT | {"result": outcome}
+    port = FakeSerial([SPEAKER_WAIT, report, HOLD])
+    assert receiver.receive_once(port, lambda: pytest.fail("Voice cue"), speaker=True) == report
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+
+
+@pytest.mark.parametrize("bad", [LISTEN, SILENT_TX_REPORT, SPEAKER_REPORT | {"raw_pcm": [0]}])
+def test_speaker_rejects_foreign_report_or_pcm(receiver, bad):
+    port = FakeSerial([SPEAKER_WAIT, bad, HOLD])
+    with pytest.raises(ValueError):
+        receiver.receive_once(port, lambda: None, speaker=True)
+    assert port.writes[-1] == b"STOP\n"
 
 
 @pytest.mark.parametrize(
@@ -458,9 +482,11 @@ def test_silent_tx_challenge_cannot_start_the_wrong_image(receiver, challenge, s
     assert port.writes == [b"HELLO\n"]
 
 
-def test_silent_tx_binds_approval_and_install_to_exact_review(receiver, tmp_path):
+@pytest.mark.parametrize("speaker", [False, True])
+def test_output_trial_binds_approval_and_install_to_exact_review(receiver, tmp_path, speaker):
     digest = "a" * 64
-    scope = "ONE_SILENT_TX_PROBE_AND_OTA1_RESTORE"
+    scope = receiver.SPEAKER_SCOPE if speaker else receiver.SILENT_TX_SCOPE
+    selection = {"speaker": speaker, "silent_tx": not speaker}
     receipt = {"approved": True, "scope": scope, "image_sha256": digest, "review_id": tmp_path.name}
     installed = {
         "port": "COM3",
@@ -470,25 +496,33 @@ def test_silent_tx_binds_approval_and_install_to_exact_review(receiver, tmp_path
         "review_id": tmp_path.name,
     }
     manifest = {
-        "kind": "REVIEW_ONLY_SILENT_TX_PROBE_V1",
-        "expected_protocol": "K151_SILENT_TX_V1",
+        "kind": "REVIEW_ONLY_SPEAKER_PROBE_V1" if speaker else "REVIEW_ONLY_SILENT_TX_PROBE_V1",
+        "expected_protocol": receiver.SPEAKER_PROTOCOL if speaker else receiver.SILENT_TX_PROTOCOL,
         "scope": scope,
         "port": "COM3",
         "image_sha256": digest,
         "review_id": tmp_path.name,
     }
+    if speaker:
+        manifest["operator_mode"] = receipt["operator_mode"] = "SYNTHETIC_SPEAKER_ONLY"
     for name, record in (
         ("review-manifest", manifest),
         ("approval", receipt),
         ("install-verified", installed),
     ):
         (tmp_path / f"{name}.json").write_text(json.dumps(record))
-    assert receiver.verified_port(tmp_path, silent_tx=True) == ("COM3", digest)
+    assert receiver.verified_port(tmp_path, **selection) == ("COM3", digest)
     for name, record in (("approval", receipt), ("install-verified", installed)):
         file = tmp_path / f"{name}.json"
         file.write_text(json.dumps(record | {"review_id": "previous-review"}))
         with pytest.raises(ValueError):
-            receiver.verified_port(tmp_path, silent_tx=True)
+            receiver.verified_port(tmp_path, **selection)
         file.write_text(json.dumps(record))
     with pytest.raises(ValueError):
         receiver.verified_port(tmp_path, question_only=True)
+    if speaker:
+        (tmp_path / "approval.json").write_text(
+            json.dumps(receipt | {"operator_mode": "SILENT_TX_NO_AUDIO"})
+        )
+        with pytest.raises(ValueError):
+            receiver.verified_port(tmp_path, speaker=True)

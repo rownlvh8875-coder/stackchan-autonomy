@@ -49,7 +49,8 @@ class K151CodecPort final {
   bool quiet();      // Both codecs; error latches fault
   bool shutdown();   // One release attempt/handle; retains failed I2S, fault stays.
   bool prepared() const {
-    return prepared_ && !faulted() && input_allowed() && in_control_.healthy() &&
+    return prepared_ && !faulted() && input_allowed() &&
+           (speaker_probe_build() || in_control_.healthy()) &&
            (microphone_only() || out_control_.healthy());
   }
   bool faulted() const {
@@ -59,6 +60,13 @@ class K151CodecPort final {
   bool cleanup_unverified() const { return cleanup_unverified_; }
 
  private:
+  static constexpr bool speaker_probe_build() {
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+    return true;
+#else
+    return false;
+#endif
+  }
   enum class OutputData { empty, queued, dma_complete };
   bool microphone_only() const { return receive_only_; }
   bool input_allowed() const {
@@ -75,7 +83,7 @@ class K151CodecPort final {
   bool prepare_i2s();
   bool prepare_i2s_tx();
   bool prepare_codecs();
-  bool quiesce_duplex_channels();
+  bool quiesce_channels();
   bool prepare_output_codec();
   bool prepare_input_codec();
   bool close_microphone(bool* driver_closed = nullptr); // Does not initiate nested cleanup.

@@ -3,6 +3,8 @@
 #include "board_evidence.hpp"
 #if defined(STACKCHAN_K151_SILENT_TX_PROBE)
 #include "k151_silent_tx_probe.hpp"
+#elif defined(STACKCHAN_K151_SPEAKER_PROBE)
+#include "k151_speaker_probe.hpp"
 #elif defined(STACKCHAN_K151_QUESTION_ONLY)
 #include "k151_question_trial.hpp"
 #else
@@ -19,7 +21,8 @@
 #include <atomic>
 #include <cstdio>
 
-#if !defined(STACKCHAN_K151_QUESTION_ONLY) && !defined(STACKCHAN_K151_SILENT_TX_PROBE)
+#if !defined(STACKCHAN_K151_QUESTION_ONLY) && !defined(STACKCHAN_K151_SILENT_TX_PROBE) && \
+    !defined(STACKCHAN_K151_SPEAKER_PROBE)
 namespace stackchan::standalone {
 std::span<const uint8_t> linked_mic_trial_model();
 }
@@ -47,6 +50,25 @@ const char* tx_result_name(K151SilentTxResult result) {
     case Result::clock_fault: return "clock_fault";
     case Result::cleanup_failed: return "cleanup_failed";
     case Result::observed: return "two_descriptors_observed";
+  }
+  return nullptr;
+}
+#elif defined(STACKCHAN_K151_SPEAKER_PROBE)
+constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_LOCAL_START";
+
+const char* speaker_result_name(K151SpeakerProbeResult result) {
+  using Result = K151SpeakerProbeResult;
+  switch (result) {
+    case Result::denied: return "denied";
+    case Result::stopped: return "stopped";
+    case Result::codec_prepare_failed: return "codec_prepare_failed";
+    case Result::clock_fault: return "clock_fault";
+    case Result::amplifier_start_failed: return "amplifier_start_failed";
+    case Result::transfer_failed: return "transfer_failed";
+    case Result::mute_confirmation_failed: return "mute_confirmation_failed";
+    case Result::cleanup_failed: return "cleanup_failed";
+    case Result::observed: return "dma_and_mute_observed";
   }
   return nullptr;
 }
@@ -105,7 +127,8 @@ void print_question_report(K151QuestionTrialDiagnostic question) {
 }
 #endif
 
-#if !defined(STACKCHAN_K151_QUESTION_ONLY) && !defined(STACKCHAN_K151_SILENT_TX_PROBE)
+#if !defined(STACKCHAN_K151_QUESTION_ONLY) && !defined(STACKCHAN_K151_SILENT_TX_PROBE) && \
+    !defined(STACKCHAN_K151_SPEAKER_PROBE)
 void announce_listening() {
   std::puts("{\"mic_trial\":\"LISTEN_NOW\",\"operating_admission\":false}");
   (void)std::fflush(stdout);
@@ -173,6 +196,12 @@ extern "C" void app_main() {
 #ifdef STACKCHAN_K151_SILENT_TX_PROBE
     if (const char* result = tx_result_name(run_k151_silent_tx_probe(owner, stop))) {
       std::printf("{\"tx_dma_probe\":\"K151_SILENT_TX_V1\",\"result\":\"%s\","
+                  "\"operating_admission\":false}\n", result);
+    }
+#elif defined(STACKCHAN_K151_SPEAKER_PROBE)
+    const K151AudioBoardEvidence evidence{expected_location, true};
+    if (const char* result = speaker_result_name(run_k151_speaker_probe(owner, stop, evidence))) {
+      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V1\",\"result\":\"%s\","
                   "\"operating_admission\":false}\n", result);
     }
 #else

@@ -5,10 +5,14 @@
 #include "k151_codec_port.hpp"
 #include "k151_mic_reader.hpp"
 #include "k151_mic_wake_trial.hpp"
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+#include "k151_speaker_probe.hpp"
+#endif
 #include "native_wake_input.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <esp_heap_caps.h>
 #include <freertos/task.h>
@@ -44,6 +48,13 @@ bool base_open=true;
 bool exercise_release_faults=false;
 bool mic_only() { return mode.starts_with("mic_only_"); }
 bool duplex_runtime() { return mode.starts_with("duplex_runtime_"); }
+bool speaker_probe() { return mode.starts_with("speaker_probe_"); }
+int64_t speaker_clock_us=1000;
+bool speaker_unmuted=false;
+int speaker_peak=0, speaker_eof=0;
+i2s_isr_callback_t speaker_callback=nullptr;
+void* speaker_callback_data=nullptr;
+std::array<int,6> speaker_dma_ids{};
 bool report_trial=false;
 std::atomic_bool local_owner{true}, local_stop{false};
 bool mic_wake_trial() { return report_trial || mode.starts_with("mic_only_trial_"); }
@@ -153,13 +164,29 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
     bytes[0] = reg == 0x00 ? 0x18 :
         (mode == "duplex_board_switch_active" && phase == "init" ? 0x01 : 0x00);
     bytes[1] = reg == 0x00 && mode != "duplex_board_wrong_amp" ? 0x52 : 0x00;
+    if (speaker_probe() && reg == 0x01) {
+      const auto power = amp_registers[0x04][1] & 0x43;
+      bytes[0] = power == 0x40 ||
+                 (speaker_unmuted && mode == "speaker_probe_mute_failure") ? 1 : 0;
+      bytes[1] = tx.enabled && power != 3 && mode != "speaker_probe_clock_failure" ? 0x11 : 0;
+    }
     return ESP_CODEC_DEV_OK;
   }
   if (out && (reg == 0x04 || reg == 0x05 || reg == 0x0c)) {
     auto& stored = amp_registers[reg];
     if (write) {
-      if (reg == 0x04) assert((bytes[1] & 0x43) == 0x03);
-      if (reg == 0x05) assert(bytes[1] & 0x10);
+      if (reg == 0x04 && (bytes[1] & 0x43) != 0x03) {
+        assert(speaker_probe() && tx.enabled && !rx.enabled && !local_stop);
+        assert((amp_registers[0x05][1] & 0x10) != 0);
+        const auto power = bytes[1] & 0x43;
+        assert((power == 0x42 && (stored[1] & 0x43) == 3) ||
+               (power == 0x40 && (stored[1] & 0x43) == 0x42));
+      }
+      if (reg == 0x05 && !(bytes[1] & 0x10)) {
+        assert(speaker_probe() && tx.enabled && !rx.enabled && !local_stop);
+        assert((amp_registers[0x04][1] & 0x43) == 0x40 && amp_registers[0x0c][0] == 0x60);
+        speaker_unmuted = true;
+      }
       if (reg == 0x0c) assert(bytes[0] == 0x60);
       stored = {bytes[0], bytes[1]};
     } else {
@@ -219,6 +246,7 @@ void zero(std::span<const int16_t> pcm) { for(auto sample:pcm)assert(sample==0);
 }
 extern "C" int64_t esp_timer_get_time() {
   ++timer_calls;
+  if (speaker_probe()) return speaker_clock_us;
   if(mic_wake_trial()) {
     if(mode=="mic_only_trial_invalid_start" && timer_calls==1)return -1;
     if(regress_next_trial_clock) {
@@ -365,7 +393,8 @@ extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev,const uint8
   return ESP_OK;
 }
 extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_t* t,i2s_chan_handle_t* r){
-  assert(c->dma_frame_num==240 && r);assert((t==nullptr)==mic_only());
+  assert(c->dma_frame_num==240 && (r==nullptr)==speaker_probe());
+  assert((t==nullptr)==mic_only());
   assert(c->dma_desc_num == 6 && c->auto_clear_after_cb == (t != nullptr));
   assert(reset_read_back && output_latch==0xa3 && !pmic.open);
   assert(expander.open != mic_only());
@@ -375,19 +404,33 @@ extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_
   }
   ++channels_created;
   if(t)*t=&tx;
-  *r=&rx;return 0;
+  if(r)*r=&rx;
+  return 0;
 }
 extern "C" esp_err_t i2s_channel_init_std_mode(i2s_chan_handle_t,const i2s_std_config_t*){assert(!mic_only());return 0;}
 extern "C" esp_err_t i2s_channel_register_event_callback(i2s_chan_handle_t h,
     const i2s_event_callbacks_t* callbacks, void* data) {
   assert(!mic_only() && h == &tx && h->alive && !h->enabled);
   assert(callbacks && callbacks->on_sent && data);
+  if (speaker_probe()) {
+    speaker_callback=callbacks->on_sent;
+    speaker_callback_data=data;
+  }
   ++tx_callbacks_registered;
   if (mode == "tx_callback_failed") return ESP_FAIL;
   return ESP_OK;
 }
 void vTaskDelay(unsigned ticks) {
   assert(!mic_only());
+  if (speaker_probe() && reset_waits==2) {
+    assert(ticks==1 && tx.enabled && !rx.enabled);
+    speaker_clock_us += calls==25 ? 10'000 : 1000;
+    if (calls==25 && mode!="speaker_probe_dma_failure") {
+      i2s_event_data_t eof{&speaker_dma_ids[speaker_eof++ % speaker_dma_ids.size()], 480};
+      assert(!speaker_callback(&tx,&eof,speaker_callback_data));
+    }
+    return;
+  }
   if (reset_waits == 0) {
     assert(ticks == 11 && output_latch == 0xa3 && tx.enabled && !rx.enabled);
     if (mode == "duplex_board_stop_in_reset") local_stop = true;
@@ -398,6 +441,7 @@ void vTaskDelay(unsigned ticks) {
   ++reset_waits;
 }
 extern "C" esp_err_t i2s_channel_init_tdm_mode(i2s_chan_handle_t h,const i2s_tdm_config_t* c){
+  assert(!speaker_probe());
   ++tdm_inits;
   assert(h==&rx && c->clk_cfg.sample_rate_hz==24000 && c->gpio_cfg.dout==I2S_GPIO_UNUSED);
   if(mic_only()) {
@@ -431,12 +475,22 @@ extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
 }
 extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
   assert(h->alive);++h->deletes;
+  if (speaker_probe() && mode=="speaker_probe_release_failure") return ESP_FAIL;
   if(h->enabled)return ESP_ERR_INVALID_STATE; // Pinned IDF refuses BEFORE free.
   h->alive=false;return 0;
 }
-extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){assert(h->alive);if(exercise_release_faults && (mode=="info_fail" || (mode=="release_rx_info" && h==&rx)))return ESP_FAIL;info->is_enabled=h->enabled;info->pair_chan=mode=="mic_only_peer"?&tx:nullptr;return 0;}
+extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){
+  assert(h->alive);
+  if(exercise_release_faults && (mode=="info_fail" || (mode=="release_rx_info" && h==&rx)))
+    return ESP_FAIL;
+  info->is_enabled=h->enabled;
+  info->pair_chan=mode=="mic_only_peer"?&tx:mode=="speaker_probe_paired"?&rx:nullptr;
+  if (speaker_probe()) info->total_dma_buf_size=6*480;
+  return 0;
+}
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
+  assert(!speaker_probe());
   if (duplex_runtime()) {
     assert(rx.enabled && tx.enabled && n==960);
     const bool priming = calls % 2 != 0;
@@ -523,9 +577,19 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
   }
   return mode=="driver_fail"?ESP_ERR_TIMEOUT:ESP_OK;
 }
-extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void*,size_t n,size_t* bytes,uint32_t ms){
+extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void* data,size_t n,size_t* bytes,uint32_t ms){
   assert(!mic_only());
   assert(h==&tx && ms==20 && n<=480);++calls;*bytes=mode=="write_short"?n-2:n;
+  if (speaker_probe()) {
+    assert(n==480 && tx.enabled && !rx.enabled && speaker_unmuted);
+    const auto* pcm=static_cast<const int16_t*>(data);
+    for (size_t i=0;i<n/2;++i) speaker_peak=std::max(speaker_peak, std::abs(int(pcm[i])));
+    if (calls==1) assert(pcm[0]==0);
+    if (calls==25) assert(pcm[239]==0);
+    speaker_clock_us+=10'000;
+    if (mode=="speaker_probe_stop_write") local_stop=true;
+    if (mode=="speaker_probe_write_failure") *bytes-=2;
+  }
   return mode=="write_fail"?ESP_ERR_TIMEOUT:ESP_OK;
 }
 extern "C" const audio_codec_data_if_t* audio_codec_new_i2s_data(audio_codec_i2s_cfg_t*) {
@@ -554,7 +618,7 @@ extern "C" const audio_codec_if_t* aw88298_codec_new(aw88298_codec_cfg_t* cfg) {
       control->write_reg(control, 0x0c, 1, volume, 2) != ESP_CODEC_DEV_OK) return nullptr;
   return &codecs[0];
 }
-extern "C" const audio_codec_if_t* es7210_codec_new(es7210_codec_cfg_t* cfg){codec_controls[1]=cfg->ctrl_if;codec_operation(1,"init");return &codecs[1];}
+extern "C" const audio_codec_if_t* es7210_codec_new(es7210_codec_cfg_t* cfg){assert(!speaker_probe());codec_controls[1]=cfg->ctrl_if;codec_operation(1,"init");return &codecs[1];}
 extern "C" esp_codec_dev_handle_t esp_codec_dev_new(esp_codec_dev_cfg_t* cfg) {
   if(mode=="mic_only_codec_prepare_fail")return nullptr;
   assert(created<2);devices[created]={cfg->data_if,cfg->dev_type,false};return &devices[created++];
@@ -570,7 +634,10 @@ extern "C" int esp_codec_dev_close(esp_codec_dev_handle_t h) {
   auto* d=static_cast<Dev*>(h);if(d->open){codec_operation(d->type==ESP_CODEC_DEV_TYPE_IN?1:0,"close");d->data->enable(d->data,d->type,false);d->open=false;}return 0;
 }
 extern "C" int esp_codec_dev_set_in_channel_gain(esp_codec_dev_handle_t,uint16_t,float){++gains;codec_operation(1,"gain");return 0;}
-extern "C" int esp_codec_dev_set_out_vol(esp_codec_dev_handle_t,int){return 0;}
+extern "C" int esp_codec_dev_set_out_vol(esp_codec_dev_handle_t,int volume){
+  if(speaker_probe())assert(volume==10 && !speaker_unmuted);
+  return 0;
+}
 extern "C" int esp_codec_dev_read(esp_codec_dev_handle_t h,void* p,int n){auto* d=static_cast<Dev*>(h);return d->data->read(d->data,static_cast<uint8_t*>(p),n);}
 extern "C" int esp_codec_dev_write(esp_codec_dev_handle_t h,void* p,int n){auto* d=static_cast<Dev*>(h);return d->data->write(d->data,static_cast<uint8_t*>(p),n);}
 extern "C" void esp_codec_dev_delete(esp_codec_dev_handle_t h){assert(!static_cast<Dev*>(h)->open);++deleted;}
@@ -595,6 +662,39 @@ std::string run_mic_trial_with_embedded_model_double(
 #endif
 int main(int argc,char** argv) {
   assert(argc==2 || (argc==3 && std::string_view(argv[2])=="--report"));mode=argv[1];
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  if (speaker_probe()) {
+    using Result=K151SpeakerProbeResult;
+    local_stop=mode=="speaker_probe_stop_before";
+    const bool evidence=mode!="speaker_probe_denied";
+    const auto result=run_k151_speaker_probe(local_owner,local_stop,{evidence,true});
+    if (mode=="speaker_probe_denied" || mode=="speaker_probe_stop_before") {
+      assert(result==(evidence?Result::stopped:Result::denied));
+      assert(bus_created==0 && channels_created==0 && calls==0);
+      return 0;
+    }
+    if (mode=="speaker_probe_ok") {
+      assert(result==Result::observed && speaker_peak==4096 && calls==25 && speaker_eof==7);
+      assert(run_k151_speaker_probe(local_owner,local_stop,{true,true})==Result::denied);
+    } else if (mode=="speaker_probe_stop_write") {
+      assert(result==Result::stopped && calls==1 && speaker_eof==0);
+    } else if (mode=="speaker_probe_write_failure" || mode=="speaker_probe_dma_failure") {
+      assert(result==Result::transfer_failed);
+    } else if (mode=="speaker_probe_mute_failure") {
+      assert(result==Result::mute_confirmation_failed && speaker_eof==7);
+    } else if (mode=="speaker_probe_clock_failure") {
+      assert(result==Result::amplifier_start_failed && !speaker_unmuted && calls==0);
+    } else if (mode=="speaker_probe_paired") {
+      assert(result==Result::codec_prepare_failed && !speaker_unmuted && calls==0);
+    } else {
+      assert(mode=="speaker_probe_release_failure" && result==Result::cleanup_failed);
+    }
+    assert(!rx.enabled && rx.deletes==0 && tdm_inits==0 && gains==0);
+    assert(!tx.enabled && output_latch==0xa3 && !bus.alive);
+    assert(created<=1 && created==deleted && legacy_calls==0);
+    return 0;
+  }
+#endif
   report_trial=argc==3;
   if (report_trial) {
     K151MicWakeTrial trial{[] {

@@ -27,8 +27,10 @@ namespace {
 constexpr char kTag[] = "SC_K151_AUDIO";
 constexpr size_t kMaxFrames = kPcmFramesPerTenMs; // 10ms of PCM, NOT a driver timeout bound.
 static_assert(kMaxFrames == DmaTxTail::kFramesPerDescriptor);
+#ifndef STACKCHAN_K151_SPEAKER_PROBE
 static_assert(k151::kProbeAddresses[k151::index(k151::Device::mic_es7210)] ==
               (ES7210_CODEC_DEFAULT_ADDR >> 1));
+#endif
 static_assert(k151::kProbeAddresses[k151::index(k151::Device::amp_aw88298)] ==
               (AW88298_CODEC_DEFAULT_ADDR >> 1));
 constexpr int kLowVolume = 10;
@@ -85,7 +87,8 @@ K151CodecPort::~K151CodecPort() { (void)shutdown(); }
 bool K151CodecPort::prepare_microphone_only(const std::atomic_bool& owner,
                                             const std::atomic_bool& stop,
                                             const K151MicOnlyEvidence& evidence) {
-  if (attempted_ || !owner.load() || stop.load() || !evidence.verified()) return false;
+  if (speaker_probe_build() || attempted_ || !owner.load() || stop.load() ||
+      !evidence.verified()) return false;
   owner_ = &owner;
   stop_ = &stop;
   receive_only_ = true;
@@ -114,19 +117,20 @@ bool K151CodecPort::prepare_hardware() {
   attempted_ = true;
   if (!input_allowed() || !prepare_i2s() || !input_allowed()) return fail();
   prepare_stage_ = K151MicWakeStage::codec_prepare;
-  if (!prepare_codecs() || (!microphone_only() && !quiesce_duplex_channels()) ||
+  if (!prepare_codecs() || (!microphone_only() && !quiesce_channels()) ||
       !input_allowed()) return fail();
   // Output is deliberately NOT opened and the amplifier is NOT enabled.
   prepared_ = true;
   return true;
 }
 
-bool K151CodecPort::quiesce_duplex_channels() {
+bool K151CodecPort::quiesce_channels() {
   // RX has its own channel, while the SDK can leave its paired TX running to
   // supply clocks without logically opening playback. Stop both independently.
-  const bool rx_stopped = disable_owned_channel(rx_);
+  const bool rx_stopped = speaker_probe_build() ||
+      (disable_owned_channel(rx_) && channel_is_idle(rx_));
   const bool tx_stopped = disable_owned_channel(tx_);
-  return rx_stopped && tx_stopped && channel_is_idle(rx_) && channel_is_idle(tx_);
+  return rx_stopped && tx_stopped && channel_is_idle(tx_);
 }
 
 bool K151CodecPort::attach_board_device(uint16_t address) {
@@ -217,12 +221,16 @@ bool K151CodecPort::prepare_i2s() {
   chan.dma_frame_num = DmaTxTail::kFramesPerDescriptor;
   chan.auto_clear_after_cb = !microphone_only();
   if (!input_allowed() ||
-      i2s_new_channel(&chan, microphone_only() ? nullptr : &tx_, &rx_) != ESP_OK)
+      i2s_new_channel(&chan, microphone_only() ? nullptr : &tx_,
+                      speaker_probe_build() ? nullptr : &rx_) != ESP_OK)
     return false;
   if (microphone_only()) {
     if (!data_port_.attach_receive_only(rx_)) return false;
   } else if (!prepare_i2s_tx()) {
     return false;
+  }
+  if constexpr (speaker_probe_build()) {
+    return input_allowed() && i2s_channel_enable(tx_) == ESP_OK;
   }
 
   i2s_tdm_config_t rx_cfg = {};
@@ -282,7 +290,11 @@ bool K151CodecPort::prepare_codecs() {
     if (!data_if_ || !data_port_.attach(data_if_, rx_, tx_) || !prepare_output_codec())
       return false;
   }
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  return input_allowed();
+#else
   return input_allowed() && prepare_input_codec();
+#endif
 }
 
 bool K151CodecPort::prepare_output_codec() {
@@ -322,6 +334,7 @@ bool K151CodecPort::prepare_output_codec() {
   return out_dev_ != nullptr;
 }
 
+#ifndef STACKCHAN_K151_SPEAKER_PROBE
 bool K151CodecPort::prepare_input_codec() {
   audio_codec_i2c_cfg_t i2c_cfg = {};
   i2c_cfg.port = static_cast<i2c_port_t>(kI2cPort);
@@ -341,8 +354,10 @@ bool K151CodecPort::prepare_input_codec() {
   in_dev_ = esp_codec_dev_new(&dev_cfg);
   return in_dev_ != nullptr;
 }
+#endif
 
 bool K151CodecPort::microphone_on() {
+  if (speaker_probe_build()) return false;
   if (!input_allowed()) return fail();
   if (!prepared() || input_open_ || output_open_) return false;
   esp_codec_dev_sample_info_t fs = {};
@@ -373,11 +388,12 @@ bool K151CodecPort::microphone_off() {
 bool K151CodecPort::capture_idle() const {
   // This is also called during STOP when the live owner flag can be false.
   return prepared_ && !faulted() && !microphone_only() && !input_open_ && !output_open_ &&
-         channel_is_idle(rx_) && channel_is_idle(tx_);
+         (speaker_probe_build() || channel_is_idle(rx_)) && channel_is_idle(tx_);
 }
 
 bool K151CodecPort::start_fresh_capture() {
-  if (!prepared() || microphone_only() || input_open_ || output_open_) return false;
+  if (speaker_probe_build() || !prepared() || microphone_only() || input_open_ || output_open_)
+    return false;
   if (!out_control_.aw88298_standby_verified()) return fail();
   if (!microphone_on()) return false;
   // The pinned IDF drops the RX queue on enable after a confirmed disable.
@@ -391,7 +407,7 @@ bool K151CodecPort::close_microphone(bool* driver_closed) {
   if (!input_open_) return !in_control_.faulted();
   const int rc = esp_codec_dev_close(in_dev_);
   const bool closed = rc == 0 && data_port_.disabled(ESP_CODEC_DEV_TYPE_IN);
-  const bool channels_stopped = microphone_only() || quiesce_duplex_channels();
+  const bool channels_stopped = microphone_only() || quiesce_channels();
   if (driver_closed) *driver_closed = closed && channels_stopped;
   if (!closed || !in_control_.healthy()) return false;
   input_open_ = false;
@@ -400,6 +416,7 @@ bool K151CodecPort::close_microphone(bool* driver_closed) {
 
 bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
   wipe_pcm(mono);
+  if (speaker_probe_build()) return false;
   if (!input_allowed()) return fail();
   if (!prepared() || !input_open_ || output_open_ || mono.empty() ||
       mono.size() > kMaxFrames) return false;
@@ -423,6 +440,7 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
 }
 
 bool K151CodecPort::playback_enabled_by_build() {
+  if constexpr (speaker_probe_build()) return true;
   // Source-derived AW9523/AXP2101 sequence is not a measured K151 power-up.
   // The DMA observer still needs physical reset, mute and codec-idle evidence.
   if (!kK151PhysicalOutputEnabledInHoldImage ||
@@ -439,7 +457,7 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
   if (!consent.load()) return false;
   // Board bring-up can leave RX clocked before the SDK codec was ever opened.
   // Quiesce the physical channel before enabling playback in the shared port.
-  if (!disable_owned_channel(rx_)) {
+  if (!speaker_probe_build() && !disable_owned_channel(rx_)) {
     fault_ = true;
     (void)shutdown();
     return false;
@@ -453,9 +471,9 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
   output_open_ = true;
   if (esp_codec_dev_open(out_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT) ||
       !out_control_.healthy()) return fail();
-  i2s_chan_info_t tx_info{}, rx_info{};
+  i2s_chan_info_t tx_info{};
   if (i2s_channel_get_info(tx_, &tx_info) != ESP_OK || !tx_info.is_enabled ||
-      i2s_channel_get_info(rx_, &rx_info) != ESP_OK || rx_info.is_enabled) return fail();
+      (speaker_probe_build() ? tx_info.pair_chan != nullptr : !channel_is_idle(rx_))) return fail();
   const auto allowed = [&] {
     return consent.load() && prepared() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT);
   };

@@ -125,3 +125,26 @@ def test_silent_tx_image_is_distinct_and_has_no_voice_trial(model_fixture):
         inspect_image(
             image(markers, project=b"k151_question_only"), ELF_SHA, SLOT_CSV, silent_tx=True
         )
+
+
+def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    markers = b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0WAIT_SPEAKER_LOCAL_START\0K151_SPEAKER_V1\0"
+    project = b"k151_speaker_probe"
+    manifest = inspect_image(image(markers, project=project), ELF_SHA, SLOT_CSV, speaker=True)
+    assert manifest["kind"] == "SYNTHETIC_SPEAKER_PROBE_NOT_OPERATIONAL"
+    assert manifest["microphone_enabled"] is False
+    assert manifest["cloud_enabled"] is False
+    assert manifest["tone_samples"] == 6000
+    assert manifest["tone_peak_pcm16"] == 4096
+    assert manifest["install_authorized"] is False
+    for unexpected in (model_fixture, b"LISTEN_NOW\0", b"QUESTION_ONLY_NOW\0", b"api.openai.com\0"):
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers + unexpected, project=project), ELF_SHA, SLOT_CSV, speaker=True
+            )
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(markers, project=b"k151_silent_tx_probe"), ELF_SHA, SLOT_CSV, speaker=True
+        )

@@ -36,8 +36,14 @@ bool K151BoundedI2s::attach(const audio_codec_data_if_t* base,
                             i2s_chan_handle_t rx, i2s_chan_handle_t tx) {
   if (attempted_) return false;
   attempted_ = true;
-  if (!base || !rx || !tx || !base->is_open || !base->enable || !base->set_fmt ||
+  if (!base || !tx || !base->is_open || !base->enable || !base->set_fmt ||
       !base->is_open(base)) { fail(); return false; }
+  if (!rx) {
+    i2s_chan_info_t info{};
+    if (i2s_channel_get_info(tx, &info) != ESP_OK || info.pair_chan) {
+      fail(); return false;
+    }
+  }
   base_ = base; rx_ = rx; tx_ = tx;
   return true;
 }

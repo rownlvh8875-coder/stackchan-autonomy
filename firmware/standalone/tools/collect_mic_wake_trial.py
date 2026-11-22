@@ -16,6 +16,8 @@ QUESTION_PROTOCOL = "MIC_QUESTION_TRIAL_V1"
 QUESTION_ONLY_PROTOCOL = "MIC_QUESTION_ONLY_TRIAL_V1"
 SILENT_TX_SCOPE = "ONE_SILENT_TX_PROBE_AND_OTA1_RESTORE"
 SILENT_TX_PROTOCOL = "K151_SILENT_TX_V1"
+SPEAKER_SCOPE = "ONE_SYNTHETIC_SPEAKER_PROBE_AND_OTA1_RESTORE"
+SPEAKER_PROTOCOL = "K151_SPEAKER_V1"
 SILENT_TX_RESULTS = {
     "denied",
     "stopped",
@@ -28,6 +30,17 @@ SILENT_TX_RESULTS = {
     "clock_fault",
     "cleanup_failed",
     "two_descriptors_observed",
+}
+SPEAKER_RESULTS = {
+    "denied",
+    "stopped",
+    "codec_prepare_failed",
+    "clock_fault",
+    "amplifier_start_failed",
+    "transfer_failed",
+    "mute_confirmation_failed",
+    "cleanup_failed",
+    "dma_and_mute_observed",
 }
 WIRE_LIMIT = 512
 QUESTION_BEFORE_CUE = {"not_run", "memory_denied", "prepare_failed", "open_failed", "quiet_timeout"}
@@ -71,16 +84,21 @@ def validate_question_report(record, *, cue_seen, wake=None):
     return record
 
 
-def validate_silent_tx_report(record):
+def validate_output_report(record, *, speaker):
+    field, protocol, results = (
+        ("speaker_probe", SPEAKER_PROTOCOL, SPEAKER_RESULTS)
+        if speaker
+        else ("tx_dma_probe", SILENT_TX_PROTOCOL, SILENT_TX_RESULTS)
+    )
     result = record.get("result")
     if (
-        set(record) != {"tx_dma_probe", "result", "operating_admission"}
-        or record.get("tx_dma_probe") != SILENT_TX_PROTOCOL
+        set(record) != {field, "result", "operating_admission"}
+        or record.get(field) != protocol
         or record.get("operating_admission") is not False
         or not isinstance(result, str)
-        or result not in SILENT_TX_RESULTS
+        or result not in results
     ):
-        raise ValueError("Invalid silent TX result")
+        raise ValueError("Invalid output diagnostic result")
     return record
 
 
@@ -92,15 +110,21 @@ def receive_once(
     wake_only_control=False,
     question_only=False,
     silent_tx=False,
+    speaker=False,
     before_start=lambda: None,
     clock=time.monotonic,
 ):
     question_mode = announce_question is not None
+    output_only = silent_tx or speaker
     if (wake_only_control or question_only) and not question_mode:
         raise ValueError("Trial requires a question-phase cue")
-    if sum((wake_only_control, question_only, silent_tx)) > 1 or (silent_tx and question_mode):
+    if sum((wake_only_control, question_only, silent_tx, speaker)) > 1 or (
+        output_only and question_mode
+    ):
         raise ValueError("Select a single trial mode")
-    if silent_tx:
+    if speaker:
+        challenge = "WAIT_SPEAKER_LOCAL_START"
+    elif silent_tx:
         challenge = "WAIT_SILENT_TX_LOCAL_START"
     elif question_only:
         challenge = "WAIT_QUESTION_ONLY_START"
@@ -148,6 +172,7 @@ def receive_once(
                 "WAIT_WAKE_ONLY_CONTROL",
                 "WAIT_QUESTION_ONLY_START",
                 "WAIT_SILENT_TX_LOCAL_START",
+                "WAIT_SPEAKER_LOCAL_START",
             ):
                 nonce = record.get("nonce")
                 if (
@@ -176,7 +201,7 @@ def receive_once(
                 if (
                     not started
                     or question_only
-                    or silent_tx
+                    or output_only
                     or listening
                     or report is not None
                     or set(record) != {"mic_trial", "operating_admission"}
@@ -200,12 +225,12 @@ def receive_once(
                     raise ValueError("Unexpected question marker")
                 question_cued = True
                 announce_question()
-            elif "tx_dma_probe" in record:
-                if not silent_tx or not started or report is not None:
-                    raise ValueError("Unexpected or repeated silent TX result")
-                report = validate_silent_tx_report(record)
+            elif "tx_dma_probe" in record or "speaker_probe" in record:
+                if not output_only or not started or report is not None:
+                    raise ValueError("Unexpected or repeated output result")
+                report = validate_output_report(record, speaker=speaker)
             elif "mic_wake_trial" in record:
-                if silent_tx or question_only or not started or report is not None:
+                if output_only or question_only or not started or report is not None:
                     raise ValueError("Unexpected or repeated trial result")
                 report = parse_mic_wake_trial_report(record)
                 if report["result"] in {"detected", "not_detected"} and not listening:
@@ -243,9 +268,15 @@ def receive_once(
 
 
 def verified_port(
-    directory, *, question=False, wake_only_control=False, question_only=False, silent_tx=False
+    directory,
+    *,
+    question=False,
+    wake_only_control=False,
+    question_only=False,
+    silent_tx=False,
+    speaker=False,
 ):
-    if sum((question, wake_only_control, question_only, silent_tx)) > 1:
+    if sum((question, wake_only_control, question_only, silent_tx, speaker)) > 1:
         raise ValueError("Select a single trial mode")
 
     def record(name):
@@ -257,13 +288,23 @@ def verified_port(
     digest = manifest["image_sha256"]
     port = manifest["port"]
     protocol = QUESTION_ONLY_PROTOCOL if question_only else QUESTION_PROTOCOL
-    if silent_tx:
-        scope = SILENT_TX_SCOPE
-        protocol = SILENT_TX_PROTOCOL
-        expected_kind = "REVIEW_ONLY_SILENT_TX_PROBE_V1"
+    if silent_tx or speaker:
+        if speaker:
+            scope = SPEAKER_SCOPE
+            protocol = SPEAKER_PROTOCOL
+            expected_kind = "REVIEW_ONLY_SPEAKER_PROBE_V1"
+            if any(
+                item.get("operator_mode") != "SYNTHETIC_SPEAKER_ONLY"
+                for item in (manifest, approved)
+            ):
+                raise ValueError("Synthetic speaker mode must be explicitly scoped")
+        else:
+            scope = SILENT_TX_SCOPE
+            protocol = SILENT_TX_PROTOCOL
+            expected_kind = "REVIEW_ONLY_SILENT_TX_PROBE_V1"
         review_id = directory.name
         if any(item.get("review_id") != review_id for item in (manifest, approved, installed)):
-            raise ValueError("Silent TX approval and installation must refer to this review")
+            raise ValueError("Output approval and installation must refer to this review")
     elif question_only:
         scope = QUESTION_ONLY_SCOPE
         expected_kind = "REVIEW_ONLY_QUESTION_ONLY_TRIAL_V1"
@@ -320,6 +361,7 @@ def main():
     mode.add_argument("--wake-only-control", action="store_true")
     mode.add_argument("--question-only", action="store_true")
     mode.add_argument("--silent-tx", action="store_true")
+    mode.add_argument("--speaker", action="store_true")
     args = parser.parse_args()
     try:
         port_name, digest = verified_port(
@@ -328,6 +370,7 @@ def main():
             wake_only_control=args.wake_only_control,
             question_only=args.question_only,
             silent_tx=args.silent_tx,
+            speaker=args.speaker,
         )
         intent = args.review_dir / "mic-receive-intent.json"
         if intent.exists():
@@ -359,10 +402,14 @@ def main():
                 wake_only_control=args.wake_only_control,
                 question_only=args.question_only,
                 silent_tx=args.silent_tx,
+                speaker=args.speaker,
             )
         finally:
             port.close()
-        result_file = "tx-dma-result.json" if args.silent_tx else "mic-result.json"
+        if args.speaker:
+            result_file = "speaker-result.json"
+        else:
+            result_file = "tx-dma-result.json" if args.silent_tx else "mic-result.json"
         with (args.review_dir / result_file).open("x", encoding="utf-8") as file:
             json.dump(report, file)
         print(json.dumps(report))

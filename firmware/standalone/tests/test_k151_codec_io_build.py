@@ -68,7 +68,7 @@ def embedded_trial_binary(tmp_path_factory):
     return _build_port(compiler, binary, BASE / "esp_app/main", embedded_trial=True)
 
 
-def _build_port(compiler, binary, app, *, embedded_trial=False):
+def _build_port(compiler, binary, app, *, embedded_trial=False, speaker_probe=False):
     sources = [
         BASE / "tests/k151_codec_io_test.cpp",
         app / "k151_codec_port.cpp",
@@ -88,6 +88,9 @@ def _build_port(compiler, binary, app, *, embedded_trial=False):
         "-DCONFIG_CODEC_AW88298_SUPPORT=1",
     ]
     command += ["-isystem", str(SDK)]  # Unmodified vendor C anonymous unions.
+    if speaker_probe:
+        command += ["-DSTACKCHAN_K151_SPEAKER_PROBE=1"]
+        sources += [app / "k151_speaker_probe.cpp"]
     for directory in [
         BASE / "tests/codec_io_doubles",
         BASE / "tests/idf_partition_doubles",
@@ -114,6 +117,40 @@ def _build_port(compiler, binary, app, *, embedded_trial=False):
     )
     assert result.returncode == 0, result.stderr
     return binary
+
+
+@pytest.fixture(scope="module")
+def speaker_probe_binary(tmp_path_factory):
+    compiler = shutil.which("g++")
+    if not compiler:
+        pytest.skip("C++20 compiler required")
+    binary = tmp_path_factory.mktemp("speaker-probe") / "speaker"
+    return _build_port(compiler, binary, BASE / "esp_app/main", speaker_probe=True)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "ok",
+        "denied",
+        "stop_before",
+        "stop_write",
+        "write_failure",
+        "dma_failure",
+        "mute_failure",
+        "clock_failure",
+        "paired",
+        "release_failure",
+    ],
+)
+def test_speaker_probe_runs_without_rx_and_uses_real_codec_guard(speaker_probe_binary, case):
+    result = subprocess.run(
+        [str(speaker_probe_binary), f"speaker_probe_{case}"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(
