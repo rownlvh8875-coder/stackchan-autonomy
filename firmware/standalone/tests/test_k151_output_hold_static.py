@@ -13,6 +13,7 @@ def test_k151_physical_output_remains_hard_disabled():
     assert "kK151SafeDmaDrainDriverAvailable = false" in policy
     assert "if (!kK151PhysicalOutputEnabledInHoldImage ||" in codec
     assert "!kK151SafeDmaDrainDriverAvailable) return false;" in codec
+    assert "if (!playback_available() || input_open_ || output_open_) return false;" in codec
     # A successful codec write alone does not satisfy physical-drain evidence.
     assert "bool K151CodecPort::drain_output_before_mute()" in codec
     assert (

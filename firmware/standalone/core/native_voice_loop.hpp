@@ -62,6 +62,7 @@ class NativeVoiceLoop final {
   }
 
   NativeVoiceStep cancel() {
+    if (faulted_) return NativeVoiceStep::stopped;
     faulted_ = true; // No implicit resume, retry, or re-use of a pending epoch.
     (void)wake_.cancel();
     (void)turn_.cancel();

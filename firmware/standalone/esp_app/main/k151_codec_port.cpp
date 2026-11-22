@@ -331,12 +331,16 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
   return true;
 }
 
-bool K151CodecPort::speaker_on_low_volume() {
+bool K151CodecPort::playback_available() const {
   // Source-derived AW9523/AXP2101 sequence is not a measured K151 power-up.
   // No real reset, mute verification or DMA-drain observer exists in this image.
   if (!kK151PhysicalOutputEnabledInHoldImage ||
       !kK151SafeDmaDrainDriverAvailable) return false;
-  if (microphone_only() || !prepared() || input_open_ || output_open_) return false;
+  return !microphone_only() && prepared();
+}
+
+bool K151CodecPort::speaker_on_low_volume() {
+  if (!playback_available() || input_open_ || output_open_) return false;
   esp_codec_dev_sample_info_t fs = {};
   fs.bits_per_sample = 16;
   fs.channel = 1;

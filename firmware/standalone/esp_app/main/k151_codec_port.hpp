@@ -36,6 +36,7 @@ class K151CodecPort final {
   bool microphone_on();
   bool microphone_off();
   bool capture_mono_24k(std::span<int16_t> mono);  // <= 10ms PCM; 20ms driver wait + 40ms postcheck.
+  bool playback_available() const;
   bool speaker_on_low_volume();
   bool speaker_off();
   bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms PCM; not wall-clock latency.

@@ -130,6 +130,23 @@ struct Fixture {
 int main(int argc,char** argv) {
   assert(argc==2);const std::string_view test=argv[1];
   Fixture x;
+  if (test == "loop_stop_once") {
+    NativeVoiceLoop loop{x.session, x.ledger, *x.native, x.turn, x.audio, x.model,
+                         x.stop, x.consent, x.busy, [] { return true; }};
+    assert(loop.poll(1000, 1800000000, x.models) == NativeVoiceStep::listening);
+    x.stop = true;
+    assert(loop.poll(1010, 1800000000, x.models) == NativeVoiceStep::stopped);
+    assert(!x.hardware.mic && !x.hardware.amp && x.audio.stopped());
+    assert(x.session.state() == State::stopped && !x.ledger.permit_active());
+    // Explicit owner teardown follows the fault returned by poll(). It must
+    // not run codec callbacks again after their resources have been released.
+    int late_closes = 0;
+    x.hardware.mic_closing = [&] { ++late_closes; };
+    const auto stopped_epoch = x.session.epoch();
+    assert(loop.cancel() == NativeVoiceStep::stopped);
+    assert(late_closes == 0 && x.session.epoch() == stopped_epoch);
+    return 0;
+  }
   constexpr int initial_quiet=QuestionCapture::kInitialQuietFrames;
   if(test=="loop_wake_tail" || test.starts_with("loop_silent_question")) {
     const bool new_question=test=="loop_wake_tail";

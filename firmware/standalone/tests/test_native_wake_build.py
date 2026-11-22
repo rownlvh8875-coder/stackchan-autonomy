@@ -50,6 +50,7 @@ def built(tmp_path_factory):
         "loop_silent_question_close_fault",
         "loop_cloud_off",
         "loop_stop",
+        "loop_stop_once",
         "loop_revoke",
         "loop_memory_lost",
         "loop_lost_during_wake_open",
