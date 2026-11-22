@@ -90,7 +90,7 @@ extern "C" void app_main() {
     static K151MicWakeTrial trial{announce_listening};
     const auto result = trial.run_embedded(owner, stop, evidence, linked_mic_trial_model());
     std::array<char, 256> report{};
-    if (format_k151_mic_wake_report(result, trial.take_input_counts(), report) != 0)
+    if (format_k151_mic_wake_report(result, trial.diagnostic(), trial.take_input_counts(), report) != 0)
       std::fputs(report.data(), stdout);
   }
   hold();

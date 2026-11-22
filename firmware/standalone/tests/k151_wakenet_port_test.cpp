@@ -205,11 +205,12 @@ std::string run_mic_trial_with_embedded_model_double(
   assert(creates==(bad_hash?0:2) && events==(bad_hash?"":"efhcdcdb"));
   assert(detects==(detected || stopped?1:0) && local_stop.load()==stopped);
   const auto counts=trial.take_input_counts();
+  const auto diagnostic=trial.diagnostic();
   assert(counts.has_value()==detected);
   assert(trial.run_embedded(local_owner,local_stop,evidence,embedded)==K151MicWakeTrialResult::denied);
   assert(hashes==1 && !trial.take_input_counts());
   std::array<char, 256> line{};
-  const auto length=format_k151_mic_wake_report(result,counts,line);
+  const auto length=format_k151_mic_wake_report(result,diagnostic,counts,line);
   assert(length!=0);
   return {line.data(),length};
 }

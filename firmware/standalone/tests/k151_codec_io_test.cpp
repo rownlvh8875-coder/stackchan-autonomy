@@ -38,8 +38,9 @@ int bus_created=0, channels_created=0, tdm_inits=0;
 std::string phase;
 bool base_open=true;
 bool mic_only() { return mode.starts_with("mic_only_"); }
+bool report_trial=false;
 std::atomic_bool local_owner{true}, local_stop{false};
-bool mic_wake_trial() { return mode.starts_with("mic_only_trial_"); }
+bool mic_wake_trial() { return report_trial || mode.starts_with("mic_only_trial_"); }
 bool embedded_trial_chain() { return mode.starts_with("mic_only_trial_chain_"); }
 int trial_resets=0, trial_chunks=0, trial_model_drops=0;
 int heap_checks=0;
@@ -100,6 +101,10 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
   if(!write){bytes[0]=out?0x12:0;if(out)bytes[1]=0x34;}
   else if(out){assert(bytes[0]==0xb7 && bytes[1]==0x6e);}
   const std::string path=out?"ctrl_out_":"ctrl_in_";
+  if (!out && !write &&
+      (mode=="mic_only_codec_open_reg_error" || mode=="mic_only_codec_open_and_cleanup_error") &&
+      (phase=="open" || (mode=="mic_only_codec_open_and_cleanup_error" && phase=="close")))
+    return ESP_CODEC_DEV_DRV_ERR;
   return mode==path+phase+(write?"_write":"_read")?ESP_CODEC_DEV_DRV_ERR:ESP_CODEC_DEV_OK;
 }
 int ctrl_read(const audio_codec_ctrl_if_t* h,int reg,int len,void* data,int n){return ctrl_io(h,reg,len,data,n,false);}
@@ -163,7 +168,11 @@ extern "C" void heap_caps_get_info(multi_heap_info_t* info, uint32_t caps) {
   if (mode=="mic_only_trial_revoke_during_memory_check") local_owner=false;
   if (mode=="mic_only_trial_stop_during_memory_check") local_stop=true;
 }
-extern "C" esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t*,i2c_master_bus_handle_t* h){++bus_created;*h=&bus;return 0;}
+extern "C" esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t*,i2c_master_bus_handle_t* h){
+  if(mode=="mic_only_i2c_bus_fail")return ESP_FAIL;
+  ++bus_created;
+  *h=&bus;return 0;
+}
 extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){
   assert(h==&bus && h->alive);++h->deletes;
   if(pmic.open || expander.open)return ESP_ERR_INVALID_STATE;
@@ -267,6 +276,7 @@ extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* i
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
   const bool short_read=mode=="short" || mode=="mic_only_short" || mode=="mic_only_trial_short" ||
+                        mode=="mic_only_trial_short_cleanup_bad" ||
                         mode=="mic_only_trial_chain_short_read";
   *bytes=short_read?n-4:mode=="overcount"?n+4:n;
   if(mic_wake_trial()) {
@@ -315,9 +325,11 @@ extern "C" const audio_codec_gpio_if_t* audio_codec_new_gpio(){assert(!mic_only(
 extern "C" const audio_codec_if_t* aw88298_codec_new(aw88298_codec_cfg_t* cfg){assert(!mic_only());codec_controls[0]=cfg->ctrl_if;codec_operation(0,"init");return &codecs[0];}
 extern "C" const audio_codec_if_t* es7210_codec_new(es7210_codec_cfg_t* cfg){codec_controls[1]=cfg->ctrl_if;codec_operation(1,"init");return &codecs[1];}
 extern "C" esp_codec_dev_handle_t esp_codec_dev_new(esp_codec_dev_cfg_t* cfg) {
+  if(mode=="mic_only_codec_prepare_fail")return nullptr;
   assert(created<2);devices[created]={cfg->data_if,cfg->dev_type,false};return &devices[created++];
 }
 extern "C" int esp_codec_dev_open(esp_codec_dev_handle_t h,esp_codec_dev_sample_info_t* fs) {
+  if(mode=="mic_only_codec_open_fail")return ESP_CODEC_DEV_INVALID_ARG;
   auto* d=static_cast<Dev*>(h);d->open=true;
   d->data->set_fmt(d->data,d->type,fs);d->data->enable(d->data,d->type,true);
   codec_operation(d->type==ESP_CODEC_DEV_TYPE_IN?1:0,"open");
@@ -334,7 +346,8 @@ extern "C" void esp_codec_dev_delete(esp_codec_dev_handle_t h){assert(!static_ca
 extern "C" int audio_codec_delete_codec_if(const audio_codec_if_t* c) {
   assert(deleted==created);
   codec_operation(c==&codecs[0]?0:1,"delete");
-  return mode=="mic_only_trial_delete_fail"?ESP_CODEC_DEV_INVALID_ARG:ESP_CODEC_DEV_OK;
+  return mode=="mic_only_trial_delete_fail" || mode=="mic_only_trial_short_cleanup_bad"
+      ?ESP_CODEC_DEV_INVALID_ARG:ESP_CODEC_DEV_OK;
 }
 extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t* c){assert(c==&controls[0] || c==&controls[1]);++controls_deleted;return 0;}
 extern "C" int audio_codec_delete_gpio_if(const audio_codec_gpio_if_t*){return 0;}
@@ -344,7 +357,16 @@ std::string run_mic_trial_with_embedded_model_double(
     std::string_view, std::atomic_bool&, std::atomic_bool&);
 #endif
 int main(int argc,char** argv) {
-  assert(argc==2);mode=argv[1];
+  assert(argc==2 || (argc==3 && std::string_view(argv[2])=="--report"));mode=argv[1];
+  report_trial=argc==3;
+  if (report_trial) {
+    K151MicWakeTrial trial;
+    const auto result=trial.run(local_owner,local_stop,{true,true},std::make_unique<TrialDetector>());
+    std::array<char,256> line{};
+    assert(format_k151_mic_wake_report(result,trial.diagnostic(),trial.take_input_counts(),line)!=0);
+    std::fputs(line.data(),stdout);
+    return 0;
+  }
 #ifdef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
   if (embedded_trial_chain()) {
     const auto report=run_mic_trial_with_embedded_model_double(mode,local_owner,local_stop);
@@ -361,19 +383,31 @@ int main(int argc,char** argv) {
 #endif
   if (mode=="mic_report") {
     using Outcome = K151MicWakeTrialResult;
+    using Stage = K151MicWakeStage;
+    const K151MicWakeDiagnostic complete{Stage::complete};
     std::array<char, 256> json{};
     const K151MicWakeInputCounts observed{4,1,6};
     const K151MicWakeInputCounts impossible{4,3,241};
-    assert(format_k151_mic_wake_report(Outcome::detected, impossible, json)==0);
-    assert(format_k151_mic_wake_report(Outcome::detected, std::nullopt, json)==0);
-    assert(format_k151_mic_wake_report(Outcome::stopped, observed, json)==0);
-    assert(format_k151_mic_wake_report(Outcome::detected, observed, std::span(json).first(8))==0);
+    assert(format_k151_mic_wake_report(Outcome::detected,complete,impossible,json)==0);
+    assert(format_k151_mic_wake_report(Outcome::detected,complete,std::nullopt,json)==0);
+    assert(format_k151_mic_wake_report(Outcome::stopped,{},observed,json)==0);
+    assert(format_k151_mic_wake_report(Outcome::fault,complete,std::nullopt,json)==0);
+    assert(format_k151_mic_wake_report(Outcome::fault,{Stage::codec_release},std::nullopt,json)==0);
+    assert(format_k151_mic_wake_report(Outcome::fault,{Stage::model_prepare,true},std::nullopt,json)==0);
+    assert(format_k151_mic_wake_report(Outcome::fault,{static_cast<Stage>(90)},std::nullopt,json)==0);
+    assert(format_k151_mic_wake_report(Outcome::detected,complete,observed,
+                                      std::span(json).first(8))==0);
     assert(json[0]=='\0');
     for (const auto outcome : {Outcome::detected, Outcome::not_detected, Outcome::stopped,
                                 Outcome::fault, Outcome::denied, Outcome::memory_denied}) {
       const bool clean = outcome==Outcome::detected || outcome==Outcome::not_detected;
       const auto counts = clean ? std::optional{observed} : std::nullopt;
-      const auto size = format_k151_mic_wake_report(outcome, counts, json);
+      Stage stage = Stage::admission;
+      if (clean) stage = Stage::complete;
+      else if (outcome==Outcome::stopped) stage = Stage::codec_release;
+      else if (outcome==Outcome::fault) stage = Stage::board_power;
+      else if (outcome==Outcome::memory_denied) stage = Stage::baseline_memory;
+      const auto size = format_k151_mic_wake_report(outcome, {stage}, counts, json);
       assert(size!=0 && json[size-1]=='\n' && json[size]=='\0');
       std::printf("%s", json.data());
     }
@@ -415,7 +449,7 @@ int main(int argc,char** argv) {
     }
     if (mode == "mic_only_trial_input_counts" || mode == "mic_only_trial_stop_on_drop") {
       std::array<char, 256> json{};
-      assert(format_k151_mic_wake_report(outcome, counts, json) != 0);
+      assert(format_k151_mic_wake_report(outcome,trial.diagnostic(),counts,json) != 0);
       std::printf("%s", json.data());
     }
     assert(trial_model_drops == 1);

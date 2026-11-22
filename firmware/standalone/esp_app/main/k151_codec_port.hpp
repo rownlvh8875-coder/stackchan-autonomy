@@ -49,6 +49,8 @@ class K151CodecPort final {
   bool faulted() const {
     return fault_ || data_port_.faulted() || in_control_.faulted() || out_control_.faulted();
   }
+  K151MicWakeStage prepare_stage() const { return prepare_stage_; }
+  bool cleanup_unverified() const { return cleanup_unverified_; }
 
  private:
   bool microphone_only() const { return mic_owner_ != nullptr; }
@@ -64,7 +66,7 @@ class K151CodecPort final {
   bool prepare_codecs();
   bool prepare_output_codec();
   bool prepare_input_codec();
-  bool close_microphone(); // Used by shutdown without initiating nested cleanup.
+  bool close_microphone(bool* driver_closed = nullptr); // Does not initiate nested cleanup.
   const std::atomic_bool* mic_owner_ = nullptr;
   const std::atomic_bool* mic_stop_ = nullptr;
   i2c_master_bus_handle_t i2c_bus_ = nullptr;
@@ -86,6 +88,8 @@ class K151CodecPort final {
   bool fault_ = false;
   bool input_open_ = false;
   bool output_open_ = false;
+  K151MicWakeStage prepare_stage_ = K151MicWakeStage::admission;
+  bool cleanup_unverified_ = false;
 };
 
 }  // namespace stackchan::standalone

@@ -74,8 +74,9 @@ bool K151CodecPort::prepare(bool physical_owner_approval, bool exact_k151_identi
 
 bool K151CodecPort::prepare_hardware() {
   attempted_ = true;
-  if (!input_allowed() || !prepare_i2s() || !input_allowed() ||
-      !prepare_codecs() || !input_allowed()) return fail();
+  if (!input_allowed() || !prepare_i2s() || !input_allowed()) return fail();
+  prepare_stage_ = K151MicWakeStage::codec_prepare;
+  if (!prepare_codecs() || !input_allowed()) return fail();
   // Output is deliberately NOT opened and the amplifier is NOT enabled.
   prepared_ = true;
   return true;
@@ -102,10 +103,12 @@ bool K151CodecPort::prepare_microphone_board() {
       return false;
     const bool checked = operation(board_device_);
     const bool removed = release_board_device();
+    if (checked && !removed) prepare_stage_ = K151MicWakeStage::board_release;
     return checked && removed && input_allowed();
   };
 
   // Reject unfamiliar or disabled rails without changing the PMIC.
+  prepare_stage_ = K151MicWakeStage::board_power;
   if (!with_device(k151::Device::pmic_axp2101, [&](auto dev) {
         uint8_t id{}, enable{};
         return read(dev, 0x03, id) && id == 0x4a &&
@@ -115,6 +118,7 @@ bool K151CodecPort::prepare_microphone_board() {
 
   // Keep RSTN asserted even on teardown. Factory initialization will release
   // it after restore/reboot. Do not change the mode or direction of any pin.
+  prepare_stage_ = K151MicWakeStage::amplifier_reset;
   return with_device(k151::Device::io_aw9523, [&](auto dev) {
     uint8_t id{}, mode{}, direction{}, output{};
     if (!read(dev, 0x10, id) || id != 0x23 ||
@@ -139,6 +143,7 @@ bool K151CodecPort::release_board_device() {
 }
 
 bool K151CodecPort::prepare_i2s() {
+  prepare_stage_ = K151MicWakeStage::i2c_bus;
   i2c_master_bus_config_t bus_cfg = {};
   bus_cfg.i2c_port = static_cast<i2c_port_t>(kI2cPort);
   bus_cfg.sda_io_num = static_cast<gpio_num_t>(k151::kI2cSda);
@@ -149,6 +154,7 @@ bool K151CodecPort::prepare_i2s() {
   if (i2c_new_master_bus(&bus_cfg, &i2c_bus_) != ESP_OK) return false;
   if (microphone_only() && !prepare_microphone_board()) return false;
 
+  prepare_stage_ = K151MicWakeStage::i2s_rx;
   i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   chan.dma_desc_num = 6;
   chan.dma_frame_num = 240;
@@ -291,11 +297,12 @@ bool K151CodecPort::microphone_off() {
   return false;
 }
 
-bool K151CodecPort::close_microphone() {
+bool K151CodecPort::close_microphone(bool* driver_closed) {
   if (!input_open_) return !in_control_.faulted();
   const int rc = esp_codec_dev_close(in_dev_);
-  if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_IN) || !in_control_.healthy())
-    return false;
+  const bool closed = rc == 0 && data_port_.disabled(ESP_CODEC_DEV_TYPE_IN);
+  if (driver_closed) *driver_closed = closed;
+  if (!closed || !in_control_.healthy()) return false;
   input_open_ = false;
   return true;
 }
@@ -381,41 +388,44 @@ bool K151CodecPort::quiet() {
 
 bool K151CodecPort::shutdown() {
   const bool previously_faulted = faulted();
-  const bool mic_ok = close_microphone();
+  in_control_.begin_cleanup();
+  out_control_.begin_cleanup();
+  bool input_driver_closed = true;
+  const bool mic_ok = close_microphone(&input_driver_closed);
   const bool speaker_ok = speaker_off();
-  bool ok = mic_ok && speaker_ok;
+  bool cleanup_ok = input_driver_closed && speaker_ok;
   if (in_dev_) { esp_codec_dev_delete(in_dev_); in_dev_ = nullptr; }
   if (out_dev_) { esp_codec_dev_delete(out_dev_); out_dev_ = nullptr; }
   if (in_codec_ && audio_codec_delete_codec_if(std::exchange(in_codec_, nullptr)) != ESP_CODEC_DEV_OK)
-    ok = false;
+    cleanup_ok = false;
   if (out_codec_ && audio_codec_delete_codec_if(std::exchange(out_codec_, nullptr)) != ESP_CODEC_DEV_OK)
-    ok = false;
+    cleanup_ok = false;
   // Codec destruction can itself issue register operations whose errors the
   // SDK drops. Observe before detaching/freeing either original control object.
-  if (in_control_.faulted() || out_control_.faulted()) ok = false;
+  const bool controls_ok = !in_control_.faulted() && !out_control_.faulted();
   in_control_.detach(); out_control_.detach();
   if (in_ctrl_ && audio_codec_delete_ctrl_if(std::exchange(in_ctrl_, nullptr)) != ESP_CODEC_DEV_OK)
-    ok = false;
+    cleanup_ok = false;
   if (out_ctrl_ && audio_codec_delete_ctrl_if(std::exchange(out_ctrl_, nullptr)) != ESP_CODEC_DEV_OK)
-    ok = false;
+    cleanup_ok = false;
   if (gpio_if_ && audio_codec_delete_gpio_if(std::exchange(gpio_if_, nullptr)) != ESP_CODEC_DEV_OK)
-    ok = false;
+    cleanup_ok = false;
   data_port_.detach();
   if (data_if_ && audio_codec_delete_data_if(std::exchange(data_if_, nullptr)) != ESP_CODEC_DEV_OK)
-    ok = false;
+    cleanup_ok = false;
   if (rx_) {
-    if (!disable_owned_channel(rx_)) ok = false;
-    if (i2s_del_channel(rx_) != ESP_OK) ok = false;
+    if (!disable_owned_channel(rx_)) cleanup_ok = false;
+    if (i2s_del_channel(rx_) != ESP_OK) cleanup_ok = false;
     else rx_ = nullptr; // IDF rejects a running channel before freeing it.
   }
   if (tx_) {
-    if (!disable_owned_channel(tx_)) ok = false;
-    if (i2s_del_channel(tx_) != ESP_OK) ok = false;
+    if (!disable_owned_channel(tx_)) cleanup_ok = false;
+    if (i2s_del_channel(tx_) != ESP_OK) cleanup_ok = false;
     else tx_ = nullptr;
   }
-  if (board_device_ && !release_board_device()) ok = false;
+  if (board_device_ && !release_board_device()) cleanup_ok = false;
   if (i2c_bus_ && !board_device_) {
-    if (i2c_del_master_bus(i2c_bus_) != ESP_OK) ok = false;
+    if (i2c_del_master_bus(i2c_bus_) != ESP_OK) cleanup_ok = false;
     // Pinned IDF can report pin-deinit error after freeing the bus wrapper.
     // Never retry this ambiguous pointer. Fault remains; reclamation/mute is
     // NOT proven if deletion failed before free. No automatic reset/recovery.
@@ -423,7 +433,13 @@ bool K151CodecPort::shutdown() {
   }
   prepared_ = false;
   input_open_ = output_open_ = false; // Codec devices gone, never mute proof.
-  if (!ok) { fault_ = true; ESP_LOGE(kTag, "audio shutdown uncertain"); }
+  if (!cleanup_ok || in_control_.cleanup_faulted() || out_control_.cleanup_faulted())
+    cleanup_unverified_ = true;
+  const bool ok = cleanup_ok && mic_ok && controls_ok;
+  if (!ok) {
+    fault_ = true;
+    ESP_LOGE(kTag, "audio shutdown uncertain");
+  }
   // Releasing a handle cannot prove the earlier hardware fault was cleared.
   return ok && !previously_faulted;
 }

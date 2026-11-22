@@ -27,13 +27,42 @@ _MIC_CLEAN = frozenset({"detected", "not_detected"})
 _MIC_RESULTS = _MIC_CLEAN | {"denied", "stopped", "fault", "memory_denied"}
 _MIC_FIELDS = frozenset({"mic_wake_trial", "result", "operating_admission"})
 _MIC_COUNT_FIELDS = frozenset({"frames_read", "all_zero_frames", "full_scale_samples"})
+_MIC_DIAGNOSTIC_FIELDS = frozenset({"stage", "codec_cleanup_unverified"})
+_MIC_MEMORY_STAGES = frozenset({"baseline_memory", "resident_memory"})
+_MIC_FAULT_STAGES = frozenset(
+    {
+        "model_prepare",
+        "input_format",
+        "model_reset",
+        "i2c_bus",
+        "board_power",
+        "amplifier_reset",
+        "board_release",
+        "i2s_rx",
+        "codec_prepare",
+        "codec_open",
+        "capture_clock",
+        "capture_read",
+        "wake_input",
+        "codec_release",
+    }
+)
+_MIC_STOP_STAGES = _MIC_FAULT_STAGES | _MIC_MEMORY_STAGES | {"admission"}
+_MIC_RESULT_STAGES = {
+    "detected": frozenset({"complete"}),
+    "not_detected": frozenset({"complete"}),
+    "denied": frozenset({"admission"}),
+    "stopped": _MIC_STOP_STAGES,
+    "memory_denied": _MIC_MEMORY_STAGES,
+    "fault": _MIC_FAULT_STAGES,
+}
 
 
 def parse_mic_wake_trial_report(record: object) -> dict:
     """Validate the fixed per-trial record emitted by the microphone diagnostic."""
     if (
         not isinstance(record, dict)
-        or record.get("mic_wake_trial") != "MIC_WAKE_TRIAL_V1"
+        or record.get("mic_wake_trial") not in ("MIC_WAKE_TRIAL_V1", "MIC_WAKE_TRIAL_V2")
         or record.get("operating_admission") is not False
         or not isinstance(record.get("result"), str)
         or record["result"] not in _MIC_RESULTS
@@ -41,8 +70,23 @@ def parse_mic_wake_trial_report(record: object) -> dict:
         raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
     clean = record["result"] in _MIC_CLEAN
     fields = _MIC_FIELDS | _MIC_COUNT_FIELDS if clean else _MIC_FIELDS
+    has_diagnostic = record["mic_wake_trial"] == "MIC_WAKE_TRIAL_V2"
+    if has_diagnostic:
+        fields |= _MIC_DIAGNOSTIC_FIELDS
     if set(record) != fields:
         raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
+    if has_diagnostic:
+        result = record["result"]
+        stage, cleanup = record["stage"], record["codec_cleanup_unverified"]
+        if (
+            not isinstance(stage, str)
+            or stage not in _MIC_RESULT_STAGES[result]
+            or type(cleanup) is not bool
+            or (cleanup and result != "fault")
+            or (cleanup and stage in ("model_prepare", "model_reset"))
+            or (result == "fault" and stage == "codec_release" and not cleanup)
+        ):
+            raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
     if clean:
         frames, zeroes, full_scale = (
             record["frames_read"],

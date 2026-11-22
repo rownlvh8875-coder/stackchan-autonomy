@@ -1,5 +1,27 @@
 # K151 마이크 단독 WakeNet 1회 진단
 
+## 종료 결과 V2
+
+새 종료 결과 `MIC_WAKE_TRIAL_V2`는 기존 결과에 `stage`와
+`codec_cleanup_unverified`를 붙인다. 종료 상태와 함께 아래 고정값만
+사용한다.
+
+| 과정 | `stage` |
+|---|---|
+| 동의·입장 및 메모리 확인 | `admission`, `baseline_memory`, `resident_memory` |
+| 모델 준비, 포맷 확인, 리셋 | `model_prepare`, `input_format`, `model_reset` |
+| I2C 버스, 보드 전원, 앰프 리셋, 보드 핸들 반납 | `i2c_bus`, `board_power`, `amplifier_reset`, `board_release` |
+| I2S 수신, 코덱 준비, 열기·입력 게인 | `i2s_rx`, `codec_prepare`, `codec_open` |
+| 시간 검사, PCM 읽기, WakeNet 입력 처리 | `capture_clock`, `capture_read`, `wake_input` |
+| 코덱 해제 후 완료 | `codec_release`, `complete` |
+
+앞 단계에서 오류가 난 뒤 해제도 확인하지 못하면 앞 단계의 코드와
+`codec_cleanup_unverified:true`가 함께 남는다. 앞 단계가 정상 완료된
+뒤 해제가 실패한 경우 `codec_release`를 사용한다. 드라이버의 원시 오류
+문자열이나 PCM은 결과에 포함하지 않는다. 프레임 집계는 정상 종료 때만
+남는다. 호스트는 보관된 V1 레코드도 원래 형식으로 읽는다. 이전 실물
+시험에서 받은 V1 `fault`의 정확한 실패 단계는 여전히 미확정이다.
+
 `K151MicWakeTrial`은 실물 마이크 검증용 코드다. 모델을 준비한 로컬 소유
 작업에서 한 번 호출할 수 있다. ESP32-S3 HOLD 앱의 구성 요소로 컴파일되며
 부팅 시에는 실행되지 않는다. 이번 변경의 검증은 Windows 호스트의 모의

@@ -265,16 +265,18 @@ def test_firmware_mic_report_matches_host_contract(port_binary, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("case", "result", "frames"),
+    ("case", "result", "frames", "stage"),
     [
-        ("ok", "detected", 4),
-        ("bad_hash", "fault", None),
-        ("memory", "memory_denied", None),
-        ("short_read", "fault", None),
-        ("stop_in_detect", "stopped", None),
+        ("ok", "detected", 4, "complete"),
+        ("bad_hash", "fault", None, "model_prepare"),
+        ("memory", "memory_denied", None, "resident_memory"),
+        ("short_read", "fault", None, "capture_read"),
+        ("stop_in_detect", "stopped", None, "wake_input"),
     ],
 )
-def test_embedded_pack_to_mic_report(embedded_trial_binary, monkeypatch, case, result, frames):
+def test_embedded_pack_to_mic_report(
+    embedded_trial_binary, monkeypatch, case, result, frames, stage
+):
     monkeypatch.syspath_prepend(str(BASE / "tools"))
     from wake_bench_trace import parse_mic_wake_trial_report
 
@@ -287,9 +289,55 @@ def test_embedded_pack_to_mic_report(embedded_trial_binary, monkeypatch, case, r
     assert trial.returncode == 0, trial.stderr
     report = parse_mic_wake_trial_report(json.loads(trial.stdout))
     assert report["result"] == result
+    assert report["mic_wake_trial"] == "MIC_WAKE_TRIAL_V2"
+    assert report["stage"] == stage
+    assert report["codec_cleanup_unverified"] is False
     assert report.get("frames_read") == frames
     if frames is not None:
         assert report["all_zero_frames"] == report["full_scale_samples"] == 0
+
+
+@pytest.mark.parametrize(
+    ("case", "result", "stage", "cleanup"),
+    [
+        ("trial_format", "fault", "input_format", False),
+        ("trial_reset_fail", "fault", "model_reset", False),
+        ("trial_stop_on_reset", "stopped", "model_reset", False),
+        ("i2c_bus_fail", "fault", "i2c_bus", False),
+        ("board_bad_pmic", "fault", "board_power", False),
+        ("board_rails_off", "fault", "board_power", False),
+        ("board_led_mode", "fault", "amplifier_reset", False),
+        ("board_bad_readback", "fault", "amplifier_reset", False),
+        ("board_cleanup_busy", "fault", "board_release", False),
+        ("peer", "fault", "i2s_rx", False),
+        ("codec_prepare_fail", "fault", "codec_prepare", False),
+        ("codec_open_fail", "fault", "codec_open", False),
+        ("codec_open_reg_error", "fault", "codec_open", False),
+        ("codec_open_and_cleanup_error", "fault", "codec_open", True),
+        ("trial_clock_backwards", "fault", "capture_clock", False),
+        ("trial_short", "fault", "capture_read", False),
+        ("trial_model_error", "fault", "wake_input", False),
+        ("trial_delete_fail", "fault", "codec_release", True),
+        ("trial_short_cleanup_bad", "fault", "capture_read", True),
+    ],
+)
+def test_mic_trial_attributes_primary_and_cleanup(
+    port_binary, monkeypatch, case, result, stage, cleanup
+):
+    monkeypatch.syspath_prepend(str(BASE / "tools"))
+    from wake_bench_trace import parse_mic_wake_trial_report
+
+    attempt = subprocess.run(
+        [str(port_binary), "mic_only_" + case, "--report"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert attempt.returncode == 0, attempt.stderr
+    report = parse_mic_wake_trial_report(json.loads(attempt.stdout))
+    assert report["result"] == result and report["stage"] == stage
+    assert report["codec_cleanup_unverified"] is cleanup
+    assert "frames_read" not in report
 
 
 @pytest.mark.parametrize("operation", ["read_reg", "write_reg"])

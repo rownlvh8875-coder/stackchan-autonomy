@@ -88,8 +88,10 @@ K151MicWakeTrialResult K151MicWakeTrial::run_embedded(
     listening = true;
     for (int i = 0; !stop.load() && i < 500; ++i) vTaskDelay(1);
     assert(stop.load());
+    diagnostic_.stage = K151MicWakeStage::wake_input;
     return K151MicWakeTrialResult::stopped;
   }
+  diagnostic_.stage = K151MicWakeStage::complete;
   input_counts_ = {4, 0, 0};
   return K151MicWakeTrialResult::detected;
 }
@@ -99,18 +101,22 @@ std::optional<K151MicWakeInputCounts> K151MicWakeTrial::take_input_counts() {
 }
 
 size_t stackchan::standalone::format_k151_mic_wake_report(
-    K151MicWakeTrialResult result, std::optional<K151MicWakeInputCounts> counts,
+    K151MicWakeTrialResult result, K151MicWakeDiagnostic diagnostic,
+    std::optional<K151MicWakeInputCounts> counts,
     std::span<char> output) {
   if (result == K151MicWakeTrialResult::stopped) {
-    assert(!counts);
+    assert(!counts && diagnostic.stage == K151MicWakeStage::wake_input);
     return std::snprintf(output.data(), output.size(),
-        "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V1\",\"result\":\"stopped\","
-        "\"operating_admission\":false}\n");
+        "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V2\",\"result\":\"stopped\","
+        "\"operating_admission\":false,\"stage\":\"wake_input\","
+        "\"codec_cleanup_unverified\":false}\n");
   }
   assert(result == K151MicWakeTrialResult::detected && counts && counts->frames_read == 4);
+  assert(diagnostic.stage == K151MicWakeStage::complete);
   return std::snprintf(output.data(), output.size(),
-      "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V1\",\"result\":\"detected\","
-      "\"operating_admission\":false,\"frames_read\":4,\"all_zero_frames\":0,"
+      "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V2\",\"result\":\"detected\","
+      "\"operating_admission\":false,\"stage\":\"complete\",\"codec_cleanup_unverified\":false,"
+      "\"frames_read\":4,\"all_zero_frames\":0,"
       "\"full_scale_samples\":0}\n");
 }
 

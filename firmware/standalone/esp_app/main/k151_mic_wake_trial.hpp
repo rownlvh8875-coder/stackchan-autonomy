@@ -19,9 +19,17 @@ struct K151MicWakeInputCounts {
   uint32_t full_scale_samples = 0;
 };
 
+struct K151MicWakeDiagnostic {
+  K151MicWakeStage stage = K151MicWakeStage::admission;
+  // This is independent of the primary failure. A prior fault alone does
+  // not make a later successful teardown unverified.
+  bool codec_cleanup_unverified = false;
+};
+
 // Fixed diagnostic JSON line. Returns zero and clears the first byte on
 // invalid input or truncation. The caller owns the output buffer.
 size_t format_k151_mic_wake_report(K151MicWakeTrialResult result,
+                                 K151MicWakeDiagnostic diagnostic,
                                  std::optional<K151MicWakeInputCounts> counts,
                                  std::span<char> output);
 
@@ -49,12 +57,14 @@ class K151MicWakeTrial final {
   // Whole-trial counts are available once after clean detected/not_detected
   // completion. An attempt that stops, faults or is denied leaves no counts.
   std::optional<K151MicWakeInputCounts> take_input_counts();
+  K151MicWakeDiagnostic diagnostic() const { return diagnostic_; }
 
  private:
   std::optional<K151MicWakeTrialResult> begin(const std::atomic_bool& owner,
                                              const std::atomic_bool& stop,
                                              const K151MicOnlyEvidence& evidence) {
     input_counts_.reset();
+    diagnostic_ = {};
     if (attempted_) return K151MicWakeTrialResult::denied;
     attempted_ = true;
     if (stop.load()) return K151MicWakeTrialResult::stopped;
@@ -67,6 +77,7 @@ class K151MicWakeTrial final {
 
   NativeWakeInput input_;
   std::optional<K151MicWakeInputCounts> input_counts_;
+  K151MicWakeDiagnostic diagnostic_;
   ListenStarted on_listen_;
   bool attempted_ = false;
 };

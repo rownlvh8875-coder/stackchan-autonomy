@@ -50,6 +50,18 @@ def test_single_start_and_only_allowlisted_report(receiver):
     assert prompts == [True]
 
 
+def test_pre_listen_fault_with_stage_survives_collection(receiver):
+    fault = {
+        "mic_wake_trial": "MIC_WAKE_TRIAL_V2",
+        "result": "fault",
+        "operating_admission": False,
+        "stage": "board_power",
+        "codec_cleanup_unverified": False,
+    }
+    port = FakeSerial([WAIT, fault, HOLD])
+    assert receiver.receive_once(port, lambda: pytest.fail("Unexpected listen prompt")) == fault
+
+
 def test_lost_challenge_request_and_duplicate_reply_still_send_one_start(receiver):
     port = FakeSerial([WAIT, WAIT, LISTEN, REPORT, HOLD])
     port.input.appendleft(b"")

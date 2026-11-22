@@ -72,7 +72,7 @@ def test_one_shot_mic_entrypoint(entrypoint, case, monkeypatch):
         assert [event.get("mic_trial", event.get("mic_wake_trial")) for event in events] == [
             "WAIT_LOCAL_START",
             "LISTEN_NOW",
-            "MIC_WAKE_TRIAL_V1",
+            "MIC_WAKE_TRIAL_V2",
             "HOLD_UNTIL_RESET",
         ]
         report = parse_mic_wake_trial_report(events[2])

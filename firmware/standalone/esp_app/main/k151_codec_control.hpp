@@ -28,11 +28,19 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
   void detach() { base_ = nullptr; } // After codec deletion; fault survives.
   bool faulted() const { return failed_.load(); }
   bool healthy() const { return opened(this) && !faulted(); }
+  void begin_cleanup() { cleaning_up_ = true; }
+  bool cleanup_faulted() const { return cleanup_failed_; }
  private:
   static K151CodecControl& self(const audio_codec_ctrl_if_t* h) {
     return *const_cast<K151CodecControl*>(static_cast<const K151CodecControl*>(h));
   }
-  int record(int rc) { if (rc != ESP_CODEC_DEV_OK) failed_ = true; return rc; }
+  int record(int rc) {
+    if (rc != ESP_CODEC_DEV_OK) {
+      failed_ = true;
+      if (cleaning_up_) cleanup_failed_ = true;
+    }
+    return rc;
+  }
   static bool opened(const audio_codec_ctrl_if_t* h) {
     if (!h) return false;
     auto& p = self(h);
@@ -63,5 +71,7 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
   const audio_codec_ctrl_if_t* base_ = nullptr;
   std::atomic_bool failed_{false};
   bool attempted_ = false;
+  bool cleaning_up_ = false;
+  bool cleanup_failed_ = false;
 };
 }

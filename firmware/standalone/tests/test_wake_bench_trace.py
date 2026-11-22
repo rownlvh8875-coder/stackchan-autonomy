@@ -181,3 +181,32 @@ def test_mic_wake_report_rejects_unexpected_or_impossible_values(change):
     assert parse_mic_wake_trial_report(record) == record
     with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
         parse_mic_wake_trial_report(record | change)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"stage": "arbitrary driver text"},
+        {"stage": []},
+        {"stage": "complete"},
+        {"stage": "resident_memory"},
+        {"stage": "model_prepare"},
+        {"stage": "model_reset"},
+        {"codec_cleanup_unverified": 1},
+        {"result": "stopped"},
+        {"stage": "codec_release", "codec_cleanup_unverified": False},
+        {"frames_read": 1},
+        {"raw_audio": "discard"},
+    ],
+)
+def test_mic_wake_v2_rejects_unapproved_or_inconsistent_diagnostics(change):
+    record = {
+        "mic_wake_trial": "MIC_WAKE_TRIAL_V2",
+        "result": "fault",
+        "operating_admission": False,
+        "stage": "capture_read",
+        "codec_cleanup_unverified": True,
+    }
+    assert parse_mic_wake_trial_report(record) == record
+    with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
+        parse_mic_wake_trial_report(record | change)

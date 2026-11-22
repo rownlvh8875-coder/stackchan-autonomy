@@ -14,9 +14,11 @@ K151MicWakeTrialResult K151MicWakeTrial::run_embedded(const std::atomic_bool& ow
   if (const auto denied = begin(owner, stop, evidence)) return *denied;
   const auto allowed = [&] { return owner.load() && !stop.load(); };
 
+  diagnostic_.stage = K151MicWakeStage::baseline_memory;
   const bool baseline_available = k151_mic_wake_internal_heap_available();
   if (!allowed()) return K151MicWakeTrialResult::stopped;
   if (!baseline_available) return K151MicWakeTrialResult::memory_denied;
+  diagnostic_.stage = K151MicWakeStage::model_prepare;
   std::unique_ptr<K151WakeNetPort> model{new (std::nothrow) K151WakeNetPort};
   if (!model || !model->prepare_embedded(owner, stop, pack)) {
     model.reset();
