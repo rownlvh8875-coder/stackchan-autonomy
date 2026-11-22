@@ -23,10 +23,12 @@ class VoiceTurnCoordinator final {
                        VoiceDialogEntry& entry, MicFrameBridge& bridge,
                        AudioGuard& audio, const std::atomic_bool& stop,
                        const std::atomic_bool& consent,
-                       const std::atomic_bool& speaker_busy)
+                       const std::atomic_bool& speaker_busy,
+                       QuestionCapture::Allocator allocate_question_pcm)
       : session_(session), ledger_(ledger), entry_(entry), bridge_(bridge),
         audio_(audio), stop_(stop), consent_(consent),
-        speaker_busy_(speaker_busy) {}
+        speaker_busy_(speaker_busy),
+        capture_(QuestionCapture::kDefaultMinRms, allocate_question_pcm) {}
 
   bool arm(uint64_t epoch, uint64_t now_ms) {
     if (active_ || faulted_ || stop_.load() || !consent_.load() ||
@@ -35,7 +37,8 @@ class VoiceTurnCoordinator final {
     session_.tick(now_ms);
     if (session_.state() != State::ready || session_.epoch() != epoch)
       return false;
-    if (!audio_.capture_begin()) {
+    if (!capture_.prepare() || stop_.load() || !consent_.load() ||
+        speaker_busy_.load() || !audio_.capture_begin()) {
       abort();
       return false;
     }

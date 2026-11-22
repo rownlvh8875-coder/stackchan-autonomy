@@ -3,11 +3,14 @@
 // A calibrated acoustic VAD and real microphone driver are still required.
 #pragma once
 
+#include "audio_wipe.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <new>
 #include <span>
-#include <vector>
 
 namespace stackchan::standalone {
 
@@ -20,9 +23,28 @@ class QuestionCapture final {
   static constexpr size_t kMaxFrames = kMaxSamples / kFrame;
   static constexpr size_t kStartFrames = 3; // 60ms continuous energy
   static constexpr size_t kEndFrames = 25; // 500ms silence
+  static constexpr uint32_t kDefaultMinRms = 300;
+  using Buffer = std::unique_ptr<int16_t[], void (*)(int16_t*)>;
+  // Return exactly kMaxSamples with their matching deleter, or an empty buffer.
+  using Allocator = Buffer (*)() noexcept;
+
+  static Buffer allocate_host_pcm() noexcept {
+    return {new (std::nothrow) int16_t[kMaxSamples],
+            [](int16_t* pcm) { delete[] pcm; }};
+  }
+
   // Fixed energy threshold is only a synthetic-test policy; site calibration
   // and background-noise immunity are not provided by this class.
-  explicit QuestionCapture(uint32_t min_rms = 300) : min_rms_(min_rms) {}
+  explicit QuestionCapture(uint32_t min_rms = kDefaultMinRms,
+                           Allocator allocate = allocate_host_pcm)
+      : min_rms_(min_rms), allocate_(allocate) {}
+  ~QuestionCapture() { wipe_pcm(used_samples()); }
+
+  bool prepare() {
+    if (state_ == CaptureResult::rejected || min_rms_ == 0) return false;
+    if (!samples_ && allocate_) samples_ = allocate_();
+    return static_cast<bool>(samples_);
+  }
 
   CaptureResult push(std::span<const int16_t> pcm, bool stop,
                      bool speaker_active) {
@@ -40,26 +62,27 @@ class QuestionCapture final {
     }
     const bool voiced = sum_sq / kFrame >=
         static_cast<uint64_t>(min_rms_) * min_rms_;
+    if (!started_ && !voiced) {
+      wipe_pcm(used_samples());
+      used_ = consecutive_voice_ = 0;
+      return CaptureResult::listening;
+    }
+    if (used_ > kMaxSamples - pcm.size() || !prepare()) return reject();
+    std::copy(pcm.begin(), pcm.end(), samples_.get() + used_);
+    used_ += pcm.size();
     if (!started_) {
-      if (!voiced) {
-        consecutive_voice_ = 0;
-        return CaptureResult::listening;
-      }
-      if (consecutive_voice_ == 0) pending_.clear();
-      pending_.insert(pending_.end(), pcm.begin(), pcm.end());
       if (++consecutive_voice_ < kStartFrames) return CaptureResult::listening;
       started_ = true;
-      captured_.swap(pending_);
       state_ = CaptureResult::speech_started;
       return state_;
     }
-    if (captured_.size() > kMaxSamples - pcm.size()) return reject();
-    captured_.insert(captured_.end(), pcm.begin(), pcm.end());
     if (voiced) {
       consecutive_silence_ = 0;
     } else if (++consecutive_silence_ >= kEndFrames) {
-      captured_.resize(captured_.size() - kEndFrames * kFrame);
-      if (captured_.empty()) return reject();
+      constexpr size_t tail = kEndFrames * kFrame;
+      wipe_pcm(used_samples().last(tail));
+      used_ -= tail;
+      if (used_ == 0) return reject();
       state_ = CaptureResult::ready;
     }
     return state_;
@@ -67,27 +90,27 @@ class QuestionCapture final {
 
   std::span<const int16_t> audio() const {
     return state_ == CaptureResult::ready ?
-        std::span<const int16_t>(captured_) : std::span<const int16_t>{};
+        std::span<const int16_t>(samples_.get(), used_) : std::span<const int16_t>{};
   }
   CaptureResult status() const { return state_; }
   void reset() {
-    std::fill(captured_.begin(), captured_.end(), 0);
-    std::fill(pending_.begin(), pending_.end(), 0);
-    captured_.clear();
-    pending_.clear();
-    frames_seen_ = consecutive_voice_ = consecutive_silence_ = 0;
+    wipe_pcm(used_samples());
+    samples_.reset();
+    used_ = frames_seen_ = consecutive_voice_ = consecutive_silence_ = 0;
     started_ = false;
     state_ = CaptureResult::listening;
   }
  private:
+  std::span<int16_t> used_samples() { return {samples_.get(), used_}; }
   CaptureResult reject() {
     reset();
     state_ = CaptureResult::rejected;
     return state_;
   }
   uint32_t min_rms_;
-  std::vector<int16_t> captured_;
-  std::vector<int16_t> pending_;
+  Allocator allocate_;
+  Buffer samples_{nullptr, nullptr};
+  size_t used_ = 0;
   size_t frames_seen_ = 0;
   size_t consecutive_voice_ = 0;
   size_t consecutive_silence_ = 0;

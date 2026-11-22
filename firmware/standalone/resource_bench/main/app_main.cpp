@@ -3,6 +3,7 @@
 #include "bench_gate.hpp"
 #include "bench_heap_window.hpp"
 #include "k151_wakenet_port.hpp"
+#include "k151_question_pcm.hpp"
 #include "audio_wipe.hpp"
 #include "audio_memory_admission.hpp"
 #include "local_tls_probe.hpp"
@@ -97,14 +98,15 @@ void measure() {
   }
   if (!allowed()) return;
   try {
-    Pcm question{OfflineVoiceCycle::kMaxRecordedFrames};
-    if(!allowed())return;
-    Pcm tts{0};
-    const bool q_external=esp_ptr_external_ram(question.samples.data());
-    if(!q_external) {
+    auto question = k151_allocate_question_pcm();
+    if (!question) {
       std::puts("{\"result\":\"ALLOCATOR_PLACEMENT_DENIED\"}");return;
     }
-    if (!allowed()) return;
+    std::span<int16_t> question_samples{question.get(), QuestionCapture::kMaxSamples};
+    ScopedPcmWipe clear_question{question_samples};
+    std::ranges::fill(question_samples, 0);
+    if(!allowed())return;
+    Pcm tts{0};
     {
       LocalTlsProbe tls;
       snapshot("model_question_before_local_tls", true);

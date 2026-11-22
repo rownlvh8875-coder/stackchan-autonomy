@@ -105,7 +105,8 @@ struct Fixture {
   GuardedVoiceSpeaker speaker{audio,sink,stop,consent,busy};
   VoiceDialogEntry entry{session,ledger,api,speaker,stop,consent,time,busy};
   MicFrameBridge bridge{question_mic,stop,busy};
-  VoiceTurnCoordinator turn{session,ledger,entry,bridge,audio,stop,consent,busy};
+  VoiceTurnCoordinator turn{session,ledger,entry,bridge,audio,stop,consent,busy,
+                            QuestionCapture::allocate_host_pcm};
   std::optional<NativeWakeController> native;
   VoiceModelConfig models{"stt_test","gpt_test","tts_test","voice_test"};
   Fixture() {
