@@ -122,5 +122,20 @@ int main() {
     assert(cap.push(speech,false,false)==CaptureResult::rejected);
     assert(!in_use && psram.front()==0 && psram.back()==0);
   }
+  {
+    QuestionCapture cap(300, k151_allocate_question_pcm, QuestionCapture::Start::after_quiet);
+    assert(cap.prepare());
+    for (int cycle = 0; cycle < 2; ++cycle) {
+      assert(cap.status() == CaptureResult::awaiting_quiet && cap.audio().empty());
+      for (size_t i = 1; i < QuestionCapture::kInitialQuietFrames; ++i)
+        assert(cap.push(silence, false, false) == CaptureResult::awaiting_quiet);
+      // A single active frame invalidates the interrupted quiet interval.
+      assert(cap.push(speech, false, false) == CaptureResult::awaiting_quiet);
+      for (size_t i = 1; i < QuestionCapture::kInitialQuietFrames; ++i)
+        assert(cap.push(silence, false, false) == CaptureResult::awaiting_quiet);
+      assert(cap.push(silence, false, false) == CaptureResult::listening);
+      cap.reset();
+    }
+  }
   std::cout << "bounded question capture PASS (host-only)\n";
 }

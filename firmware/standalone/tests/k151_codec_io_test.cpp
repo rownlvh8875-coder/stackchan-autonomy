@@ -45,8 +45,10 @@ bool embedded_trial_chain() { return mode.starts_with("mic_only_trial_chain_"); 
 int trial_resets=0, trial_chunks=0, trial_model_drops=0;
 int heap_checks=0;
 int64_t trial_time_us=1000;
-bool question_trial() { return mode.starts_with("mic_only_trial_question_"); }
-int question_reads=0, question_cues=0;
+constexpr std::string_view question_prefix="mic_only_trial_question_";
+bool question_trial() { return mode.starts_with(question_prefix); }
+std::string_view question_case() { return std::string_view(mode).substr(question_prefix.size()); }
+int question_reads=0, question_cues=0, question_reads_at_cue=0;
 std::array<int16_t, QuestionCapture::kMaxSamples> question_pcm{};
 bool question_allocated=false, question_freed=false;
 void announce_question() {
@@ -54,7 +56,8 @@ void announce_question() {
   assert(bus_created==2 && bus.deletes==1 && channels_created==2 && rx.deletes==1);
   assert(rx.enabled && reset_writes==1 && output_latch==0xa3);
   ++question_cues;
-  if (mode=="mic_only_trial_question_stop_at_cue") local_stop=true;
+  question_reads_at_cue=question_reads;
+  if (question_case()=="stop_at_cue") local_stop=true;
 }
 struct TrialDetector : NativeWakePort {
   ~TrialDetector() override {
@@ -176,14 +179,13 @@ extern "C" void* heap_caps_malloc(size_t size,uint32_t caps) {
 extern "C" void heap_caps_free(void* pcm) {
   assert(pcm==question_pcm.data() && question_allocated && !question_freed);
   question_freed=true;
-  const auto samples=QuestionCapture::kFrame*static_cast<size_t>(question_reads/2);
-  if (mode=="mic_only_trial_question_endpoint" || mode=="mic_only_trial_question_release_fail") {
+  const auto test=question_case();
+  if (test=="endpoint" || test=="release_fail" || test=="tail_then_question" ||
+      test=="revoke" || test=="short" || test=="frame_cap") {
+    const auto samples=QuestionCapture::kFrame*
+        static_cast<size_t>((question_reads-question_reads_at_cue)/2);
     zero(std::span(question_pcm).first(samples));
     assert(question_pcm[samples]==12345);
-  }
-  if (mode=="mic_only_trial_question_revoke" || mode=="mic_only_trial_question_short") {
-    assert(question_reads==9);
-    zero(std::span(question_pcm).first(samples));
   }
 }
 #ifndef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
@@ -326,19 +328,32 @@ extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* i
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
   if(channels_created==2) {
-    assert(question_trial() && question_cues==1);
+    assert(question_trial());
+    const auto test=question_case();
     ++question_reads;
-    if(mode=="mic_only_trial_question_wall") trial_time_us+=30000;
-    else if(mode=="mic_only_trial_question_frame_cap") trial_time_us+=1000;
+    if(test=="wall") trial_time_us+=30000;
+    else if(test=="frame_cap") trial_time_us+=1000;
     else trial_time_us+=10000;
-    if(question_reads==9 && mode=="mic_only_trial_question_revoke") local_owner=false;
-    if(question_reads==9 && mode=="mic_only_trial_question_clock") trial_time_us=-1;
-    *bytes=(question_reads==9 && mode=="mic_only_trial_question_short")?n-4:n;
+
+    const int since_cue=question_reads-question_reads_at_cue;
+    const bool before_cue=question_cues==0;
+    if (!before_cue && since_cue==9 && test=="revoke") local_owner=false;
+    if (!before_cue && since_cue==9 && test=="clock") trial_time_us=-1;
+    if (before_cue && question_reads==9 && test=="handoff_stop") local_stop=true;
+    const bool short_read=(before_cue && question_reads==9 && test=="handoff_short") ||
+                          (!before_cue && since_cue==9 && test=="short");
+    *bytes=short_read?n-4:n;
     auto* pcm=static_cast<int16_t*>(p);
-    const bool voice=mode=="mic_only_trial_question_wall" ||
-                     mode=="mic_only_trial_question_frame_cap" || question_reads<=8;
+    const bool initial_tail=question_reads<=8 &&
+        (test=="wake_tail" || test=="tail_then_question" || test=="interrupted_quiet");
+    const bool second_burst=test=="interrupted_quiet" && question_reads>56 && question_reads<=62;
+    const bool quiet_only_at_deadline=test=="quiet_at_deadline" && question_reads<=750;
+    const bool voice=initial_tail || second_burst ||
+        (before_cue ? test=="quiet_timeout" || quiet_only_at_deadline
+                    : test=="wall" || test=="frame_cap" ||
+                      (test!="wake_tail" && test!="interrupted_quiet" && since_cue<=8));
     for(size_t i=0;i<*bytes/4;++i) {
-      pcm[2*i]=voice?1800:0;
+      pcm[2*i]=voice?(i%2==0?1800:-1800):0;
       pcm[2*i+1]=900;
     }
     return ESP_OK;
@@ -489,7 +504,7 @@ int main(int argc,char** argv) {
   }
   if(question_trial()) {
     using Result=K151QuestionTrialResult;
-    const auto test=std::string_view(mode).substr(std::string_view("mic_only_trial_question_").size());
+    const auto test=question_case();
     K151MicWakeTrial trial{nullptr,announce_question};
     const auto wake=trial.run(local_owner,local_stop,{true,true},std::make_unique<TrialDetector>());
     const auto question=trial.question_diagnostic();
@@ -507,26 +522,47 @@ int main(int argc,char** argv) {
       assert(question_freed==(test=="bad_placement") && bus_created==1);
       return 0;
     }
-    assert(question_freed && question_cues==1 && bus_created==2 && bus.deletes==2 && rx.deletes==2);
+    assert(question_freed && bus_created==2 && bus.deletes==2 && rx.deletes==2);
     assert(question.codec_cleanup_unverified==(test=="release_fail"));
-    if(test=="endpoint" || test=="release_fail") {
-      assert(question_reads==58);
-      assert(question.result==(test=="endpoint"?Result::endpoint:Result::release_failed));
+    if(test=="quiet_timeout" || test=="quiet_at_deadline" ||
+       test=="handoff_stop" || test=="handoff_short") {
+      assert(question_cues==0);
+      if(test=="quiet_timeout" || test=="quiet_at_deadline") {
+        assert(question_reads==800 && question.result==Result::quiet_timeout);
+      } else {
+        assert(question_reads==9);
+        assert(question.result==(test=="handoff_stop"?Result::stopped:Result::read_failed));
+      }
+      assert(std::ranges::all_of(question_pcm,[](int16_t sample){return sample==12345;}));
+      return 0;
+    }
+
+    if(test=="wake_tail" || test=="interrupted_quiet")
+      assert(question.result!=Result::endpoint && "post-wake energy was accepted as a new question");
+    const int expected_cue=test=="wake_tail" || test=="tail_then_question" ? 58
+        : test=="interrupted_quiet" ? 112 : 50;
+    assert(question_cues==1 && question_reads_at_cue==expected_cue);
+    const int after_cue=question_reads-question_reads_at_cue;
+    if(test=="endpoint" || test=="release_fail" || test=="tail_then_question") {
+      assert(after_cue==58);
+      assert(question.result==(test=="release_fail"?Result::release_failed:Result::endpoint));
+    } else if(test=="wake_tail" || test=="interrupted_quiet") {
+      assert(question.result==Result::no_endpoint && question_reads==800);
+      assert(std::ranges::all_of(question_pcm,[](int16_t sample){return sample==12345;}));
     } else if(test=="wall") {
       assert(trial_time_us==8'081'000 && question_reads==268);
       assert(question.result==Result::no_endpoint);
     } else if(test=="frame_cap") {
       assert(question_reads==2*static_cast<int>(QuestionCapture::kMaxFrames));
-      zero(question_pcm);
       assert(question.result==Result::no_endpoint);
     } else if(test=="stop_at_cue") {
-      assert(question.result==Result::stopped && question_reads==0);
+      assert(question.result==Result::stopped && after_cue==0);
     } else if(test=="revoke") {
-      assert(question.result==Result::stopped && question_reads==9);
+      assert(question.result==Result::stopped && after_cue==9);
     } else if(test=="short") {
-      assert(question.result==Result::read_failed && question_reads==9);
+      assert(question.result==Result::read_failed && after_cue==9);
     } else if(test=="clock") {
-      assert(question.result==Result::clock_fault && question_reads==9);
+      assert(question.result==Result::clock_fault && after_cue==9);
     } else assert(false);
     return 0;
   }

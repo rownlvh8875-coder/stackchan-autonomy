@@ -96,7 +96,7 @@ def test_one_shot_mic_entrypoint(entrypoint, case, monkeypatch):
         assert events[-1] == {"mic_trial": "HOLD_UNTIL_RESET", "operating_admission": False}
 
 
-@pytest.mark.parametrize("case", ["detect", "stop_during", "bad_nonce", "slot"])
+@pytest.mark.parametrize("case", ["detect", "stop_during", "quiet_timeout", "bad_nonce", "slot"])
 def test_question_trial_entrypoint(question_entrypoint, case):
     done = subprocess.run(
         [str(question_entrypoint), case], capture_output=True, text=True, timeout=8
@@ -114,7 +114,11 @@ def test_question_trial_entrypoint(question_entrypoint, case):
         assert any("mic_wake_trial" in event for event in events)
         assert events[-2] == {
             "mic_question_trial": "MIC_QUESTION_TRIAL_V1",
-            "result": "endpoint" if case == "detect" else "not_run",
+            "result": {
+                "detect": "endpoint",
+                "stop_during": "not_run",
+                "quiet_timeout": "quiet_timeout",
+            }[case],
             "codec_cleanup_unverified": False,
             "operating_admission": False,
         }

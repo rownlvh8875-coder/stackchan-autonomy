@@ -358,6 +358,13 @@ def test_mic_trial_attributes_primary_and_cleanup(
         "short",
         "clock",
         "release_fail",
+        "wake_tail",
+        "tail_then_question",
+        "interrupted_quiet",
+        "quiet_timeout",
+        "quiet_at_deadline",
+        "handoff_stop",
+        "handoff_short",
     ],
 )
 def test_question_after_verified_wake(port_binary, case):

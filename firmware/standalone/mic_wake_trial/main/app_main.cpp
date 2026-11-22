@@ -42,6 +42,7 @@ const char* question_result_name(K151QuestionTrialResult result) {
     case K151QuestionTrialResult::no_endpoint: return "no_endpoint";
     case K151QuestionTrialResult::endpoint: return "endpoint";
     case K151QuestionTrialResult::release_failed: return "release_failed";
+    case K151QuestionTrialResult::quiet_timeout: return "quiet_timeout";
   }
   return nullptr;
 }

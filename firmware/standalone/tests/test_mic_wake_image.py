@@ -38,6 +38,7 @@ def test_question_trial_requires_separate_project_and_scope(model_fixture):
     manifest = inspect_image(app, ELF_SHA, SLOT_CSV, question=True)
     assert manifest["kind"] == "RECEIVE_ONLY_MIC_QUESTION_TRIAL_NOT_OPERATIONAL"
     assert manifest["question_capture_deadline_ms"] == 8000
+    assert manifest["question_initial_quiet_ms"] == 500
     assert manifest["combined_start_window_ms"] == 10000
     assert manifest["usb_exports_pcm"] is False
     assert manifest["install_authorized"] is False

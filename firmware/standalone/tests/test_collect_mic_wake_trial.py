@@ -124,9 +124,28 @@ def test_collect_question_without_audio(receiver):
 
 
 @pytest.mark.parametrize(
+    ("result", "cleanup"), [("quiet_timeout", False), ("read_failed", False), ("read_failed", True)]
+)
+def test_collect_question_outcome_without_prompt(receiver, result, cleanup):
+    outcome = {**QUESTION, "result": result, "codec_cleanup_unverified": cleanup}
+    port = FakeSerial([QUESTION_WAIT, LISTEN, WAKE_V2, outcome, HOLD])
+    report = receiver.receive_once(
+        port, lambda: None, announce_question=lambda: pytest.fail("Question cue before quiet")
+    )
+    assert report == {"wake": WAKE_V2, "question": outcome}
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+
+
+@pytest.mark.parametrize(
     "records",
     [
         [LISTEN, WAKE_V2, QUESTION],
+        [LISTEN, QUESTION_CUE, WAKE_V2, {**QUESTION, "result": "quiet_timeout"}],
+        [
+            LISTEN,
+            WAKE_V2,
+            {**QUESTION, "result": "quiet_timeout", "codec_cleanup_unverified": True},
+        ],
         [LISTEN, QUESTION_CUE, WAKE_V2, {**QUESTION, "pcm": [42]}],
         [LISTEN, QUESTION_CUE, WAKE_V2, {**QUESTION, "codec_cleanup_unverified": True}],
         [LISTEN, QUESTION_CUE, WAKE_V2, {**QUESTION, "result": "not_run"}],

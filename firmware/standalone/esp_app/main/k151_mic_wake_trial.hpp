@@ -15,7 +15,7 @@ inline constexpr uint32_t kK151MicWakeTrialFrameLimit = 500;
 
 enum class K151QuestionTrialResult {
   not_run, stopped, memory_denied, prepare_failed, open_failed, clock_fault,
-  read_failed, no_endpoint, endpoint, release_failed,
+  read_failed, no_endpoint, endpoint, release_failed, quiet_timeout,
 };
 
 struct K151QuestionTrialDiagnostic {

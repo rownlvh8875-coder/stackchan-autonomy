@@ -158,8 +158,7 @@ QuestionResult record_question(K151CodecPort& codec, QuestionCapture& capture,
   const std::atomic_bool speaker_busy{false}; // Receive-only port owns no TX.
   K151MicReader mic{codec};
   MicFrameBridge bridge{mic, stop, speaker_busy};
-  if (!allowed()) return QuestionResult::stopped;
-  cue();
+  bool cued = false;
   for (size_t frame = 0; frame < QuestionCapture::kMaxFrames; ++frame) {
     if (!allowed()) return QuestionResult::stopped;
     const auto before = clock();
@@ -172,8 +171,15 @@ QuestionResult record_question(K151CodecPort& codec, QuestionCapture& capture,
     if (progress == CaptureResult::rejected) return QuestionResult::read_failed;
     if (after - started_us > kQuestionWindowUs) break;
     if (progress == CaptureResult::ready) return QuestionResult::endpoint;
+    if (!cued && progress == CaptureResult::listening) {
+      if (frame + 1 == QuestionCapture::kMaxFrames || after - started_us == kQuestionWindowUs)
+        break;
+      if (!allowed()) return QuestionResult::stopped;
+      cue();
+      cued = true;
+    }
   }
-  return QuestionResult::no_endpoint;
+  return cued ? QuestionResult::no_endpoint : QuestionResult::quiet_timeout;
 }
 
 K151QuestionTrialDiagnostic capture_question(const std::atomic_bool& owner,
@@ -182,7 +188,8 @@ K151QuestionTrialDiagnostic capture_question(const std::atomic_bool& owner,
                                               K151MicWakeTrial::ListenStarted cue) {
   const auto allowed = [&] { return owner.load() && !stop.load(); };
   if (!allowed()) return {QuestionResult::stopped};
-  QuestionCapture capture{QuestionCapture::kDefaultMinRms, k151_allocate_question_pcm};
+  QuestionCapture capture{QuestionCapture::kDefaultMinRms, k151_allocate_question_pcm,
+                          QuestionCapture::Start::after_quiet};
   const bool memory_available = capture.prepare();
   if (!allowed()) return {QuestionResult::stopped};
   if (!memory_available) return {QuestionResult::memory_denied};
@@ -201,8 +208,10 @@ K151QuestionTrialDiagnostic capture_question(const std::atomic_bool& owner,
   const bool released = codec.shutdown();
   const bool cleanup_unverified = codec.cleanup_unverified();
   if (!allowed() && !cleanup_unverified) result = QuestionResult::stopped;
-  if ((!released && (result == QuestionResult::endpoint || result == QuestionResult::no_endpoint)) ||
-      (cleanup_unverified && result == QuestionResult::stopped)) {
+  const bool completed = result == QuestionResult::endpoint ||
+                         result == QuestionResult::no_endpoint ||
+                         result == QuestionResult::quiet_timeout;
+  if ((!released && completed) || (cleanup_unverified && result == QuestionResult::stopped)) {
     result = QuestionResult::release_failed;
   }
   return {result, cleanup_unverified};

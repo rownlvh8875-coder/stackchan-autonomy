@@ -26,6 +26,7 @@ def inspect_image(app: bytes, elf_sha256: str, partition_csv: str, *, question=F
         manifest.update(
             kind="RECEIVE_ONLY_MIC_QUESTION_TRIAL_NOT_OPERATIONAL",
             question_capture_deadline_ms=8000,
+            question_initial_quiet_ms=500,
             question_max_frames_20ms=400,
             combined_start_window_ms=10000,
         )

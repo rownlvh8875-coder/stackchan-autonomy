@@ -12,9 +12,17 @@ SCOPE = "ONE_MIC_WAKE_TRIAL_AND_OTA1_RESTORE"
 QUESTION_SCOPE = "ONE_MIC_QUESTION_TRIAL_AND_OTA1_RESTORE"
 QUESTION_PROTOCOL = "MIC_QUESTION_TRIAL_V1"
 WIRE_LIMIT = 512
-QUESTION_BEFORE_CUE = {"not_run", "memory_denied", "prepare_failed", "open_failed"}
-QUESTION_AFTER_CUE = {"read_failed", "no_endpoint", "endpoint"}
-QUESTION_ANY_TIME = {"stopped", "clock_fault", "release_failed"}
+QUESTION_BEFORE_CUE = {"not_run", "memory_denied", "prepare_failed", "open_failed", "quiet_timeout"}
+QUESTION_AFTER_CUE = {"no_endpoint", "endpoint"}
+QUESTION_ANY_TIME = {"stopped", "clock_fault", "read_failed", "release_failed"}
+CLEAN_QUESTION_RESULTS = {
+    "not_run",
+    "stopped",
+    "memory_denied",
+    "endpoint",
+    "no_endpoint",
+    "quiet_timeout",
+}
 
 
 def validate_question_report(record, *, cue_seen, wake):
@@ -32,9 +40,7 @@ def validate_question_report(record, *, cue_seen, wake):
         or result not in QUESTION_ANY_TIME | cue_results
         or wake["mic_wake_trial"] != "MIC_WAKE_TRIAL_V2"
         or wake_detected != (result != "not_run")
-        or (
-            cleanup and result in {"not_run", "stopped", "memory_denied", "endpoint", "no_endpoint"}
-        )
+        or (cleanup and result in CLEAN_QUESTION_RESULTS)
     ):
         raise ValueError("Invalid question trial report")
     return record

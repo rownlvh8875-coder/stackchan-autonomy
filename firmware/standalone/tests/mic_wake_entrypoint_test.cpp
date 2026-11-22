@@ -64,7 +64,7 @@ int usb_serial_jtag_read_bytes(void* out, size_t size, unsigned timeout) {
   return 0;
 }
 int usb_serial_jtag_driver_install(const usb_serial_jtag_driver_config_t*) {
-  assert(scenario == "detect" || scenario == "stop_during" ||
+  assert(scenario == "detect" || scenario == "stop_during" || scenario == "quiet_timeout" ||
          scenario == "bad_nonce" || scenario == "stop_before" || scenario == "no_hello" ||
          scenario == "usb_error" || scenario == "task_error");
   return scenario == "usb_error" ? -1 : ESP_OK;
@@ -80,7 +80,8 @@ void vTaskDelay(unsigned) { std::this_thread::sleep_for(std::chrono::millisecond
 K151MicWakeTrialResult K151MicWakeTrial::run_embedded(
     const std::atomic_bool& owner, const std::atomic_bool& stop,
     const K151MicOnlyEvidence& evidence, std::span<const uint8_t> pack) {
-  assert((scenario == "detect" || scenario == "stop_during") && owner.load() && !stop.load());
+  assert((scenario == "detect" || scenario == "stop_during" || scenario == "quiet_timeout") &&
+         owner.load() && !stop.load());
   assert(evidence.verified() && pack.size() == 2 && pack.front() == 1);
   assert(++sessions == 1 && on_listen_);
 #ifdef STACKCHAN_K151_QUESTION_TRIAL
@@ -98,7 +99,10 @@ K151MicWakeTrialResult K151MicWakeTrial::run_embedded(
   }
   diagnostic_.stage = K151MicWakeStage::complete;
   input_counts_ = {4, 0, 0};
-  if (on_question_) {
+  if (scenario == "quiet_timeout") {
+    assert(on_question_);
+    question_diagnostic_.result = K151QuestionTrialResult::quiet_timeout;
+  } else if (on_question_) {
     on_question_();
     question_diagnostic_.result = K151QuestionTrialResult::endpoint;
   }
@@ -135,5 +139,6 @@ int main(int argc, char** argv) {
   scenario = argv[1];
   app_main();
   if (reader_task.joinable()) reader_task.join();
-  assert(sessions == (scenario == "detect" || scenario == "stop_during" ? 1 : 0));
+  assert(sessions ==
+         (scenario == "detect" || scenario == "stop_during" || scenario == "quiet_timeout" ? 1 : 0));
 }
