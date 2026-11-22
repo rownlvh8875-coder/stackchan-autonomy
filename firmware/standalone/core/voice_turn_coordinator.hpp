@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 
 namespace stackchan::standalone {
 
@@ -44,8 +45,11 @@ class VoiceTurnCoordinator final {
     return true;
   }
 
+  // The native owner supplies its readiness check at capture and dialog
+  // boundaries. Dialog and the transport also enforce cloud admission.
   VoiceTurnStep poll(uint64_t now_ms, uint64_t unix_seconds,
-                     const VoiceModelConfig& models) {
+                     const VoiceModelConfig& models,
+                     const std::function<bool()>& live_readiness = {}) {
     if (faulted_) return VoiceTurnStep::aborted;
     if (!active_) return VoiceTurnStep::inactive;
     if (stop_.load() || !consent_.load() || speaker_busy_.load())
@@ -56,7 +60,8 @@ class VoiceTurnCoordinator final {
       return abort();
 
     const CaptureResult event = bridge_.capture(capture_);
-    if (event == CaptureResult::rejected || stop_.load() ||
+    if (event == CaptureResult::rejected || (live_readiness && !live_readiness()) ||
+        stop_.load() ||
         !consent_.load() || speaker_busy_.load())
       return abort();
 
@@ -66,11 +71,11 @@ class VoiceTurnCoordinator final {
     }
     if (event == CaptureResult::ready) {
       if (!speech_started_ || session_.state() != State::record ||
-          !audio_.capture_end())
+          !audio_.capture_end() || (live_readiness && !live_readiness()))
         return abort();
       active_ = false; // No more microphone reads while cloud stages run.
       const bool okay = entry_.answer_captured(capture_, epoch_, now_ms,
-                                                unix_seconds, models);
+                                                unix_seconds, models, live_readiness);
       if (!okay) return abort();
       return VoiceTurnStep::answered;
     }

@@ -32,14 +32,13 @@ class NativeVoiceLoop final {
   NativeVoiceStep poll(uint64_t now_ms, uint64_t unix_seconds,
                        const VoiceModelConfig& models) {
     if (faulted_) return NativeVoiceStep::stopped;
-    if (stop_.load() || !consent_.load() || !readiness_ || !readiness_() ||
-        stop_.load() || !consent_.load() || !model_.ready() || busy_.load())
-      return cancel();
+    if (!live_ready()) return cancel();
     started_ = true;
     session_.tick(now_ms);
     if (turn_.active()) {
       if (wake_.active()) return cancel();
-      const auto result = turn_.poll(now_ms, unix_seconds, models);
+      const auto result = turn_.poll(now_ms, unix_seconds, models,
+                                     [this] { return live_ready(); });
       if (result == VoiceTurnStep::answered) return NativeVoiceStep::answered;
       if (result == VoiceTurnStep::aborted || result == VoiceTurnStep::inactive)
         return cancel();
@@ -47,10 +46,12 @@ class NativeVoiceLoop final {
     }
     if (session_.state() == State::cooldown) return NativeVoiceStep::cooldown;
     if (session_.state() != State::wake_wait) return cancel();
-    if (!wake_.active() && !wake_.begin(now_ms)) return cancel();
+    if (!wake_.active() && (!wake_.begin(now_ms) || !live_ready())) return cancel();
     const auto event = wake_.poll(now_ms);
+    if (!live_ready()) return cancel();
     if (event.step == NativeWakeStep::detected) {
-      if (!event.epoch || !turn_.arm(*event.epoch, now_ms)) return cancel();
+      if (!event.epoch || !turn_.arm(*event.epoch, now_ms) || !live_ready())
+        return cancel();
       return NativeVoiceStep::questioning;
     }
     if (event.step != NativeWakeStep::listening) return cancel();
@@ -68,6 +69,11 @@ class NativeVoiceLoop final {
   }
 
  private:
+  bool live_ready() const {
+    return !stop_.load() && consent_.load() && readiness_ && readiness_() &&
+           !stop_.load() && consent_.load() && model_.ready() && !busy_.load();
+  }
+
   Session& session_; PersistentGuard& ledger_; NativeWakeController& wake_;
   VoiceTurnCoordinator& turn_; AudioGuard& audio_; NativeWakePort& model_;
   const std::atomic_bool& stop_; const std::atomic_bool& consent_;

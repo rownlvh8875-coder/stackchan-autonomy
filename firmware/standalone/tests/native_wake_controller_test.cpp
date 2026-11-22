@@ -15,6 +15,7 @@
 using namespace stackchan::standalone;
 struct Store:AtomicKv {
   std::vector<uint8_t> budget;
+  std::function<void()> on_commit;
   ReadValue read(std::string_view k,size_t bound) override {
     if (k!="budget" || budget.empty()) return {ReadCode::missing,{}};
     if (budget.size()>bound) return {ReadCode::failure,{}};
@@ -22,16 +23,19 @@ struct Store:AtomicKv {
   }
   bool commit(std::string_view k,std::span<const uint8_t> b) override {
     if(k!="budget") { return false; }
-    budget.assign(b.begin(),b.end()); return true;
+    budget.assign(b.begin(),b.end());
+    if(on_commit)on_commit();
+    return true;
   }
 };
 struct Hardware {
   bool mic=false,amp=false,fail_close=false;
   int on=0;
+  std::function<void()> mic_opening, mic_closing;
   AudioHooks hooks() { return {
-    [this]{if(fail_close)return false;mic=false;return true;},
+    [this]{if(fail_close)return false;if(mic_closing)mic_closing();mic=false;return true;},
     [this]{amp=false;return true;}, []{return true;},
-    [this]{++on;mic=true;return true;}, []{return true;},
+    [this]{++on;if(mic_opening)mic_opening();mic=true;return true;}, []{return true;},
     [this]{amp=true;return true;}, []{return true;}}; }
 };
 struct Mic:MonoMicReader {
@@ -64,6 +68,7 @@ struct Model:NativeWakePort {
 };
 struct Api:VoiceApiPort {
   Hardware& hw; int calls=0;
+  std::function<void(VoiceApiStage)> on_reply;
   explicit Api(Hardware& h):hw(h){}
   VoiceApiReply request(const VoiceApiRequest& r) override {
     assert(!hw.mic && !hw.amp);
@@ -76,14 +81,19 @@ struct Api:VoiceApiPort {
     }
     else if(calls==1){assert(r.stage==VoiceApiStage::respond);v.utf8_text="답변";}
     else {assert(calls==2 && r.stage==VoiceApiStage::synthesize);v.pcm24k.assign(240,1);}
-    ++calls;return v;
+    ++calls;
+    if(on_reply)on_reply(r.stage);
+    return v;
   }
 };
 struct Sink:VoiceSpeakerPort {
   Hardware& hw; int calls=0;
+  std::function<void()> on_play;
   explicit Sink(Hardware& h):hw(h){}
   VoicePlaybackResult play_pcm24k(std::span<const int16_t> pcm,uint64_t now) override {
-    assert(!hw.mic && hw.amp && !pcm.empty());++calls;return {true,now+1};
+    assert(!hw.mic && hw.amp && !pcm.empty());++calls;
+    if(on_play)on_play();
+    return {true,now+1};
   }
 };
 struct Fixture {
@@ -116,6 +126,74 @@ struct Fixture {
 int main(int argc,char** argv) {
   assert(argc==2);const std::string_view test=argv[1];
   Fixture x;
+  if(test.starts_with("loop_lost_during_")) {
+    bool measured_ready=true;
+    auto revoke=[&]{measured_ready=false;};
+    NativeVoiceLoop loop{x.session,x.ledger,*x.native,x.turn,x.audio,x.model,
+                         x.stop,x.consent,x.busy,[&]{return measured_ready;}};
+    const auto budget_before=x.store.budget;
+    x.session.cloud_enable(true);
+    const auto poll=[&](uint64_t now){return loop.poll(now,1800000000,x.models);};
+    uint64_t loss_poll=1000;
+    int api_calls=0, speaker_calls=0;
+    bool reserved=false;
+    if(test=="loop_lost_during_wake_open") {
+      x.hardware.mic_opening=revoke;
+    } else if(test=="loop_lost_during_wake_read") {
+      x.wake_mic.hook=revoke;
+    } else {
+      assert(poll(1000)==NativeVoiceStep::listening);
+      assert(poll(1010)==NativeVoiceStep::listening);
+      loss_poll=1020;
+      if(test=="loop_lost_during_detect") {
+        x.model.hook=revoke;
+      } else if(test=="loop_lost_during_question_open") {
+        x.hardware.mic_opening=revoke;
+      } else {
+        assert(poll(1020)==NativeVoiceStep::questioning);
+        loss_poll=1040;
+        if(test=="loop_lost_during_question_read") {
+          x.question_mic.hook=revoke;
+        } else {
+          for(int frame=0;frame<28;++frame,loss_poll+=20)
+            assert(poll(loss_poll)==NativeVoiceStep::questioning);
+          if(test=="loop_lost_during_question_close") {
+            x.hardware.mic_closing=revoke;
+          } else {
+            reserved=true;
+            if(test=="loop_lost_during_reservation") {
+              x.store.on_commit=revoke;
+            } else if(test=="loop_lost_during_playback") {
+              x.sink.on_play=revoke;
+              api_calls=3;
+              speaker_calls=1;
+            } else {
+              const bool during_stt=test=="loop_lost_during_stt";
+              assert(during_stt || test=="loop_lost_during_tts");
+              const auto target=during_stt?VoiceApiStage::transcribe:VoiceApiStage::synthesize;
+              x.api.on_reply=[&,target](VoiceApiStage stage){if(stage==target)revoke();};
+              api_calls=during_stt?1:3;
+            }
+          }
+        }
+      }
+    }
+    const auto result=poll(loss_poll);
+    assert(!measured_ready);
+    assert(x.api.calls==api_calls && x.sink.calls==speaker_calls);
+    assert(result==NativeVoiceStep::stopped);
+    assert(x.session.state()==State::stopped && x.audio.stopped());
+    assert(!x.hardware.mic && !x.hardware.amp && !x.native->active());
+    assert(!x.turn.active() && !x.turn.has_question_audio());
+    assert(!x.ledger.permit_active());
+    assert(x.ledger.reserved_conversations()==(reserved?1u:0u));
+    assert((x.store.budget!=budget_before)==reserved);
+    if(test=="loop_lost_during_wake_open")assert(x.wake_mic.calls==0);
+    if(test=="loop_lost_during_detect")assert(x.hardware.on==1);
+    measured_ready=true;
+    assert(poll(loss_poll+20)==NativeVoiceStep::stopped);
+    std::cout<<"PASS "<<test<<'\n';return 0;
+  }
   if(test.starts_with("loop_")) {
     bool measured_ready=true;
     NativeVoiceLoop loop{x.session,x.ledger,*x.native,x.turn,x.audio,x.model,

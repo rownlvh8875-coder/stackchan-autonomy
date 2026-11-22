@@ -5,6 +5,7 @@
 #include "question_capture.hpp"
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 namespace stackchan::standalone {
@@ -41,19 +42,22 @@ class VoiceDialogEntry {
     return session_.speech_started(now_ms,epoch);
   }
   bool answer(std::span<const int16_t> pcm,uint64_t now_ms,uint64_t unix_seconds,
-              const VoiceModelConfig& models) {
+              const VoiceModelConfig& models,
+              const std::function<bool()>& live_readiness = {}) {
     if(stop_.load() || speaker_busy_.load() || !consent_.load())return false;
-    OfflineVoiceCycle cycle(session_,ledger_,api_,speaker_,stop_,consent_,time_);
+    OfflineVoiceCycle cycle(session_,ledger_,api_,speaker_,stop_,consent_,time_,
+                            live_readiness);
     return cycle.run(pcm,now_ms,unix_seconds,models);
   }
   bool answer_captured(QuestionCapture& capture,uint64_t epoch,uint64_t now_ms,
-                       uint64_t unix_seconds,const VoiceModelConfig& models) {
+                       uint64_t unix_seconds,const VoiceModelConfig& models,
+                       const std::function<bool()>& live_readiness = {}) {
     if(capture.status()!=CaptureResult::ready)return false;
     if(session_.state()!=State::record || session_.epoch()!=epoch ||
        stop_.load() || speaker_busy_.load() || !consent_.load()) {
       capture.reset();return false;
     }
-    const bool result=answer(capture.audio(),now_ms,unix_seconds,models);
+    const bool result=answer(capture.audio(),now_ms,unix_seconds,models,live_readiness);
     capture.reset();return result;
   }
  private:

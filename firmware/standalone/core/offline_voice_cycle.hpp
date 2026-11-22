@@ -9,9 +9,11 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace stackchan::standalone {
@@ -161,9 +163,11 @@ class OfflineVoiceCycle final {
                     VoiceApiPort& api, VoiceSpeakerPort& speaker,
                     const std::atomic_bool& physical_stop,
                     const std::atomic_bool& owner_paid_consent,
-                    const std::atomic_bool& trusted_sntp)
+                    const std::atomic_bool& trusted_sntp,
+                    std::function<bool()> live_readiness = {})
       : session_(session), ledger_(ledger), api_(api), speaker_(speaker),
-        stop_(physical_stop), consent_(owner_paid_consent), time_(trusted_sntp) {}
+        stop_(physical_stop), consent_(owner_paid_consent), time_(trusted_sntp),
+        readiness_(std::move(live_readiness)) {}
 
   bool run(std::span<const int16_t> question_pcm24k, uint64_t monotonic_ms,
            uint64_t unix_seconds, const VoiceModelConfig& models) {
@@ -172,9 +176,9 @@ class OfflineVoiceCycle final {
     if (session_.state() != State::record) return false;
     // A disallowed/cancelled recording must never remain reusable if owner
     // consent, trusted time or cloud enablement changes later.
-    if (stop_.load() || !session_.cloud_enabled() || !models.valid() ||
+    if (!cloud_allowed() || !models.valid() ||
         question_pcm24k.empty() || question_pcm24k.size() > kMaxRecordedFrames ||
-        !consent_.load() || !time_.load()) {
+        !time_.load()) {
       session_.stop();
       ledger_.cancel_permit();
       return false;
@@ -227,13 +231,11 @@ class OfflineVoiceCycle final {
     if (!session_.synthesized(now, epoch, true)) { ledger_.cancel_permit(); return false; }
     // The real speaker driver must implement a STOP latch + bounded complete
     // playback drain. This port is a host fake, NOT real I2S.
-    if (stop_.load() || !consent_.load() || !time_.load() ||
-        !session_.cloud_enabled()) {
+    if (!cloud_allowed() || !time_.load()) {
       session_.stop(); ledger_.cancel_permit(); return false;
     }
     const auto played = speaker_.play_pcm24k(synthesis->pcm24k, now);
-    if (stop_.load() || !consent_.load() || !time_.load() ||
-        !session_.cloud_enabled()) {
+    if (!cloud_allowed() || !time_.load()) {
       session_.stop(); ledger_.cancel_permit(); return false;
     }
     const bool complete = played.complete && played.finished_ms >= now;
@@ -244,6 +246,11 @@ class OfflineVoiceCycle final {
   }
 
  private:
+  bool cloud_allowed() const {
+    return (!readiness_ || readiness_()) && !stop_.load() && consent_.load() &&
+           session_.cloud_enabled();
+  }
+
   static uint64_t add_deadline(uint64_t now) {
     return now > UINT64_MAX - kStageDeadlineMs ? UINT64_MAX :
            now + kStageDeadlineMs;
@@ -253,7 +260,7 @@ class OfflineVoiceCycle final {
                                       PaidStage permit, State required,
                                       uint64_t& now, uint64_t epoch) {
     session_.tick(now);
-    if (stop_.load() || !consent_.load() || !session_.cloud_enabled()) {
+    if (!cloud_allowed()) {
       session_.stop(); ledger_.cancel_permit(); return std::nullopt;
     }
     if (session_.state() != required || session_.epoch() != epoch ||
@@ -269,7 +276,7 @@ class OfflineVoiceCycle final {
     VoiceApiRequest signed_request = request;
     signed_request.dispatch_permit = &dispatch;
     auto reply = api_.request(signed_request);
-    if (stop_.load() || !consent_.load() || !session_.cloud_enabled()) {
+    if (!cloud_allowed()) {
       session_.stop(); ledger_.cancel_permit(); return std::nullopt;
     }
     if (!reply.success || reply.http_status != 200 ||
@@ -294,6 +301,7 @@ class OfflineVoiceCycle final {
   const std::atomic_bool& stop_;
   const std::atomic_bool& consent_;
   const std::atomic_bool& time_;
+  std::function<bool()> readiness_;
 };
 
 }  // namespace stackchan::standalone
