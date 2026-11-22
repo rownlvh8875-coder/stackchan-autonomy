@@ -525,6 +525,7 @@ def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
     app.mkdir()
     for name in [
         "k151_audio_hold_hooks.hpp",
+        "k151_board_bus.hpp",
         "k151_codec_port.cpp",
         "k151_codec_port.hpp",
         "k151_bounded_i2s.cpp",
