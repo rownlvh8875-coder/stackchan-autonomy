@@ -20,6 +20,12 @@ bool K151HttpChannel::post_once(
     return owner_.load() && network_.live_network_ready() && owner_.load();
   };
   if (!spend_dispatch || !live_network() || !consent_.load() || stop_.load()) return false;
+  if (req.stage == VoiceApiStage::synthesize && req.model == kRealtimeSpeechModel) {
+    EphemeralApiKey key;
+    return req.fixed_path == kRealtimeSpeechPath && network_.copy_api_key(key) &&
+           realtime_.synthesize_once(req, key.view(), live_network, consent_, stop_,
+                                     spend_dispatch, body, completed_ms);
+  }
   httpwire::Endpoint endpoint;
   switch (req.stage) {
     case VoiceApiStage::transcribe:

@@ -19,6 +19,13 @@ def metadata(path: Path) -> dict[str, int | str]:
     return {"size": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
+def verify_realtime_transport(app: bytes) -> None:
+    if b"/v1/realtime?model=gpt-realtime-2.1-mini" not in app:
+        raise ValueError("missing linked Realtime synthesis path")
+    if any(message in app for message in (b"Error write Upgrade header", b"Write upgrade request")):
+        raise ValueError("WebSocket upgrade diagnostics can expose the credential")
+
+
 def validate(elf: Path, app: Path, idf_head: str) -> dict:
     if idf_head != EXPECTED_IDF_SHA:
         raise ValueError("ESP-IDF is not the pinned v6.1 commit")
@@ -56,8 +63,12 @@ def main() -> int:
     parser.add_argument("--bin", type=Path, required=True)
     parser.add_argument("--idf-head", required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--check-realtime", action="store_true")
     args = parser.parse_args()
     result = validate(args.elf, args.bin, args.idf_head)
+    if args.check_realtime:
+        verify_realtime_transport(args.bin.read_bytes())
+        result["realtime_fixed_host_and_safe_upgrade_logging"] = "LINKED_NO_CREDENTIAL_LOGS"
     args.out.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(result, indent=2))
     return 0

@@ -64,6 +64,12 @@ struct VoiceApiRequest {
   DispatchPermit* dispatch_permit = nullptr;
 };
 
+inline constexpr std::string_view kRealtimeSpeechModel = "gpt-realtime-2.1-mini";
+inline constexpr std::string_view kRealtimeSpeechPath = "/v1/realtime";
+inline constexpr std::string_view speech_path(std::string_view model) {
+  return model == kRealtimeSpeechModel ? kRealtimeSpeechPath : "/v1/audio/speech";
+}
+
 // The fake test port returns *already parsed* data; it does not validate
 // HTTP chunking, JSON, credentials, MIME types or a real TLS certificate.
 struct VoiceApiReply {
@@ -218,7 +224,7 @@ class OfflineVoiceCycle final {
     }
     if (!session_.thought(now, epoch, true)) { ledger_.cancel_permit(); return false; }
 
-    VoiceApiRequest tts{VoiceApiStage::synthesize, "/v1/audio/speech",
+    VoiceApiRequest tts{VoiceApiStage::synthesize, speech_path(models.speech),
                         models.speech, answer->utf8_text, models.voice, {}, {},
                         epoch, now, add_deadline(now), 0, false, true};
     const auto synthesis = stage(tts, PaidStage::synthesize, State::synthesize, now, epoch);

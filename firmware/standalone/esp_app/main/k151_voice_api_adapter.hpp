@@ -3,6 +3,7 @@
 #pragma once
 #include "voice_api_bridge.hpp"
 #include "k151_https_voice.hpp"
+#include "k151_realtime_speech.hpp"
 #include "k151_wifi_time.hpp"
 #include "k151_voice_decode.hpp"
 #include <atomic>
@@ -31,6 +32,7 @@ class K151HttpChannel final : public VoiceHttpChannel {
   const std::atomic_bool& owner_;
   const std::atomic_bool& stop_;
   K151HttpsVoicePort http_;
+  K151RealtimeSpeechPort realtime_;
 };
 
 class K151ReplyCodec final : public VoiceReplyCodec {

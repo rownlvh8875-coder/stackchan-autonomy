@@ -3,9 +3,9 @@
 // and the fixed-host TLS/HTTP + JSON/PCM decoder. No sockets in this header.
 #pragma once
 
+#include "audio_wipe.hpp"
 #include "offline_voice_cycle.hpp"
 
-#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -17,7 +17,7 @@
 namespace stackchan::standalone {
 
 // A trusted implementation must call spend_dispatch() once immediately before
-// it can open a socket, and MUST NOT retry a possibly-billed POST.
+// it can open a socket, and MUST NOT retry a possibly-billed request.
 class VoiceHttpChannel {
  public:
   virtual ~VoiceHttpChannel() = default;
@@ -56,6 +56,10 @@ class BoundVoiceApiPort final : public VoiceApiPort {
     if (before < req.started_ms || before >= req.deadline_ms) return fail;
 
     std::vector<uint8_t> raw;
+    struct WipeReply {
+      std::vector<uint8_t>& bytes;
+      ~WipeReply() { wipe_audio_bytes(bytes); }
+    } wipe{raw};
     uint64_t completed_ms = 0;
     auto spend = [&]() {
       // The same stop/consent/clock checks apply at the instant the
@@ -89,7 +93,6 @@ class BoundVoiceApiPort final : public VoiceApiPort {
       decoded = codec_.speech_pcm(raw, reply.pcm24k) &&
                 !reply.pcm24k.empty() && reply.pcm24k.size() <= 20U * 24000U;
     }
-    std::fill(raw.begin(), raw.end(), uint8_t(0));
     if (!decoded || stop_.load() || !consent_.load() || !trusted_.load())
       return fail;
     const uint64_t decoded_at = now_();
@@ -118,7 +121,7 @@ class BoundVoiceApiPort final : public VoiceApiPort {
                valid_bounded_utf8(r.text, 500U) &&
                r.max_output_tokens == 400U && !r.store && !r.pcm_output;
       case VoiceApiStage::synthesize:
-        return r.fixed_path == "/v1/audio/speech" && r.pcm24k.empty() &&
+        return r.fixed_path == speech_path(r.model) && r.pcm24k.empty() &&
                r.language.empty() && !r.voice.empty() &&
                valid_bounded_utf8(r.text, 300U) &&
                r.max_output_tokens == 0U && !r.store && r.pcm_output;

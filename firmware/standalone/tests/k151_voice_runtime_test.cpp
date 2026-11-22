@@ -493,6 +493,7 @@ bool K151HttpsVoicePort::post_once(const Request& req, std::string_view,
   const std::array expected{httpwire::Endpoint::transcription, httpwire::Endpoint::responses,
                             httpwire::Endpoint::speech};
   assert(calls < 3 && req.endpoint == expected[calls]);
+  assert(scenario != "bootstrap_conversation_realtime" || calls < 2);
   if (calls == 0) {
     if (scenario.starts_with("bootstrap_")) {
       const auto ledger = BudgetLedger::restore(durable_budget);
@@ -517,13 +518,28 @@ bool K151VoiceDecoder::response_text(std::span<const uint8_t>, std::string& out)
 bool K151VoiceDecoder::speech_pcm(std::span<const uint8_t>, std::vector<int16_t>& out) {
   out.assign(240, 10); return true;
 }
+bool K151RealtimeSpeechPort::synthesize_once(const VoiceApiRequest& request, std::string_view key,
+    const std::function<bool()>& network_ready, const std::atomic_bool& paid,
+    const std::atomic_bool& stopped, const std::function<bool()>& spend,
+    std::vector<uint8_t>& pcm, uint64_t& completed_ms) const {
+  assert(scenario == "bootstrap_conversation_realtime" && calls == 2 && !mic_open && !amp_open);
+  assert(request.fixed_path == "/v1/realtime" && request.model == "gpt-realtime-2.1-mini");
+  assert(request.voice == "marin" && request.text == "test reply" && request.pcm24k.empty());
+  assert(key == "mock-only-credential" && paid && !stopped && network_ready() && spend() && !spend());
+  ++calls;
+  pcm = {10, 0};
+  completed_ms = static_cast<uint64_t>(now_us / 1'000);
+  return true;
+}
 }
 
 void exercise_conversation() {
   using Phase = K151ConversationOwner::Phase;
   auto& conversation = K151ConversationOwner::instance();
   board_bus_registered = false;
-  const VoiceModelConfig models{"stt", "gpt", "tts", "voice"};
+  const bool realtime = scenario == "bootstrap_conversation_realtime";
+  const VoiceModelConfig models{"stt", "gpt", realtime ? "gpt-realtime-2.1-mini" : "tts",
+                                realtime ? "marin" : "voice"};
   const auto request = [&](bool paid, bool budget) {
     return conversation.request_voice(models, pack, paid, budget, true, K151VoiceMode::one_paid_turn);
   };

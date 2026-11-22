@@ -66,6 +66,16 @@ def test_hold_build_checks_observed_app_slots(validator):
     assert apps == {("ota_0", "ota_0", 0x20000, size), ("ota_1", "ota_1", 0x510000, size)}
 
 
+def test_realtime_route_and_bearer_log_check(validator):
+    route = b"/v1/realtime?model=gpt-realtime-2.1-mini"
+    validator.verify_realtime_transport(b"app\0" + route + b"\0")
+    with pytest.raises(ValueError, match="missing"):
+        validator.verify_realtime_transport(b"app\0")
+    for message in (b"Error write Upgrade header", b"Write upgrade request"):
+        with pytest.raises(ValueError, match="credential"):
+            validator.verify_realtime_transport(route + b"\0" + message)
+
+
 @pytest.mark.parametrize("corruption", ["truncated", "elf64", "big_endian", "invalid_version"])
 def test_rejects_invalid_elf_identity(tmp_path, validator, corruption):
     elf, app = tmp_path / "app.elf", tmp_path / "app.bin"

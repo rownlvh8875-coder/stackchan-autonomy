@@ -41,6 +41,7 @@ jobs:
             --elf firmware/standalone/esp_app/build/stackchan_standalone_hold.elf \
             --bin firmware/standalone/esp_app/build/stackchan_standalone_hold.bin \
             --idf-head "$IDF_SHA" \
+            --check-realtime \
             --out firmware/standalone/esp_app/validation-manifest.json
       - name: Build panel, head touch and screen STOP probe (NO INSTALL)
         shell: bash

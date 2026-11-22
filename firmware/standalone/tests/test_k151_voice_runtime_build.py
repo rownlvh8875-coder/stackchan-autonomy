@@ -105,6 +105,7 @@ def runtime_binary(tmp_path_factory):
         "bootstrap_first_turn",
         "bootstrap_one_paid_trial",
         "bootstrap_conversation_complete",
+        "bootstrap_conversation_realtime",
         "bootstrap_conversation_stop",
         "bootstrap_conversation_unverified_release",
         "bootstrap_existing",
