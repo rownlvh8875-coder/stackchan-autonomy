@@ -41,16 +41,9 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
   }
   bool aw88298_standby_verified() {
     if (profile_ != Profile::aw88298_muted_startup || !healthy()) return false;
-    std::array<uint8_t, 2> value{};
-    const auto read_word = [&](int reg) {
+    return standby_registers_verified([&](int reg, std::array<uint8_t, 2>& value) {
       return read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK;
-    };
-    // AW88298 datasheet ID, SYSCTRL (I2SEN/AMPPD/PWDN), SYSCTRL2
-    // (HMUTE), and SYSST (SWS). SYSINT is clear-on-read and is not used.
-    return read_word(0x00) && value[0] == 0x18 && value[1] == 0x52 &&
-           read_word(0x04) && (value[1] & 0x43) == 0x03 &&
-           read_word(0x05) && (value[1] & 0x10) != 0 &&
-           read_word(0x01) && (value[0] & 0x01) == 0;
+    });
   }
   bool request_aw88298_standby() {
     if (profile_ != Profile::aw88298_muted_startup || !opened(this)) return false;
@@ -65,8 +58,97 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     const bool power = update(0x04);
     return mute && power;
   }
+
+  // The caller owns the enabled I2S TX and must close through standby or reset
+  // on failure, including revocation detected during the unmute transaction.
+  template <typename Allowed, typename Clock, typename Pause>
+  [[nodiscard]] bool start_aw88298_low_volume(Allowed allowed, Clock clock, Pause pause) {
+    constexpr int64_t kStartupLimitUs = 100'000;
+    constexpr int64_t kStageSettleUs = 2'000;
+    constexpr uint16_t kClockMask = 0x0031; // NOCLKS, CLKS, PLLS
+    constexpr uint16_t kClockLocked = 0x0011;
+    constexpr uint16_t kSwitching = 0x0100;
+    constexpr uint16_t kHardFaults = 0xcc0a; // OVP2, UVL, BSTOC, OVP, OCD, OTH
+    constexpr uint8_t kPowerMask = 0x43; // I2SEN, AMPPD, PWDN
+    constexpr uint8_t kConfiguring = 0x42; // I2S enabled, amplifier still off
+    constexpr uint8_t kOperating = 0x40;
+    constexpr uint8_t kHardMute = 0x10;
+
+    if (!allowed() || !muted_startup_verified()) return false;
+    const int64_t started = clock();
+    if (started < 0) return false;
+    int64_t sampled = started;
+    const auto live = [&] {
+      if (!allowed() || !healthy()) return false;
+      const int64_t observed = clock();
+      if (observed < sampled || observed - started >= kStartupLimitUs) return false;
+      sampled = observed;
+      return true;
+    };
+    const auto read_live = [&](int reg, std::array<uint8_t, 2>& value) {
+      return live() && read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK && live();
+    };
+    const auto transition = [&](int reg, uint8_t mask, uint8_t before, uint8_t after) {
+      std::array<uint8_t, 2> value{};
+      if (!read_live(reg, value) || (value[1] & mask) != before) return false;
+      value[1] = (value[1] & ~mask) | after;
+      // SDK writes still use the muted profile. Only these owner-task stages
+      // directly change the protected low-byte bits.
+      verified_ &= ~(reg == 0x04 ? kPowerVerified : kMuteVerified);
+      if (!live() ||
+          record(base_->write_reg(base_, reg, 1, value.data(), value.size())) != ESP_CODEC_DEV_OK)
+        return false;
+      if (!read_live(reg, value)) return false;
+      return (value[1] & mask) == after;
+    };
+    const auto read_status = [&](uint16_t& status) {
+      std::array<uint8_t, 2> value{};
+      if (!read_live(0x01, value)) return false; // SYSST is not clear-on-read.
+      status = (static_cast<uint16_t>(value[0]) << 8) | value[1];
+      return (status & kHardFaults) == 0;
+    };
+    const auto await_stage = [&](bool operating) {
+      const int64_t stage_started = sampled; // Sampled after the stage write/readback.
+      const uint16_t expected = kClockLocked | (operating ? kSwitching : 0);
+      // The poll count also bounds failure if the injected clock never advances.
+      for (int poll = 0; poll < 100; ++poll) {
+        uint16_t status{};
+        if (!read_status(status) || (!operating && (status & kSwitching))) return false;
+        if (sampled - stage_started >= kStageSettleUs &&
+            (status & (kClockMask | kSwitching)) == expected) return true;
+        if (!live()) return false;
+        pause();
+      }
+      return false;
+    };
+
+    std::array<uint8_t, 2> value{};
+    if (!standby_registers_verified(read_live) ||
+        !transition(0x04, kPowerMask, 0x03, kConfiguring) || !await_stage(false) ||
+        !read_live(0x05, value) || !(value[1] & kHardMute) ||
+        !transition(0x04, kPowerMask, kConfiguring, kOperating) || !await_stage(true) ||
+        !read_live(0x0c, value) || value[0] < kMinAttenuation ||
+        value[0] > kMaxAttenuation) return false;
+    uint16_t status{};
+    constexpr auto kStatusMask = kClockMask | kSwitching;
+    constexpr auto kReady = kClockLocked | kSwitching;
+    return read_status(status) && (status & kStatusMask) == kReady &&
+           transition(0x05, kHardMute, kHardMute, 0) &&
+           read_status(status) && (status & kStatusMask) == kReady;
+  }
  private:
   static constexpr uint8_t kPowerVerified = 1, kMuteVerified = 2, kAttenuationVerified = 4;
+  static constexpr uint8_t kMinAttenuation = 0x60, kMaxAttenuation = 0xc0;
+
+  template <typename Read>
+  static bool standby_registers_verified(Read read_word) {
+    std::array<uint8_t, 2> value{};
+    // ID, SYSCTRL, SYSCTRL2 and SYSST. SYSINT is clear-on-read and is not used.
+    return read_word(0x00, value) && value[0] == 0x18 && value[1] == 0x52 &&
+           read_word(0x04, value) && (value[1] & 0x43) == 0x03 &&
+           read_word(0x05, value) && (value[1] & 0x10) != 0 &&
+           read_word(0x01, value) && (value[0] & 0x01) == 0;
+  }
 
   int write_aw88298(int reg, int len, void* data, int size, bool standby_request = false) {
     if (len != 1 || size != 2 || reg < 0 || reg > 0xff)
@@ -92,8 +174,8 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
         verified_bit = kMuteVerified;
         break;
       case 0x0c:  // HAGCCFG4: high byte encodes attenuation in 0.5 dB steps.
-        if (staged[0] > 0xc0) return record(ESP_CODEC_DEV_INVALID_ARG);
-        if (staged[0] < 0x60) staged[0] = 0x60;
+        if (staged[0] > kMaxAttenuation) return record(ESP_CODEC_DEV_INVALID_ARG);
+        if (staged[0] < kMinAttenuation) staged[0] = kMinAttenuation;
         mask[0] = 0xff;
         verified_bit = kAttenuationVerified;
         break;

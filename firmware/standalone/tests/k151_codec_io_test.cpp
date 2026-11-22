@@ -909,7 +909,8 @@ int main(int argc,char** argv) {
     }
     assert(port.prepare_microphone_only(local_owner,local_stop,verified));
     assert(port.prepared() && !rx.enabled && controls_created==1 && created==1);
-    assert(!port.prepare(local_owner,local_stop,{true,true}) && !port.speaker_on_low_volume());
+    assert(!port.prepare(local_owner,local_stop,{true,true}) &&
+           !port.speaker_on_low_volume(local_owner));
     if(mode=="mic_only_stop_open") {
       assert(!port.microphone_on() && port.faulted() && !rx.enabled && gains==0);
       assert(!port.shutdown());return 0;
@@ -998,7 +999,7 @@ int main(int argc,char** argv) {
   }
   if (mode.starts_with("duplex_board_")) {
     assert(!port.prepare(local_owner, local_stop, {true, true}));
-    assert(port.faulted() && !port.prepared() && !port.speaker_on_low_volume());
+    assert(port.faulted() && !port.prepared() && !port.speaker_on_low_volume(local_owner));
     assert(!port.shutdown() && !bus.alive);
     if (mode=="duplex_board_wrong_pmic" || mode=="duplex_board_wrong_mode") {
       assert(reset_writes==0 && channels_created==0 && output_latch==0xa7);

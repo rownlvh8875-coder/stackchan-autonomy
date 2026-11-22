@@ -17,6 +17,10 @@ int writes = 0;
 bool power_seen = false, mute_seen = false, volume_seen = false;
 bool standby_request = false;
 int standby_mute_writes = 0;
+bool activating = false;
+bool allowed = true;
+bool unmuted = false;
+int64_t now_us = 0;
 
 bool is_open(const audio_codec_ctrl_if_t* h) { return h == &i2c; }
 int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* output, int bytes) {
@@ -36,7 +40,29 @@ int write(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* inpu
   ++writes;
   const auto* data = static_cast<const uint8_t*>(input);
   const auto word = static_cast<uint16_t>((data[0] << 8) | data[1]);
-  if (scenario != "raw") {
+  if (activating && reg == 0x04 && (word & 0x43) != 0x03) {
+    assert((word & ~0x43) == (registers[0x04] & ~0x43));
+    assert((registers[0x05] & 0x10) != 0 && allowed);
+    if ((word & 0x43) == 0x42) {
+      assert((registers[0x04] & 0x43) == 0x03);
+      if (scenario != "start_no_clock" && scenario != "start_frozen_clock")
+        registers[0x01] = 0x0011;
+    } else {
+      assert((word & 0x43) == 0x40);
+      assert((registers[0x04] & 0x43) == 0x42 && (registers[0x01] & 0x31) == 0x11);
+      assert(now_us >= 2000);
+      if (scenario != "start_no_switching") registers[0x01] |= 0x0100;
+      if (scenario == "start_fault") registers[0x01] |= 0x0008;
+      if (scenario == "start_mute_lost") registers[0x05] &= ~0x10;
+    }
+  } else if (activating && reg == 0x05 && (word & 0x10) == 0) {
+    assert(word == (registers[0x05] & ~0x10));
+    assert((registers[0x01] & 0x0131) == 0x0111 && allowed && now_us >= 4000);
+    assert((registers[0x0c] >> 8) >= 0x60 && (registers[0x0c] >> 8) <= 0xc0);
+    unmuted = true;
+    if (scenario == "start_revoked_at_unmute") allowed = false;
+    if (scenario == "start_clock_lost_at_unmute") registers[0x01] = 0x0120;
+  } else if (scenario != "raw") {
     if (reg == 0x04) assert((word & 0x43) == 0x03);
     if (reg == 0x05) assert((word & 0x10) != 0);
     if (reg == 0x0c) assert((word >> 8) >= 0x60 && (word >> 8) <= 0xc0);
@@ -103,6 +129,36 @@ int main(int argc, char** argv) {
     assert(guarded.muted_startup_verified());
     assert((registers[0x04] & 0x43) == 0x03 && (registers[0x05] & 0x10) != 0);
     assert((registers[0x0c] >> 8) >= 0x60);
+    if (scenario.starts_with("start_")) {
+      registers[0x00] = 0x1852;
+      registers[0x01] = 0;
+      registers[0x05] |= 0x2000; // Unrelated bits must survive the masked writes.
+      if (scenario == "start_excess_gain") registers[0x0c] = 0x5f64;
+      if (scenario == "start_revoked_initially") allowed = false;
+      const int before = writes;
+      activating = true;
+      const bool started = guarded.start_aw88298_low_volume(
+          [] { return allowed; }, [] { return now_us; }, [] {
+            if (scenario != "start_frozen_clock")
+              now_us += scenario == "start_clock_reversed" ? -1 : 1000;
+            if (scenario == "start_revoked_while_muted") allowed = false;
+          });
+      activating = false;
+      const bool success = scenario == "start_low_volume";
+      const bool side_effect = success || scenario == "start_revoked_at_unmute" ||
+                               scenario == "start_clock_lost_at_unmute";
+      assert(started == success && unmuted == side_effect);
+      if (scenario == "start_revoked_initially") assert(writes == before);
+      if (success) {
+        assert((registers[0x04] & 0x43) == 0x40 && (registers[0x05] & 0x10) == 0);
+        assert(!guarded.aw88298_standby_verified());
+      }
+      power_seen = false;
+      standby_request = true;
+      assert(guarded.request_aw88298_standby());
+      standby_request = false;
+      assert(guarded.aw88298_standby_verified());
+    }
     if (scenario.starts_with("standby")) {
       // Begin with an emulated active register state. No physical amp is opened.
       constexpr uint16_t active_power = 0x40c4, active_mute = 0x26a8;

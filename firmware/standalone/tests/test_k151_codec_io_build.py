@@ -623,3 +623,27 @@ def test_real_aw88298_startup_stays_quiet(aw88298_startup_binary, mode):
         [str(aw88298_startup_binary), mode], capture_output=True, text=True, timeout=10
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "start_low_volume",
+        "start_no_clock",
+        "start_no_switching",
+        "start_excess_gain",
+        "start_fault",
+        "start_mute_lost",
+        "start_clock_lost_at_unmute",
+        "start_revoked_initially",
+        "start_revoked_while_muted",
+        "start_revoked_at_unmute",
+        "start_clock_reversed",
+        "start_frozen_clock",
+    ],
+)
+def test_real_aw88298_guarded_low_volume_start(aw88298_startup_binary, mode):
+    result = subprocess.run(
+        [str(aw88298_startup_binary), mode], capture_output=True, text=True, timeout=10
+    )
+    assert result.returncode == 0, result.stderr
