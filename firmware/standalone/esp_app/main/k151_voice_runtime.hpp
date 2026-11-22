@@ -5,6 +5,7 @@
 #include "k151_mic_reader.hpp"
 #include "k151_pcm_speaker_sink.hpp"
 #include "k151_voice_api_adapter.hpp"
+#include "k151_voice_status.hpp"
 #include "k151_wakenet_port.hpp"
 #include "native_voice_loop.hpp"
 
@@ -19,7 +20,8 @@ class K151VoiceRuntime final {
   K151VoiceRuntime(PersistentGuard& ledger, K151WifiTimePort& network,
                    const std::atomic_bool& local_owner, const std::atomic_bool& paid_consent,
                    const std::atomic_bool& budget_writes, const std::atomic_bool& stop,
-                   K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus);
+                   K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus,
+                   std::function<bool(K151VoiceStatus)> show_status = {});
   K151VoiceRuntime(const K151VoiceRuntime&) = delete;
   K151VoiceRuntime& operator=(const K151VoiceRuntime&) = delete;
   ~K151VoiceRuntime();
@@ -42,6 +44,7 @@ class K151VoiceRuntime final {
   bool authorized() const;
   bool admission_ready() const;
   bool live_ready() const;
+  bool publish_status(K151VoiceStatus status) const;
   bool start_voice();
 
   PersistentGuard& ledger_;
@@ -52,6 +55,7 @@ class K151VoiceRuntime final {
   const std::atomic_bool& stop_;
   const K151AudioBoardEvidence evidence_;
   const i2c_master_bus_handle_t board_bus_;
+  std::function<bool(K151VoiceStatus)> show_status_;
   K151CodecPort codec_;
   AudioGuard audio_;
   std::atomic_bool busy_{false};

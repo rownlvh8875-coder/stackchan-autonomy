@@ -2,6 +2,7 @@
 #include "k151_voice_bootstrap.hpp"
 #include "k151_install_hold.hpp"
 #include "k151_display_stop.hpp"
+#include "k151_setup_lvgl.hpp"
 #include "k151_voice_handoff.hpp"
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -14,19 +15,21 @@ K151VoiceBootstrap::K151VoiceBootstrap(const K151VoiceHandoff& handoff,
     : K151VoiceBootstrap(handoff.setup, handoff.panel, handoff.paid_consent,
                          handoff.budget_writes, evidence, handoff.bus,
                          handoff.one_paid_turn ? K151VoiceMode::one_paid_turn
-                                               : K151VoiceMode::continuous) {
+                                               : K151VoiceMode::continuous, &handoff.view) {
   reviewed_first_budget_ = handoff.allow_first_budget;
 }
 
 K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel& panel,
     const std::atomic_bool& paid_consent, const std::atomic_bool& budget_writes,
-    K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus, K151VoiceMode mode)
+    K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus, K151VoiceMode mode,
+    K151SetupLvgl* view)
     : setup_(setup), panel_(panel), paid_consent_(paid_consent), budget_writes_(budget_writes),
-      evidence_(evidence), board_bus_(board_bus),
+      evidence_(evidence), board_bus_(board_bus), view_(view),
       storage_(setup.owner_, paid_consent, budget_writes, setup.stop_),
       ledger_(storage_, mode == K151VoiceMode::one_paid_turn),
       voice_(ledger_, network_, setup.owner_, paid_consent, budget_writes, setup.stop_,
-             evidence_, board_bus_) {}
+             evidence_, board_bus_,
+             [this](K151VoiceStatus status) { return !view_ || view_->present_voice_status(status); }) {}
 
 K151VoiceBootstrap::~K151VoiceBootstrap() {
   if (display_stop_owned_) stop();
@@ -57,7 +60,8 @@ bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t>
     stop();
     return false;
   }
-  if (!confirmed_setup() || !authorized() || !storage_.init_without_erase() || !authorized() ||
+  if ((view_ && !view_->present_voice_status(K151VoiceStatus::connecting)) ||
+      !confirmed_setup() || !authorized() || !storage_.init_without_erase() || !authorized() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) ||
       !ledger_.restore_budget_for_setup(allow_first_budget) || !authorized() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) || !confirmed_setup()) {

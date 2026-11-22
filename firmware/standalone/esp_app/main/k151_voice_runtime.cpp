@@ -23,10 +23,12 @@ K151VoiceRuntime::K151VoiceRuntime(
     PersistentGuard& ledger, K151WifiTimePort& network,
     const std::atomic_bool& local_owner, const std::atomic_bool& paid_consent,
     const std::atomic_bool& budget_writes, const std::atomic_bool& stop,
-    K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus)
+    K151AudioBoardEvidence evidence, i2c_master_bus_handle_t board_bus,
+    std::function<bool(K151VoiceStatus)> show_status)
     : ledger_(ledger), network_(network),
       owner_(local_owner), consent_(paid_consent), budget_writes_(budget_writes), stop_(stop),
       evidence_(evidence), board_bus_(board_bus),
+      show_status_(std::move(show_status)),
       audio_(k151_audio_hooks(codec_, owner_, stop_, consent_, evidence_, board_bus_)),
       mic_(codec_), sink_(codec_, stop, paid_consent, local_owner),
       speaker_(audio_, sink_, stop, paid_consent, busy_,
@@ -65,8 +67,19 @@ bool K151VoiceRuntime::live_ready() const {
   const bool before_capture = audio_.state() == AudioState::idle &&
       (session_.state() == State::wake_wait || session_.state() == State::ready ||
        session_.state() == State::cooldown);
-  return phase_ == Phase::operating && (!before_capture || turn_psram_available()) &&
-         admission_ready();
+  if (phase_ != Phase::operating || (before_capture && !turn_psram_available()) ||
+      !admission_ready()) return false;
+  switch (session_.state()) {
+    case State::transcribe:
+    case State::think:
+    case State::synthesize: return publish_status(K151VoiceStatus::processing);
+    case State::play: return publish_status(K151VoiceStatus::playing);
+    default: return true;
+  }
+}
+
+bool K151VoiceRuntime::publish_status(K151VoiceStatus status) const {
+  return authorized() && (!show_status_ || show_status_(status)) && authorized();
 }
 
 bool K151VoiceRuntime::start(VoiceModelConfig models, std::span<const uint8_t> model_pack) {
@@ -111,7 +124,16 @@ NativeVoiceStep K151VoiceRuntime::poll() {
     if (now_us >= 0 && unix_time >= 0) {
       const auto step = loop_.poll(static_cast<uint64_t>(now_us / 1000),
                                   static_cast<uint64_t>(unix_time), models_);
-      if (step != NativeVoiceStep::stopped) return step;
+      bool shown = false;
+      switch (step) {
+        case NativeVoiceStep::listening: shown = publish_status(K151VoiceStatus::listening); break;
+        case NativeVoiceStep::questioning: shown = publish_status(K151VoiceStatus::question); break;
+        case NativeVoiceStep::answered:
+        case NativeVoiceStep::cooldown: shown = publish_status(K151VoiceStatus::returning); break;
+        case NativeVoiceStep::trial_standby: shown = publish_status(K151VoiceStatus::trial_finished); break;
+        default: break;
+      }
+      if (shown) return step;
     }
   }
   stop();

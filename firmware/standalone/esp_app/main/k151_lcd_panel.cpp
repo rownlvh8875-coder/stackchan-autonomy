@@ -320,25 +320,44 @@ void K151LcdPanel::flush(lv_display_t* display, const lv_area_t* area, uint8_t* 
                        area->x2 == static_cast<int>(kWidth - 1) && area->y1 >= 0 &&
                        area->y2 >= area->y1 && area->y2 < static_cast<int>(kHeight) &&
                        area->y2 - area->y1 < static_cast<int>(kStripeRows) &&
-                       (!panel.full_refresh_ || unsigned(area->y1) == panel.next_row_);
+                       (!panel.refresh_pending_ ||
+                        (unsigned(area->y1) == panel.next_row_ && unsigned(area->y2) < panel.end_row_));
     if (!valid || !panel.transmit_rows(area->y1, area->y2, pixels)) panel.fault_ = true;
-    else if (panel.full_refresh_) panel.next_row_ = area->y2 + 1;
+    else if (panel.refresh_pending_) panel.next_row_ = area->y2 + 1;
   }
   lv_display_flush_ready(display);
 }
 
 bool K151LcdPanel::present_now() {
-  if (!ready() || full_refresh_) return false;
+  if (!ready() || refresh_pending_) return false;
+  if (present_rows(0, kHeight)) return true;
+  if (backlight_claimed_) (void)set_bits(pmic_, kLdoEnable, kDldo1Enable, 0);
+  return false;
+}
+
+bool K151LcdPanel::present_voice_status_rows() {
+  // The one-line status label is centered. Limit changes to the middle 60
+  // rows so a state change cannot queue a full frame during microphone use.
+  return stop_input_handed_off_ && present_rows(kHeight / 2 - 30, kHeight / 2 + 30);
+}
+
+bool K151LcdPanel::present_rows(unsigned first, unsigned end) {
+  if (!ready() || refresh_pending_) return false;
   auto* active = lv_display_get_screen_active(display_);
   if (!active) return false;
-  next_row_ = 0;
-  full_refresh_ = true;
-  lv_obj_invalidate(active);
-  lv_refr_now(display_);
-  full_refresh_ = false;
-  if (ready() && next_row_ == kHeight) return true;
+  next_row_ = first;
+  end_row_ = end;
+  refresh_pending_ = true;
+  if (first == 0 && end == kHeight) {
+    lv_obj_invalidate(active);
+  } else {
+    const lv_area_t area{0, int32_t(first), int32_t(kWidth - 1), int32_t(end - 1)};
+    if (lv_obj_invalidate_area(active, &area) != LV_RESULT_OK) fault_ = true;
+  }
+  if (!fault_) lv_refr_now(display_);
+  refresh_pending_ = false;
+  if (ready() && next_row_ == end) return true;
   fault_ = true;
-  if (backlight_claimed_) (void)set_bits(pmic_, kLdoEnable, kDldo1Enable, 0);
   return false;
 }
 

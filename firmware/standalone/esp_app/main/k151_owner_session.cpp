@@ -141,7 +141,7 @@ std::optional<K151VoiceHandoff> K151OwnerSession::handoff() {
       !paid_consent_.load() || !budget_writes_.load() || stop_.load())
     return std::nullopt;
   handoff_taken_ = true;
-  return K151VoiceHandoff{setup_, panel_, bus_, paid_consent_, budget_writes_,
+  return K151VoiceHandoff{setup_, panel_, view_, bus_, paid_consent_, budget_writes_,
                          allow_first_budget_, one_paid_turn_};
 }
 

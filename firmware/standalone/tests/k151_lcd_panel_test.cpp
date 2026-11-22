@@ -12,6 +12,7 @@
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
 #include <esp_heap_caps.h>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -45,12 +46,15 @@ uint8_t expander_p0 = 0x07, p0_direction = 0x18, p1_direction = 0x0c, p0_drive =
 uint8_t initial_p0{}, initial_p1{}, initial_drive{}, initial_irq_direction{}, initial_ldo_enable{};
 bool release_failed_once = false;
 unsigned ft_contact_reads = 0, irq_ack_reads = 0;
+unsigned handoff_first_contact_read = 1;
 uint8_t screen_contacts = 0;
 bool spi_open = false, lcd_open = false, lv_open = false, display_on = false;
 bool sd_cs_driven = false;
 uint32_t sd_cs_level = 0;
 unsigned label_count = 0, attach_calls = 0, register_writes = 0, frames = 0;
 unsigned transmitted_rows = 0, acknowledged_stripes = 0;
+std::optional<lv_area_t> partial_area;
+bool rendering_voice_band = false;
 uint16_t stripe_start = 0, stripe_end = 0;
 void* allocated = nullptr;
 std::vector<int> commands;
@@ -174,7 +178,8 @@ extern "C" esp_err_t i2c_master_transmit_receive(
   } else {
     assert(device == &expander && size == 1);
     if (*reg == 0x00 || *reg == 0x01) {
-      assert(ft_contact_reads == 1 && irq_ack_reads == *reg && scenario.starts_with("handoff_"));
+      assert(ft_contact_reads == handoff_first_contact_read && irq_ack_reads == *reg);
+      assert(scenario.starts_with("handoff_") || scenario.starts_with("review_voice_status"));
       ++irq_ack_reads;
       *data = 0;
       return *reg == 0x01 && scenario == "handoff_i2c_error" ? ESP_FAIL : ESP_OK;
@@ -323,6 +328,8 @@ extern "C" esp_err_t esp_lcd_panel_io_tx_param(
       if (scenario == "initial_spi_error" || (scenario == "sas_spi_error" && frames == 3))
         return ESP_FAIL;
       transmitted_rows = stripe_end + 1;
+      if (scenario == "review_voice_status_stop" && rendering_voice_band && stripe_start == 90)
+        stop = true;
       break;
     case 0x29:
       assert(size == 0 && !(ldo_enable & 0x80) && transmitted_rows == 240);
@@ -381,15 +388,24 @@ extern "C" lv_obj_t* lv_display_get_screen_active(lv_display_t* disp) {
   return &screen;
 }
 extern "C" void lv_obj_invalidate(lv_obj_t* obj) { assert(obj == &screen); }
+extern "C" lv_result_t lv_obj_invalidate_area(const lv_obj_t* obj, const lv_area_t* area) {
+  assert(obj == &screen && area->y1 == 90 && area->y2 == 149 && !partial_area);
+  partial_area = *area;
+  return LV_RESULT_OK;
+}
 extern "C" void lv_refr_now(lv_display_t* disp) {
   ++frames;
-  transmitted_rows = 0;
-  const int limit = scenario == "short_frame" || (scenario == "sas_short_frame" && frames == 3)
+  const auto band = std::exchange(partial_area, std::nullopt);
+  rendering_voice_band = band.has_value();
+  const int start = band ? band->y1 : 0;
+  transmitted_rows = start;
+  const int limit = band ? band->y2 + 1 + (scenario == "review_voice_status_spill" ? 10 : 0) :
+                    scenario == "short_frame" || (scenario == "sas_short_frame" && frames == 3)
                      || (scenario == "review_short_frame" && frames == 4)
                      || (scenario == "review_final_short_frame" && frames == 5)
                      || (scenario == "review_voice_banner_failure" && frames == 7)
                  ? 230 : 240;
-  for (int y = 0; y < limit; y += 10) {
+  for (int y = start; y < limit; y += 10) {
     lv_area_t area{11, y, 318, y + 9};
     lv_event_t event{&area};
     disp->round(&event);
@@ -398,6 +414,7 @@ extern "C" void lv_refr_now(lv_display_t* disp) {
     disp->buffer[1] = 0x12;
     disp->flush(disp, &area, disp->buffer);
   }
+  rendering_voice_band = false;
 }
 extern "C" void lv_draw_sw_rgb565_swap(void* buffer, uint32_t size) {
   assert(buffer == allocated && size == 3200);
@@ -438,6 +455,10 @@ extern "C" void lv_label_set_text(lv_obj_t* label, const char* value) {
         ? "Update existing NVS budget log" : "Create or update NVS budget log"));
   }
   captions[index] = index == 0 ? std::string_view(value) : std::string_view{};
+}
+extern "C" void lv_label_set_text_static(lv_obj_t* label, const char* value) {
+  assert(label == &labels[1] && scenario.starts_with("review_voice_status"));
+  captions[1] = value;
 }
 
 int main(int argc, char** argv) {
@@ -553,6 +574,30 @@ int main(int argc, char** argv) {
           assert(voice(now, 1) == Review::waiting);
         assert(voice(4800, 0) == Review::approved && captions[0] == "VOICE APPROVED");
         assert(voice(4900, 0) == Review::fault);
+        if (scenario.starts_with("review_voice_status")) {
+          using Status = K151VoiceStatus;
+          assert(!setup.present_voice_status(Status::connecting)); // STOP monitor has no route yet.
+          handoff_first_contact_read = ft_contact_reads + 1;
+          assert(K151DisplayStop::handoff(panel, &bus, stop));
+          const auto reads = ft_contact_reads;
+          assert(!setup.present(TouchConsentPhase::consumed, OwnerSetupPhase::ready,
+                                true, false, true));
+          assert(setup.present_voice_status(Status::connecting) && transmitted_rows == 240);
+          const auto stripes = acknowledged_stripes;
+          const bool normal = scenario == "review_voice_status";
+          assert(setup.present_voice_status(Status::listening) == normal);
+          assert(ft_contact_reads == reads && irq_ack_reads == 2);
+          assert(captions[0] == "STACKCHAN VOICE" && captions[1] == "Say Hi StackChan");
+          if (normal) {
+            assert(transmitted_rows == 150 && acknowledged_stripes == stripes + 6);
+            assert(setup.present_voice_status(Status::listening) && acknowledged_stripes == stripes + 6);
+            assert(setup.present_voice_status(Status::question) && acknowledged_stripes == stripes + 12);
+            assert(captions[1] == "Say your question" && ft_contact_reads == reads);
+          } else {
+            assert(transmitted_rows == (stop ? 100 : 150));
+            assert(!setup.present_voice_status(Status::question));
+          }
+        }
       } else {
         assert(K151OwnerSession::poll_voice(setup, 2400) == Review::fault);
       }

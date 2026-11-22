@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "k151_conversation_owner.hpp"
 
+#include <esp_timer.h>
 #include <utility>
 
 namespace stackchan::standalone {
@@ -44,9 +45,23 @@ bool K151ConversationOwner::request_voice(VoiceModelConfig models,
 K151ConversationOwner::Progress K151ConversationOwner::poll() {
   if (!task_) return {Phase::idle};
   if (!on_owner_task()) return {Phase::fault};
+  if (progress_.phase == Phase::showing_trial_result) {
+    const auto now_us = esp_timer_get_time();
+    if (now_us < trial_result_at_us_ || now_us - trial_result_at_us_ >= 3'000'000)
+      return finish(Phase::trial_complete, NativeVoiceStep::trial_standby);
+    return progress_;
+  }
   if (progress_.phase == Phase::voice) {
     const auto result = voice_->poll();
-    if (result == NativeVoiceStep::trial_standby) return finish(Phase::trial_complete, result);
+    if (result == NativeVoiceStep::trial_standby) {
+      // Bootstrap has already closed audio, model, network and the STOP monitor.
+      // Keep the last frame visible briefly. The owner task polls the dwell.
+      voice_.reset();
+      (void)setup_.poll(); // Clear the remaining local approvals on the STOP latch.
+      trial_result_at_us_ = esp_timer_get_time();
+      if (trial_result_at_us_ < 0) return finish(Phase::trial_complete, result);
+      return progress_ = {Phase::showing_trial_result, result};
+    }
     if (result == NativeVoiceStep::stopped) return finish(Phase::stopped);
     return progress_ = {Phase::voice, result};
   }

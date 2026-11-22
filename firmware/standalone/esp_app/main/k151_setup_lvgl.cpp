@@ -49,7 +49,7 @@ bool K151SetupLvgl::attach(K151LcdPanel& panel, bool exact_panel_verified,
 bool K151SetupLvgl::present(TouchConsentPhase touch, OwnerSetupPhase owner,
                             bool trusted_input_ready, bool sensor_read_failed,
                             bool lvgl_lock_held) {
-  if (!attached() || !lvgl_lock_held) return false;
+  if (!attached() || panel_->stop_input_handed_off_ || !lvgl_lock_held) return false;
   sas_visible_ = false;
   if (review_ != ReviewPhase::idle) review_ = ReviewPhase::closed;
   const SetupScreenFrame frame = setup_screen_frame(
@@ -122,7 +122,35 @@ K151SetupLvgl::ReviewResult K151SetupLvgl::poll_voice_review(
   lv_label_set_text(title_, "VOICE APPROVED");
   lv_label_set_text(first_, "Starting when ready");
   lv_label_set_text(second_, "Tap the screen to stop");
-  return panel_->present_now() && !stop_.load() ? ReviewResult::approved : ReviewResult::fault;
+  voice_approved_ = panel_->present_now() && !stop_.load();
+  return voice_approved_ ? ReviewResult::approved : ReviewResult::fault;
+}
+
+bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
+  if (!voice_approved_ || !attached() || !panel_->stop_input_handed_off_) return false;
+  if (voice_status_ == status) return !stop_.load();
+  const char* text = nullptr;
+  switch (status) {
+    case K151VoiceStatus::connecting: text = "Connecting to Wi-Fi"; break;
+    case K151VoiceStatus::listening: text = "Say Hi StackChan"; break;
+    case K151VoiceStatus::question: text = "Say your question"; break;
+    case K151VoiceStatus::processing: text = "Preparing an answer"; break;
+    case K151VoiceStatus::playing: text = "Playing AI voice"; break;
+    case K151VoiceStatus::returning: text = "Returning to standby"; break;
+    case K151VoiceStatus::trial_finished: text = "Standby verified. Trial ended."; break;
+  }
+  if (!text) return false;
+  const bool first = !voice_status_;
+  if (first) {
+    if (status != K151VoiceStatus::connecting) return false;
+    lv_label_set_text(title_, "STACKCHAN VOICE");
+    lv_label_set_text(second_, "Tap the screen to stop");
+  }
+  lv_label_set_text_static(first_, text);
+  if (!(first ? panel_->present_now() : panel_->present_voice_status_rows()) || stop_.load())
+    return false;
+  voice_status_ = status;
+  return true;
 }
 
 void K151SetupLvgl::wait_for_fresh_contact(uint64_t now) {
@@ -187,6 +215,8 @@ bool K151SetupLvgl::detach(bool lvgl_lock_held) {
   panel_ = nullptr;
   sas_visible_ = false;
   review_ = ReviewPhase::closed;
+  voice_approved_ = false;
+  voice_status_.reset();
   return true;
 }
 } // namespace stackchan::standalone

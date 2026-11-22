@@ -3,7 +3,9 @@
 #pragma once
 
 #include "setup_screen_model.hpp"
+#include "k151_voice_status.hpp"
 #include <atomic>
+#include <optional>
 #include <string_view>
 #include <lvgl.h>
 
@@ -32,6 +34,8 @@ class K151SetupLvgl final {
                            bool owner_window, bool lvgl_lock_held);
   bool detach(bool lvgl_lock_held);
   bool attached() const;
+  // Pinned LVGL owner only, following voice approval and STOP input handoff.
+  bool present_voice_status(K151VoiceStatus status);
 
  private:
   friend class K151ScpsUsbPort;
@@ -58,6 +62,8 @@ class K151SetupLvgl final {
   ReviewPhase review_ = ReviewPhase::idle;
   bool sas_visible_ = false;
   bool voice_review_started_ = false;
+  bool voice_approved_ = false;
+  std::optional<K151VoiceStatus> voice_status_;
   bool attempted_ = false;
 };
 } // namespace stackchan::standalone

@@ -11,7 +11,9 @@ namespace stackchan::standalone {
 // existing setup and wake sampling limits.
 class K151ConversationOwner final {
  public:
-  enum class Phase { idle, setup, cloud_off, voice_review, voice, trial_complete, stopped, fault };
+  enum class Phase {
+    idle, setup, cloud_off, voice_review, voice, showing_trial_result, trial_complete, stopped, fault
+  };
   struct Progress {
     Phase phase;
     NativeVoiceStep voice = NativeVoiceStep::stopped;
@@ -45,6 +47,7 @@ class K151ConversationOwner final {
   TaskHandle_t task_ = nullptr;
   int core_ = -1;
   Progress progress_{Phase::idle};
+  int64_t trial_result_at_us_ = 0;
   bool released_ = false;
 };
 

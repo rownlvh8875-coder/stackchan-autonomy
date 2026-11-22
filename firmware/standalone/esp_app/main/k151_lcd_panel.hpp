@@ -35,6 +35,8 @@ class K151LcdPanel final {
   friend class K151SetupLvgl;
   bool read_contact_count(uint8_t& count) const;
   bool handoff_stop_input(i2c_master_bus_handle_t bus, const std::atomic_bool& expected_stop);
+  bool present_voice_status_rows();
+  bool present_rows(unsigned first, unsigned end);
   bool locate_panel(i2c_master_bus_handle_t bus);
   bool prepare_touch_pins();
   bool restore_touch_pins();
@@ -54,7 +56,8 @@ class K151LcdPanel final {
   uint8_t* stripe_ = nullptr;
   uint8_t initial_backlight_level_ = 0;
   unsigned next_row_ = 0;
-  bool full_refresh_ = false;
+  unsigned end_row_ = 0;
+  bool refresh_pending_ = false;
   bool attempted_ = false;
   bool spi_owned_ = false;
   bool sd_cs_claimed_ = false;

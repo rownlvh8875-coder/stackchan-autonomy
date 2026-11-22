@@ -9,6 +9,7 @@
 namespace stackchan::standalone {
 
 class K151LcdPanel;
+class K151SetupLvgl;
 struct K151VoiceHandoff;
 enum class K151VoiceMode { continuous, one_paid_turn };
 
@@ -22,7 +23,8 @@ class K151VoiceBootstrap final {
                      const std::atomic_bool& paid_consent,
                      const std::atomic_bool& budget_writes, K151AudioBoardEvidence evidence,
                      i2c_master_bus_handle_t board_bus,
-                     K151VoiceMode mode = K151VoiceMode::continuous);
+                     K151VoiceMode mode = K151VoiceMode::continuous,
+                     K151SetupLvgl* view = nullptr);
   ~K151VoiceBootstrap();
   K151VoiceBootstrap(const K151VoiceBootstrap&) = delete;
   K151VoiceBootstrap& operator=(const K151VoiceBootstrap&) = delete;
@@ -52,6 +54,7 @@ class K151VoiceBootstrap final {
   const std::atomic_bool& budget_writes_;
   const K151AudioBoardEvidence evidence_;
   const i2c_master_bus_handle_t board_bus_;
+  K151SetupLvgl* const view_;
   IsolatedNvs storage_;
   PersistentGuard ledger_;
   K151WifiTimePort network_;

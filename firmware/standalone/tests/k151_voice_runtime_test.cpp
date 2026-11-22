@@ -54,6 +54,8 @@ std::atomic_int stop_gpio_level{1};
 unsigned gpio_configures = 0, gpio_samples = 0, timer_creates = 0;
 bool stop_timer_active = false;
 unsigned panel_handoffs = 0;
+unsigned wake_detections = 0;
+std::vector<K151VoiceStatus> voice_status;
 int board_task, other_task;
 TaskHandle_t current_task = &board_task;
 bool lvgl_on = false, setup_usb = false;
@@ -342,13 +344,27 @@ bool K151SetupLvgl::present(TouchConsentPhase, OwnerSetupPhase, bool, bool, bool
 }
 bool K151SetupLvgl::detach(bool lock) { return lock && !setup_usb && !codec_running; }
 bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first, bool lock, bool one_turn) {
-  assert(first && lock && one_turn && !setup_usb && !network_starts && !nvs_init_calls);
+  assert(first && lock && !setup_usb && !network_starts && !nvs_init_calls);
+  assert(one_turn == (scenario != "bootstrap_conversation_continuous"));
   review_started_ms = now;
   return true;
 }
 K151SetupLvgl::ReviewResult K151SetupLvgl::poll_voice_review(uint64_t now, bool lock) {
   assert(lock && review_started_ms && !setup_usb && !network_starts && !nvs_init_calls);
   return now - review_started_ms >= 1200 ? ReviewResult::approved : ReviewResult::waiting;
+}
+bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
+  assert(conversation_case() && lvgl_on && stop_timer_active && !setup_usb && !K151DisplayStop::flag());
+  if (!voice_status.empty() && voice_status.back() == status) return true;
+  voice_status.push_back(status);
+  if (status == K151VoiceStatus::connecting) assert(!nvs_init_calls && !network_starts);
+  if (status == K151VoiceStatus::question) assert(mic_open && !calls);
+  if (status == K151VoiceStatus::processing || status == K151VoiceStatus::playing)
+    assert(!mic_open && !amp_open && calls == (status == K151VoiceStatus::playing ? 3 : 0));
+  if (status == K151VoiceStatus::trial_finished) assert(mic_open && mic_opens == 3 && plays == 1);
+  if (status == K151VoiceStatus::processing && scenario == "bootstrap_conversation_stop_during_display")
+    display_press();
+  return !K151DisplayStop::flag();
 }
 void K151SecurePcSetup::stop() {}
 K151ScpsUsbPort::~K151ScpsUsbPort() { assert(!setup_usb); }
@@ -479,6 +495,7 @@ bool K151WakeNetPort::prepare_embedded(const std::atomic_bool& given_owner,
 bool K151WakeNetPort::ready() const { return model_loaded && owner && !stop_source(); }
 bool K151WakeNetPort::reset() { return ready(); }
 NativeWakeResult K151WakeNetPort::detect(std::span<int16_t>) {
+  if (conversation_case() && wake_detections++ < 2) return NativeWakeResult::none;
   return mic_opens == 1 ? NativeWakeResult::detected : NativeWakeResult::none;
 }
 void K151WakeNetPort::close() {
@@ -538,10 +555,12 @@ void exercise_conversation() {
   auto& conversation = K151ConversationOwner::instance();
   board_bus_registered = false;
   const bool realtime = scenario == "bootstrap_conversation_realtime";
+  const bool continuous = scenario == "bootstrap_conversation_continuous";
   const VoiceModelConfig models{"stt", "gpt", realtime ? "gpt-realtime-2.1-mini" : "tts",
                                 realtime ? "marin" : "voice"};
   const auto request = [&](bool paid, bool budget) {
-    return conversation.request_voice(models, pack, paid, budget, true, K151VoiceMode::one_paid_turn);
+    const auto mode = continuous ? K151VoiceMode::continuous : K151VoiceMode::one_paid_turn;
+    return conversation.request_voice(models, pack, paid, budget, true, mode);
   };
   assert(!request(true, true) && conversation.start({true, true}, true));
   now_us += 50'000;
@@ -561,6 +580,7 @@ void exercise_conversation() {
   now_us += 50'000;
   assert(conversation.poll().phase == Phase::voice && network_starts == 1 && !setup_usb);
   assert(conversation.poll().voice == NativeVoiceStep::waiting_network);
+  assert(voice_status == std::vector<K151VoiceStatus>{K151VoiceStatus::connecting});
   if (scenario == "bootstrap_conversation_stop") {
     display_press();
     assert(conversation.poll().phase == Phase::stopped && !board_bus_registered &&
@@ -568,19 +588,47 @@ void exercise_conversation() {
     return;
   }
   auto state = conversation.poll();
+  assert(state.voice == NativeVoiceStep::listening && voice_status.back() == K151VoiceStatus::listening);
+  for (int i = 0; i < 4 && state.voice == NativeVoiceStep::listening; ++i) {
+    now_us += 20'000;
+    state = conversation.poll();
+  }
+  assert(state.voice == NativeVoiceStep::questioning && voice_status.back() == K151VoiceStatus::question);
   for (unsigned i = 0; i < 200 && state.voice == NativeVoiceStep::questioning; ++i) {
     now_us += 20'000;
     state = conversation.poll();
   }
+  if (scenario == "bootstrap_conversation_stop_during_display") {
+    assert(state.phase == Phase::stopped && !calls && !plays && !board_bus_registered);
+    assert(voice_status.back() == K151VoiceStatus::processing);
+    return;
+  }
   assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::answered && calls == 3);
   now_us += 600'000;
   state = conversation.poll();
+  if (continuous) {
+    assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::listening);
+    assert(voice_status.back() == K151VoiceStatus::listening && mic_opens == 3 && mic_open);
+    assert(!amp_open && stop_timer_active && calls == 3 && plays == 1);
+    display_press();
+    assert(conversation.poll().phase == Phase::stopped && !mic_open && !board_bus_registered);
+    return;
+  }
   assert(mic_opens == 3 && plays == 1 && !pending_pcm && !mic_open && !amp_open);
   if (scenario == "bootstrap_conversation_unverified_release") {
     assert(state.phase == Phase::fault && !conversation.shutdown() && board_bus_registered);
     std::_Exit(0); // The real owner task and borrowed board live until reset.
   }
-  assert(state.phase == Phase::trial_complete && state.voice == NativeVoiceStep::trial_standby);
+  assert(state.phase == Phase::showing_trial_result && state.voice == NativeVoiceStep::trial_standby);
+  const std::vector expected{K151VoiceStatus::connecting, K151VoiceStatus::listening,
+      K151VoiceStatus::question, K151VoiceStatus::processing, K151VoiceStatus::playing,
+      K151VoiceStatus::returning, K151VoiceStatus::trial_finished};
+  assert(voice_status == expected);
+  assert(board_bus_registered && lvgl_on && !stop_timer_active && network_stops == 1);
+  now_us += 2'999'000;
+  assert(conversation.poll().phase == Phase::showing_trial_result && board_bus_registered);
+  now_us += 1'000;
+  assert(conversation.poll().phase == Phase::trial_complete);
   assert(!board_bus_registered && !lvgl_on && !stop_timer_active && !request(true, true));
   assert(conversation.poll().phase == Phase::trial_complete && calls == 3 && nvs_commits == 2);
 }
