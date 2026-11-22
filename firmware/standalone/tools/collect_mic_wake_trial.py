@@ -14,6 +14,21 @@ WAKE_ONLY_CONTROL_SCOPE = "ONE_WAKE_ONLY_CONTROL_AND_OTA1_RESTORE"
 QUESTION_ONLY_SCOPE = "ONE_QUESTION_ONLY_TRIAL_AND_OTA1_RESTORE"
 QUESTION_PROTOCOL = "MIC_QUESTION_TRIAL_V1"
 QUESTION_ONLY_PROTOCOL = "MIC_QUESTION_ONLY_TRIAL_V1"
+SILENT_TX_SCOPE = "ONE_SILENT_TX_PROBE_AND_OTA1_RESTORE"
+SILENT_TX_PROTOCOL = "K151_SILENT_TX_V1"
+SILENT_TX_RESULTS = {
+    "denied",
+    "stopped",
+    "channel_failed",
+    "preload_failed",
+    "callback_failed",
+    "enable_failed",
+    "timeout",
+    "invalid_event",
+    "clock_fault",
+    "cleanup_failed",
+    "two_descriptors_observed",
+}
 WIRE_LIMIT = 512
 QUESTION_BEFORE_CUE = {"not_run", "memory_denied", "prepare_failed", "open_failed", "quiet_timeout"}
 QUESTION_AFTER_CUE = {"no_endpoint", "endpoint"}
@@ -56,6 +71,19 @@ def validate_question_report(record, *, cue_seen, wake=None):
     return record
 
 
+def validate_silent_tx_report(record):
+    result = record.get("result")
+    if (
+        set(record) != {"tx_dma_probe", "result", "operating_admission"}
+        or record.get("tx_dma_probe") != SILENT_TX_PROTOCOL
+        or record.get("operating_admission") is not False
+        or not isinstance(result, str)
+        or result not in SILENT_TX_RESULTS
+    ):
+        raise ValueError("Invalid silent TX result")
+    return record
+
+
 def receive_once(
     port,
     announce,
@@ -63,15 +91,18 @@ def receive_once(
     announce_question=None,
     wake_only_control=False,
     question_only=False,
+    silent_tx=False,
     before_start=lambda: None,
     clock=time.monotonic,
 ):
     question_mode = announce_question is not None
     if (wake_only_control or question_only) and not question_mode:
         raise ValueError("Trial requires a question-phase cue")
-    if wake_only_control and question_only:
+    if sum((wake_only_control, question_only, silent_tx)) > 1 or (silent_tx and question_mode):
         raise ValueError("Select a single trial mode")
-    if question_only:
+    if silent_tx:
+        challenge = "WAIT_SILENT_TX_LOCAL_START"
+    elif question_only:
         challenge = "WAIT_QUESTION_ONLY_START"
         question_cue = "QUESTION_ONLY_NOW"
     elif wake_only_control:
@@ -116,6 +147,7 @@ def receive_once(
                 "WAIT_QUESTION_LOCAL_START",
                 "WAIT_WAKE_ONLY_CONTROL",
                 "WAIT_QUESTION_ONLY_START",
+                "WAIT_SILENT_TX_LOCAL_START",
             ):
                 nonce = record.get("nonce")
                 if (
@@ -144,6 +176,7 @@ def receive_once(
                 if (
                     not started
                     or question_only
+                    or silent_tx
                     or listening
                     or report is not None
                     or set(record) != {"mic_trial", "operating_admission"}
@@ -167,8 +200,12 @@ def receive_once(
                     raise ValueError("Unexpected question marker")
                 question_cued = True
                 announce_question()
+            elif "tx_dma_probe" in record:
+                if not silent_tx or not started or report is not None:
+                    raise ValueError("Unexpected or repeated silent TX result")
+                report = validate_silent_tx_report(record)
             elif "mic_wake_trial" in record:
-                if question_only or not started or report is not None:
+                if silent_tx or question_only or not started or report is not None:
                     raise ValueError("Unexpected or repeated trial result")
                 report = parse_mic_wake_trial_report(record)
                 if report["result"] in {"detected", "not_detected"} and not listening:
@@ -205,8 +242,10 @@ def receive_once(
                 pass
 
 
-def verified_port(directory, *, question=False, wake_only_control=False, question_only=False):
-    if sum((question, wake_only_control, question_only)) > 1:
+def verified_port(
+    directory, *, question=False, wake_only_control=False, question_only=False, silent_tx=False
+):
+    if sum((question, wake_only_control, question_only, silent_tx)) > 1:
         raise ValueError("Select a single trial mode")
 
     def record(name):
@@ -218,7 +257,14 @@ def verified_port(directory, *, question=False, wake_only_control=False, questio
     digest = manifest["image_sha256"]
     port = manifest["port"]
     protocol = QUESTION_ONLY_PROTOCOL if question_only else QUESTION_PROTOCOL
-    if question_only:
+    if silent_tx:
+        scope = SILENT_TX_SCOPE
+        protocol = SILENT_TX_PROTOCOL
+        expected_kind = "REVIEW_ONLY_SILENT_TX_PROBE_V1"
+        review_id = directory.name
+        if any(item.get("review_id") != review_id for item in (manifest, approved, installed)):
+            raise ValueError("Silent TX approval and installation must refer to this review")
+    elif question_only:
         scope = QUESTION_ONLY_SCOPE
         expected_kind = "REVIEW_ONLY_QUESTION_ONLY_TRIAL_V1"
     elif wake_only_control:
@@ -273,6 +319,7 @@ def main():
     mode.add_argument("--question", action="store_true")
     mode.add_argument("--wake-only-control", action="store_true")
     mode.add_argument("--question-only", action="store_true")
+    mode.add_argument("--silent-tx", action="store_true")
     args = parser.parse_args()
     try:
         port_name, digest = verified_port(
@@ -280,6 +327,7 @@ def main():
             question=args.question,
             wake_only_control=args.wake_only_control,
             question_only=args.question_only,
+            silent_tx=args.silent_tx,
         )
         intent = args.review_dir / "mic-receive-intent.json"
         if intent.exists():
@@ -310,14 +358,16 @@ def main():
                 ),
                 wake_only_control=args.wake_only_control,
                 question_only=args.question_only,
+                silent_tx=args.silent_tx,
             )
         finally:
             port.close()
-        with (args.review_dir / "mic-result.json").open("x", encoding="utf-8") as file:
+        result_file = "tx-dma-result.json" if args.silent_tx else "mic-result.json"
+        with (args.review_dir / result_file).open("x", encoding="utf-8") as file:
             json.dump(report, file)
         print(json.dumps(report))
     except (OSError, ValueError, KeyError, TypeError, AttributeError, KeyboardInterrupt):
-        print("Microphone trial stopped or denied. Check the reviewed restore procedure.")
+        print("Diagnostic stopped or denied. Check the reviewed restore procedure.")
         return 1
     return 0
 
