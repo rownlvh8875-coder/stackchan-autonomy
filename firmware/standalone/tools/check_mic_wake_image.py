@@ -4,22 +4,50 @@ import argparse
 import json
 from pathlib import Path
 
+import check_resource_bench
 from check_board_probe import validate_slot
 from check_idf_build import validate
-from check_resource_bench import inspect_model_image
-from esp_app_image import SLOT_OFFSET, bind_source_head, validate_source_head
+from esp_app_image import SLOT_OFFSET, bind_source_head, inspect_envelope, validate_source_head
 
 
 def inspect_image(
-    app: bytes, elf_sha256: str, partition_csv: str, *, question=False, wake_only_control=False
+    app: bytes,
+    elf_sha256: str,
+    partition_csv: str,
+    *,
+    question=False,
+    wake_only_control=False,
+    question_only=False,
 ) -> dict:
-    if question and wake_only_control:
+    if sum((question, wake_only_control, question_only)) > 1:
         raise ValueError("Select a single trial image")
+    if question_only:
+        envelope, _ = inspect_envelope(app, elf_sha256, b"k151_question_only")
+        if (
+            check_resource_bench.PACK_PREFIX in app
+            or b"LISTEN_NOW\0" in app
+            or b"MIC_WAKE_TRIAL_V" in app
+            or b"QUESTION_ONLY_NOW\0" not in app
+            or b"MIC_QUESTION_ONLY_TRIAL_V1\0" not in app
+        ):
+            raise ValueError("Question-only app markers or absence of WakeNet rejected")
+        return {
+            **envelope,
+            **validate_slot(partition_csv, SLOT_OFFSET, envelope["erase_span_bytes"]),
+            "kind": "RECEIVE_ONLY_QUESTION_ONLY_NOT_OPERATIONAL",
+            "local_nonce_start_required": True,
+            "wake_model_bundled": False,
+            "usb_exports_pcm": False,
+            "question_capture_deadline_ms": 8000,
+            "question_initial_quiet_ms": 500,
+            "question_max_frames_20ms": 400,
+            "combined_start_window_ms": 10000,
+        }
     if wake_only_control:
         project = b"k151_wake_only_control"
     else:
         project = b"k151_mic_question_trial" if question else b"k151_mic_wake_trial"
-    result = inspect_model_image(app, elf_sha256, project)
+    result = check_resource_bench.inspect_model_image(app, elf_sha256, project)
     manifest = {
         **result,
         **validate_slot(partition_csv, SLOT_OFFSET, result["erase_span_bytes"]),
@@ -57,6 +85,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--question", action="store_true")
     mode.add_argument("--wake-only-control", action="store_true")
+    mode.add_argument("--question-only", action="store_true")
     args = parser.parse_args()
     validate_source_head(args.source_head)
     build = validate(args.elf, args.bin, args.idf_head)
@@ -66,6 +95,7 @@ def main():
         args.partition_csv.read_text(encoding="utf-8"),
         question=args.question,
         wake_only_control=args.wake_only_control,
+        question_only=args.question_only,
     )
     result.update(
         idf_commit=build["idf_commit"],

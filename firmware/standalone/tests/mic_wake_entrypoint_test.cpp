@@ -77,6 +77,24 @@ int xTaskCreate(void (*entry)(void*), const char*, unsigned, void* arg, unsigned
 void vTaskDelete(void*) {}
 void vTaskDelay(unsigned) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
 
+#ifdef STACKCHAN_K151_QUESTION_ONLY
+K151QuestionTrialDiagnostic stackchan::standalone::run_k151_question_trial(
+    const std::atomic_bool& owner, const std::atomic_bool& stop,
+    const K151MicOnlyEvidence& evidence, void (*cue)(), K151QuestionTrialMode mode) {
+  assert(owner.load() && !stop.load() && evidence.verified() && cue);
+  assert(++sessions == 1 && mode == K151QuestionTrialMode::standard);
+  if (scenario == "quiet_timeout") return {K151QuestionTrialResult::quiet_timeout};
+  cue();
+  if (scenario == "stop_during") {
+    listening = true;
+    for (int i = 0; !stop.load() && i < 500; ++i) vTaskDelay(1);
+    assert(stop.load());
+    return {K151QuestionTrialResult::stopped};
+  }
+  assert(scenario == "detect");
+  return {K151QuestionTrialResult::endpoint};
+}
+#else
 K151MicWakeTrialResult K151MicWakeTrial::run_embedded(
     const std::atomic_bool& owner, const std::atomic_bool& stop,
     const K151MicOnlyEvidence& evidence, std::span<const uint8_t> pack) {
@@ -135,6 +153,8 @@ size_t stackchan::standalone::format_k151_mic_wake_report(
       "\"frames_read\":4,\"all_zero_frames\":0,"
       "\"full_scale_samples\":0}\n");
 }
+
+#endif
 
 extern "C" void app_main();
 int main(int argc, char** argv) {

@@ -1,0 +1,13 @@
+# Receive-only question diagnostic. Generated bootloader and table are build inputs only.
+cmake_minimum_required(VERSION 3.16)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(COMPONENTS main)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(k151_question_only)
+idf_build_get_property(trial_components BUILD_COMPONENTS)
+foreach(forbidden nvs_flash esp_wifi esp_netif esp_http_client esp_tls espressif__esp-sr esp-sr)
+    if(forbidden IN_LIST trial_components)
+        message(FATAL_ERROR "Question-only trial must not link ${forbidden}")
+    endif()
+endforeach()

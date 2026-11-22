@@ -50,7 +50,12 @@ bool regress_next_trial_clock=false;
 BenchGate question_gate{1, 1};
 constexpr std::string_view question_prefix="mic_only_trial_question_";
 bool question_trial() { return mode.starts_with(question_prefix); }
-std::string_view question_case() { return std::string_view(mode).substr(question_prefix.size()); }
+bool direct_question() { return mode.starts_with("mic_only_trial_question_direct_"); }
+std::string_view question_case() {
+  auto name = std::string_view(mode).substr(question_prefix.size());
+  if (direct_question()) name.remove_prefix(std::string_view("direct_").size());
+  return name;
+}
 bool question_control() { return question_case().starts_with("control_"); }
 bool question_with_gate() {
   return (question_control() && question_case()!="control_local_limit") ||
@@ -60,8 +65,10 @@ int question_reads=0, question_cues=0, question_reads_at_cue=0;
 std::array<int16_t, QuestionCapture::kMaxSamples> question_pcm{};
 bool question_allocated=false, question_freed=false;
 void announce_question() {
-  assert(trial_model_drops==1 && question_allocated && !question_freed);
-  assert(bus_created==2 && bus.deletes==1 && channels_created==2 && rx.deletes==1);
+  const int released_wake_channels = direct_question() ? 0 : 1;
+  assert(trial_model_drops == released_wake_channels && question_allocated && !question_freed);
+  assert(bus_created == released_wake_channels + 1 && bus.deletes == released_wake_channels);
+  assert(channels_created == released_wake_channels + 1 && rx.deletes == released_wake_channels);
   assert(rx.enabled && reset_writes==1 && output_latch==0xa3);
   ++question_cues;
   question_reads_at_cue=question_reads;
@@ -198,7 +205,8 @@ extern "C" int64_t esp_timer_get_time() {
 extern "C" void* heap_caps_malloc(size_t size,uint32_t caps) {
   assert(question_trial() && size==question_pcm.size()*sizeof(int16_t));
   assert(caps==(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  assert(trial_model_drops==1 && bus_created==1 && !bus.alive && !rx.alive);
+  if (direct_question()) assert(trial_model_drops == 0 && bus_created == 0 && channels_created == 0);
+  else assert(trial_model_drops == 1 && bus_created == 1 && !bus.alive && !rx.alive);
   assert(!question_allocated);
   question_allocated=true;
   if (mode=="mic_only_trial_question_no_memory") return nullptr;
@@ -213,7 +221,7 @@ extern "C" void heap_caps_free(void* pcm) {
   question_freed=true;
   const auto test=question_case();
   if (test=="endpoint" || test=="release_fail" || test=="tail_then_question" ||
-      test=="revoke" || test=="short" || test=="frame_cap") {
+      test=="revoke" || test=="short" || test=="frame_cap" || test=="stop_after_speech") {
     const auto samples=QuestionCapture::kFrame*
         static_cast<size_t>((question_reads-question_reads_at_cue)/2);
     zero(std::span(question_pcm).first(samples));
@@ -359,7 +367,7 @@ extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
 extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* info){assert(h->alive);if(mode=="info_fail" || (mode=="release_rx_info" && h==&rx))return ESP_FAIL;info->is_enabled=h->enabled;info->pair_chan=mode=="mic_only_peer"?&tx:nullptr;return 0;}
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
-  if(channels_created==2) {
+  if(channels_created == (direct_question() ? 1 : 2)) {
     assert(question_trial());
     const auto test=question_case();
     ++question_reads;
@@ -377,6 +385,7 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
       if (question_gate.stopped()) local_stop=true;
     }
     if (!before_cue && since_cue==9 && test=="revoke") local_owner=false;
+    if (!before_cue && since_cue==9 && test=="stop_after_speech") local_stop=true;
     if (!before_cue && since_cue==9 && test=="clock") trial_time_us=-1;
     if (before_cue && question_reads==9 && test=="handoff_stop") local_stop=true;
     const bool short_read=(before_cue && question_reads==9 && test=="handoff_short") ||
@@ -394,7 +403,8 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
                     : test=="wall" || test=="frame_cap" ||
                       (test=="control_endpoint" && since_cue>=93 && since_cue<=100) ||
                       (!question_control() && test!="standard_gate_stop" &&
-                       test!="wake_tail" && test!="interrupted_quiet" && since_cue<=8));
+                       test!="wake_tail" && test!="interrupted_quiet" && test!="silence" &&
+                       since_cue<=8));
     for(size_t i=0;i<*bytes/4;++i) {
       pcm[2*i]=voice?(i%2==0?1800:-1800):0;
       pcm[2*i+1]=900;
@@ -572,6 +582,34 @@ int main(int argc,char** argv) {
       assert(size!=0 && json[size-1]=='\n' && json[size]=='\0');
       std::printf("%s", json.data());
     }
+    return 0;
+  }
+  if (direct_question()) {
+    using Result = K151QuestionTrialResult;
+    const auto test = question_case();
+    local_stop = test == "stop_before";
+    const auto question = run_k151_question_trial(
+        local_owner, local_stop, {test != "deny", true}, announce_question);
+    assert(trial_model_drops == 0 && trial_chunks == 0 && trial_resets == 0 && heap_checks == 0);
+    assert(!question.codec_cleanup_unverified && tx.deletes == 0 && legacy_calls == 0);
+    if (test == "deny" || test == "stop_before") {
+      assert(question.result == (test == "deny" ? Result::prepare_failed : Result::stopped));
+      assert(question_cues == 0 && question_reads == 0 && !question_allocated && bus_created == 0);
+    } else {
+      assert(question_freed && bus_created == 1 && bus.deletes == 1 && rx.deletes == 1);
+      assert(question_cues == 1 && question_reads_at_cue == 50);
+      const auto after_cue = question_reads - question_reads_at_cue;
+      if (test == "endpoint") {
+        assert(question.result == Result::endpoint && after_cue == 58);
+      } else if (test == "silence") {
+        assert(question.result == Result::no_endpoint && question_reads == 800);
+        assert(std::ranges::all_of(question_pcm, [](int16_t sample) { return sample == 12345; }));
+      } else {
+        assert(test == "stop_after_speech" && local_stop && question.result == Result::stopped);
+        assert(after_cue == 9);
+      }
+    }
+    std::puts("question-only capture verified");
     return 0;
   }
   if(question_trial()) {

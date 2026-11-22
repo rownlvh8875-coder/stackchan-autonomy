@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "k151_mic_only_evidence.hpp"
+#include "k151_question_trial.hpp"
 #include "native_wake_input.hpp"
 #include <atomic>
 #include <memory>
@@ -13,19 +13,6 @@ namespace stackchan::standalone {
 enum class K151MicWakeTrialResult { denied, stopped, not_detected, detected, fault, memory_denied };
 inline constexpr uint32_t kK151MicWakeTrialFrameLimit = 500;
 inline constexpr size_t kK151MicWakeReportBytes = 384;
-inline constexpr size_t kK151WakeOnlyObservationFrames = 75; // 1.5s of 20ms PCM frames.
-
-enum class K151QuestionTrialMode { standard, wake_only_control };
-
-enum class K151QuestionTrialResult {
-  not_run, stopped, memory_denied, prepare_failed, open_failed, clock_fault,
-  read_failed, no_endpoint, endpoint, release_failed, quiet_timeout,
-};
-
-struct K151QuestionTrialDiagnostic {
-  K151QuestionTrialResult result = K151QuestionTrialResult::not_run;
-  bool codec_cleanup_unverified = false;
-};
 
 struct K151MicWakeInputCounts {
   uint32_t frames_read = 0;

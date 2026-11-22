@@ -314,3 +314,92 @@ def test_open_waits_for_port_to_return_without_toggling_control_lines(receiver):
     waits = []
     port = receiver.open_port(SerialModule, "COM3", clock=lambda: 0, wait=waits.append)
     assert port.port == "COM3" and SerialModule.opened == 2 and len(waits) == 1
+
+
+ONLY_WAIT = {**WAIT, "mic_trial": "WAIT_QUESTION_ONLY_START"}
+ONLY_CUE = {**QUESTION_CUE, "mic_trial": "QUESTION_ONLY_NOW"}
+ONLY_REPORT = {**QUESTION, "mic_question_trial": "MIC_QUESTION_ONLY_TRIAL_V1"}
+
+
+@pytest.mark.parametrize("outcome", ["endpoint", "no_endpoint", "stopped"])
+def test_question_only_collects_no_wake_record(receiver, outcome):
+    report = {**ONLY_REPORT, "result": outcome}
+    port = FakeSerial([ONLY_WAIT, ONLY_CUE, report, HOLD])
+    cues = []
+    assert (
+        receiver.receive_once(
+            port,
+            lambda: pytest.fail("Question-only trial has no wake cue"),
+            announce_question=lambda: cues.append("question"),
+            question_only=True,
+        )
+        == report
+    )
+    assert cues == ["question"]
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        [QUESTION_CUE, ONLY_REPORT],
+        [ONLY_CUE, WAKE_V2, ONLY_REPORT],
+        [ONLY_REPORT],
+        [ONLY_CUE, {**ONLY_REPORT, "raw_pcm": [0]}],
+        [ONLY_CUE, QUESTION],
+        [ONLY_CUE, {**ONLY_REPORT, "result": "not_run"}],
+    ],
+)
+def test_question_only_rejects_cross_mode_or_invalid_data(receiver, tail):
+    port = FakeSerial([ONLY_WAIT, *tail, HOLD])
+    with pytest.raises(ValueError):
+        receiver.receive_once(
+            port, lambda: None, announce_question=lambda: None, question_only=True
+        )
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n", b"STOP\n"]
+
+
+def test_question_only_scope_is_separate(receiver, tmp_path):
+    sha = "a" * 64
+    manifest = {
+        "port": "COM3",
+        "image_sha256": sha,
+        "kind": "REVIEW_ONLY_QUESTION_ONLY_TRIAL_V1",
+        "scope": "ONE_QUESTION_ONLY_TRIAL_AND_OTA1_RESTORE",
+        "expected_protocol": "MIC_QUESTION_ONLY_TRIAL_V1",
+    }
+    (tmp_path / "review-manifest.json").write_text(json.dumps(manifest))
+    (tmp_path / "install-verified.json").write_text(
+        json.dumps(
+            {
+                "port": "COM3",
+                "offset": 0x510000,
+                "independent_verify_passed": True,
+                "image_sha256": sha,
+            }
+        )
+    )
+    approval = tmp_path / "approval.json"
+    approval.write_text(
+        json.dumps(
+            {
+                "approved": True,
+                "image_sha256": sha,
+                "scope": receiver.QUESTION_SCOPE,
+            }
+        )
+    )
+    with pytest.raises(ValueError):
+        receiver.verified_port(tmp_path, question_only=True)
+    approval.write_text(
+        json.dumps(
+            {
+                "approved": True,
+                "image_sha256": sha,
+                "scope": manifest["scope"],
+            }
+        )
+    )
+    assert receiver.verified_port(tmp_path, question_only=True) == ("COM3", sha)
+    with pytest.raises(ValueError):
+        receiver.verified_port(tmp_path, question=True)

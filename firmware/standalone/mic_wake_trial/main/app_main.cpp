@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include "bench_gate.hpp"
 #include "board_evidence.hpp"
+#ifdef STACKCHAN_K151_QUESTION_ONLY
+#include "k151_question_trial.hpp"
+#else
 #include "k151_mic_wake_trial.hpp"
+#endif
 #include <driver/usb_serial_jtag.h>
 #include <esp_chip_info.h>
 #include <esp_ota_ops.h>
@@ -13,27 +17,40 @@
 #include <atomic>
 #include <cstdio>
 
+#ifndef STACKCHAN_K151_QUESTION_ONLY
 namespace stackchan::standalone {
 std::span<const uint8_t> linked_mic_trial_model();
 }
+#endif
 
 namespace {
 using namespace stackchan::standalone;
 std::atomic_bool owner{false}, stop{false}, reader_done{false};
 
-#if defined(STACKCHAN_K151_WAKE_ONLY_CONTROL) || defined(STACKCHAN_K151_QUESTION_TRIAL)
-#ifdef STACKCHAN_K151_WAKE_ONLY_CONTROL
+#if defined(STACKCHAN_K151_QUESTION_ONLY)
+constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_QUESTION_ONLY_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_QUESTION_ONLY_START";
+constexpr char kQuestionCue[] = "QUESTION_ONLY_NOW";
+constexpr char kQuestionProtocol[] = "MIC_QUESTION_ONLY_TRIAL_V1";
+#elif defined(STACKCHAN_K151_WAKE_ONLY_CONTROL)
 constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_WAKE_ONLY_CONTROL_NOT_OPERATIONAL";
 constexpr char kChallengeMarker[] = "WAIT_WAKE_ONLY_CONTROL";
 constexpr char kQuestionCue[] = "QUIET_OBSERVATION_NOW";
 constexpr auto kQuestionMode = K151QuestionTrialMode::wake_only_control;
-#else
+constexpr char kQuestionProtocol[] = "MIC_QUESTION_TRIAL_V1";
+#elif defined(STACKCHAN_K151_QUESTION_TRIAL)
 constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_QUESTION_TRIAL_NOT_OPERATIONAL";
 constexpr char kChallengeMarker[] = "WAIT_QUESTION_LOCAL_START";
 constexpr char kQuestionCue[] = "QUESTION_NOW";
 constexpr auto kQuestionMode = K151QuestionTrialMode::standard;
+constexpr char kQuestionProtocol[] = "MIC_QUESTION_TRIAL_V1";
+#else
+constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_WAKE_TRIAL_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_LOCAL_START";
 #endif
 
+#if defined(STACKCHAN_K151_QUESTION_ONLY) || defined(STACKCHAN_K151_WAKE_ONLY_CONTROL) || \
+    defined(STACKCHAN_K151_QUESTION_TRIAL)
 void announce_question() {
   std::printf("{\"mic_trial\":\"%s\",\"operating_admission\":false}\n", kQuestionCue);
   (void)std::fflush(stdout);
@@ -55,15 +72,22 @@ const char* question_result_name(K151QuestionTrialResult result) {
   }
   return nullptr;
 }
-#else
-constexpr char kBootMarker[] = "K151_RECEIVE_ONLY_WAKE_TRIAL_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_LOCAL_START";
+
+void print_question_report(K151QuestionTrialDiagnostic question) {
+  if (const char* name = question_result_name(question.result)) {
+    std::printf("{\"mic_question_trial\":\"%s\",\"result\":\"%s\","
+                "\"codec_cleanup_unverified\":%s,\"operating_admission\":false}\n",
+                kQuestionProtocol, name, question.codec_cleanup_unverified ? "true" : "false");
+  }
+}
 #endif
 
+#ifndef STACKCHAN_K151_QUESTION_ONLY
 void announce_listening() {
   std::puts("{\"mic_trial\":\"LISTEN_NOW\",\"operating_admission\":false}");
   (void)std::fflush(stdout);
 }
+#endif
 
 void reader(void*) {
   const uint32_t nonce = esp_random();
@@ -126,6 +150,9 @@ extern "C" void app_main() {
     // This app has one I2S caller, using the port's exclusive RX allocation.
     // It still checks the two board chips live before opening any channel.
     const K151MicOnlyEvidence evidence{expected_location, true};
+#ifdef STACKCHAN_K151_QUESTION_ONLY
+    print_question_report(run_k151_question_trial(owner, stop, evidence, announce_question));
+#else
 #if defined(STACKCHAN_K151_WAKE_ONLY_CONTROL) || defined(STACKCHAN_K151_QUESTION_TRIAL)
     static K151MicWakeTrial trial{announce_listening, announce_question, kQuestionMode};
 #else
@@ -136,12 +163,8 @@ extern "C" void app_main() {
     if (format_k151_mic_wake_report(result, trial.diagnostic(), trial.take_input_counts(), report) != 0)
       std::fputs(report.data(), stdout);
 #if defined(STACKCHAN_K151_WAKE_ONLY_CONTROL) || defined(STACKCHAN_K151_QUESTION_TRIAL)
-    const auto question = trial.question_diagnostic();
-    if (const char* name = question_result_name(question.result)) {
-      std::printf("{\"mic_question_trial\":\"MIC_QUESTION_TRIAL_V1\",\"result\":\"%s\","
-                  "\"codec_cleanup_unverified\":%s,\"operating_admission\":false}\n",
-                  name, question.codec_cleanup_unverified ? "true" : "false");
-    }
+    print_question_report(trial.question_diagnostic());
+#endif
 #endif
   }
   hold();

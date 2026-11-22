@@ -82,3 +82,24 @@ def test_deny_other_app_or_invalid_pack(model_fixture, failure):
         app = image(model_fixture, address=0x3FC90000, project=PROJECT)
     with pytest.raises(ValueError):
         inspect_image(app, ELF_SHA, table)
+
+
+def test_question_only_image_has_own_identity_and_no_model(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    project = b"k151_question_only"
+    markers = b"QUESTION_ONLY_NOW\0MIC_QUESTION_ONLY_TRIAL_V1\0"
+    app = image(markers, project=project)
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV, question_only=True)
+    assert manifest["kind"] == "RECEIVE_ONLY_QUESTION_ONLY_NOT_OPERATIONAL"
+    assert manifest["wake_model_bundled"] is False
+    assert manifest["question_capture_deadline_ms"] == 8000
+    assert manifest["combined_start_window_ms"] == 10000
+    assert manifest["install_authorized"] is False
+    for unexpected in (model_fixture, b"LISTEN_NOW\0", b"MIC_WAKE_TRIAL_V4\0"):
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers + unexpected, project=project), ELF_SHA, SLOT_CSV, question_only=True
+            )
+    with pytest.raises(ValueError):
+        inspect_image(image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, question_only=True)

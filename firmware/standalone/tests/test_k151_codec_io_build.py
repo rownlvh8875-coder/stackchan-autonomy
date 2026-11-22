@@ -74,6 +74,7 @@ def _build_port(compiler, binary, app, *, embedded_trial=False):
         app / "k151_codec_port.cpp",
         app / "k151_bounded_i2s.cpp",
         app / "k151_mic_wake_trial.cpp",
+        app / "k151_question_trial.cpp",
     ]
     command = [
         compiler,
@@ -441,6 +442,20 @@ def test_question_after_verified_wake(port_binary, case, monkeypatch):
         }
 
 
+@pytest.mark.parametrize(
+    "case", ["endpoint", "silence", "stop_after_speech", "deny", "stop_before"]
+)
+def test_question_only_with_real_capture_and_mock_codec(port_binary, case):
+    attempt = subprocess.run(
+        [str(port_binary), "mic_only_trial_question_direct_" + case],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert attempt.returncode == 0, attempt.stderr
+    assert attempt.stdout.strip() == "question-only capture verified"
+
+
 @pytest.mark.parametrize("operation", ["read_reg", "write_reg"])
 def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
     """An actual one-byte truncation must fail the real-port AW88298 boundary."""
@@ -461,6 +476,8 @@ def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
         "k151_mic_wake_trial.cpp",
         "k151_mic_wake_memory.hpp",
         "k151_question_pcm.hpp",
+        "k151_question_trial.cpp",
+        "k151_question_trial.hpp",
         "k151_contract.hpp",
     ]:
         shutil.copyfile(BASE / "esp_app/main" / name, app / name)

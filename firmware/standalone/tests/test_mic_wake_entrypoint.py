@@ -25,7 +25,12 @@ def control_entrypoint(tmp_path_factory):
     return _build_entrypoint(tmp_path_factory, question=False, wake_only_control=True)
 
 
-def _build_entrypoint(tmp_path_factory, *, question, wake_only_control=False):
+@pytest.fixture(scope="module")
+def question_only_entrypoint(tmp_path_factory):
+    return _build_entrypoint(tmp_path_factory, question=False, question_only=True)
+
+
+def _build_entrypoint(tmp_path_factory, *, question, wake_only_control=False, question_only=False):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("C++20 compiler required")
@@ -34,6 +39,7 @@ def _build_entrypoint(tmp_path_factory, *, question, wake_only_control=False):
         [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pthread"]
         + (["-DSTACKCHAN_K151_QUESTION_TRIAL=1"] if question else [])
         + (["-DSTACKCHAN_K151_WAKE_ONLY_CONTROL=1"] if wake_only_control else [])
+        + (["-DSTACKCHAN_K151_QUESTION_ONLY=1"] if question_only else [])
         + [
             arg
             for include in (
@@ -146,3 +152,37 @@ def test_wake_only_control_entrypoint(control_entrypoint):
     ]
     assert events[-2]["mic_question_trial"] == "MIC_QUESTION_TRIAL_V1"
     assert events[-2]["result"] == "no_endpoint"
+
+
+@pytest.mark.parametrize(
+    "case, result, cue",
+    [
+        ("detect", "endpoint", True),
+        ("stop_during", "stopped", True),
+        ("quiet_timeout", "quiet_timeout", False),
+        ("stop_before", None, False),
+        ("bad_nonce", None, False),
+        ("slot", None, False),
+    ],
+)
+def test_question_only_starts_without_wakenet(question_only_entrypoint, case, result, cue):
+    done = subprocess.run(
+        [str(question_only_entrypoint), case], capture_output=True, text=True, timeout=8
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.startswith("K151_RECEIVE_ONLY_QUESTION_ONLY_NOT_OPERATIONAL\n")
+    events = [json.loads(line) for line in done.stdout.splitlines() if line.startswith("{")]
+    assert events[-1] == {"mic_trial": "HOLD_UNTIL_RESET", "operating_admission": False}
+    assert all("mic_wake_trial" not in event for event in events)
+    assert sum(event.get("mic_trial") == "QUESTION_ONLY_NOW" for event in events) == cue
+    assert all(event.get("mic_trial") != "LISTEN_NOW" for event in events)
+    if result is not None:
+        assert events[0]["mic_trial"] == "WAIT_QUESTION_ONLY_START"
+        assert events[-2] == {
+            "mic_question_trial": "MIC_QUESTION_ONLY_TRIAL_V1",
+            "result": result,
+            "codec_cleanup_unverified": False,
+            "operating_admission": False,
+        }
+    else:
+        assert all("mic_question_trial" not in event for event in events)

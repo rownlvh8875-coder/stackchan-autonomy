@@ -42,6 +42,38 @@ jobs:
             --bin firmware/standalone/esp_app/build/stackchan_standalone_hold.bin \
             --idf-head "$IDF_SHA" \
             --out firmware/standalone/esp_app/validation-manifest.json
+      - name: Build question-only diagnostic for review (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          TRIAL=firmware/standalone/question_only_trial
+          OUT="$TRIAL/build"
+          idf.py -C "$TRIAL" -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
+          idf.py -C "$TRIAL" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_mic_wake_image.py --question-only \
+            --elf "$OUT/k151_question_only.elf" --bin "$OUT/k151_question_only.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
+          mkdir -p "$OUT/review-notices"
+          cp "$IDF_PATH/LICENSE" "$OUT/review-notices/ESP-IDF-LICENSE"
+          cp firmware/standalone/tests/sdk_esp_codec_dev_1_6_2/LICENSE "$OUT/review-notices/ESP-CODEC-DEV-LICENSE"
+      - name: Publish question-only diagnostic for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-question-only-trial-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/question_only_trial/build/k151_question_only.bin
+            firmware/standalone/question_only_trial/build/k151_question_only.elf
+            firmware/standalone/question_only_trial/build/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/question_only_trial/build/validation-manifest.json
+            firmware/standalone/question_only_trial/build/review-notices/
+          if-no-files-found: error
+          retention-days: 14
       - name: Build separate silent resource bench (NO INSTALL)
         shell: bash
         run: |
