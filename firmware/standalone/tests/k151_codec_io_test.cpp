@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <esp_heap_caps.h>
+#include <freertos/task.h>
 #include <limits>
 #include <memory>
 #include <string>
@@ -36,6 +37,7 @@ Dev devices[2];
 int created=0, deleted=0, data_deletes=0, calls=0, legacy_calls=0, timer_calls=0, gains=0, formats=0;
 int controls_created=0, controls_deleted=0;
 int bus_created=0, channels_created=0, tdm_inits=0;
+int tx_callbacks_registered=0;
 std::string phase;
 bool base_open=true;
 bool mic_only() { return mode.starts_with("mic_only_"); }
@@ -338,6 +340,7 @@ extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev,const uint8
 }
 extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_t* t,i2s_chan_handle_t* r){
   assert(c->dma_frame_num==240 && r);assert((t==nullptr)==mic_only());
+  assert(c->dma_desc_num == 6 && c->auto_clear_after_cb == (t != nullptr));
   if(mic_only())assert(reset_read_back && output_latch==0xa3 && !pmic.open && !expander.open);
   if(channels_created) {
     assert(question_trial() && !rx.alive && rx.deletes==1);
@@ -348,6 +351,17 @@ extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_
   *r=&rx;return 0;
 }
 extern "C" esp_err_t i2s_channel_init_std_mode(i2s_chan_handle_t,const i2s_std_config_t*){assert(!mic_only());return 0;}
+extern "C" esp_err_t i2s_channel_register_event_callback(i2s_chan_handle_t h,
+    const i2s_event_callbacks_t* callbacks, void* data) {
+  assert(!mic_only() && h == &tx && h->alive && !h->enabled);
+  assert(callbacks && callbacks->on_sent && data);
+  ++tx_callbacks_registered;
+  if (mode == "tx_callback_failed") return ESP_FAIL;
+  return ESP_OK;
+}
+void vTaskDelay(unsigned) {
+  assert(false && "HOLD must never wait for a speaker transfer");
+}
 extern "C" esp_err_t i2s_channel_init_tdm_mode(i2s_chan_handle_t h,const i2s_tdm_config_t* c){
   ++tdm_inits;
   assert(h==&rx && c->clk_cfg.sample_rate_hz==24000 && c->gpio_cfg.dout==I2S_GPIO_UNUSED);
@@ -944,12 +958,20 @@ int main(int argc,char** argv) {
   if(mode=="denied") {
     assert(!port.prepare(false,true,true));assert(!port.capture_mono_24k(pcm));zero(pcm);assert(created==0);return 0;
   }
+  if (mode == "tx_callback_failed") {
+    assert(!port.prepare(true, true, true) && port.faulted());
+    assert(tx_callbacks_registered == 1 && created == 0 && tdm_inits == 0);
+    assert(!port.shutdown() && !tx.alive && !rx.alive && !bus.alive);
+    assert(tx.deletes == 1 && rx.deletes == 1 && bus.deletes == 1);
+    return 0;
+  }
   if(mode.starts_with("ctrl_") && mode.find("_init_")!=std::string::npos) {
     assert(!port.prepare(true,true,true));assert(port.faulted() && !port.prepared());
     assert(!port.capture_mono_24k(pcm));zero(pcm);assert(calls==0);
     assert(!port.shutdown());assert(controls_deleted==controls_created);return 0;
   }
   assert(port.prepare(true,true,true));
+  assert(tx_callbacks_registered == 1);
   const auto* api=devices[1].data;
   if(mode.starts_with("release_")) {
     const bool bus_error=mode.starts_with("release_bus_");

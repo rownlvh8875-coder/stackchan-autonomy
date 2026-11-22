@@ -41,8 +41,12 @@ class K151PcmSpeakerSink final : public VoiceSpeakerPort {
           if (now_us < 0) return std::nullopt;
           return static_cast<uint64_t>(now_us / 1000);
         });
-    if (!finished || !owner_.load()) return {};
-    return {true, *finished};
+    if (!finished || !codec_.wait_for_tx_tail(owner_, consent_, stop_)) return {};
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us < 0 || !owner_.load() || !consent_.load() || stop_.load()) return {};
+    const auto observed_ms = static_cast<uint64_t>(now_us / 1000);
+    return observed_ms >= *finished ? VoicePlaybackResult{true, observed_ms} :
+                                      VoicePlaybackResult{};
   }
 
  private:

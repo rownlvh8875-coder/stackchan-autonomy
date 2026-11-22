@@ -14,8 +14,12 @@ constexpr int I2S_DATA_BIT_WIDTH_16BIT=16, I2S_SLOT_MODE_STEREO=2, I2S_STD_SLOT_
 constexpr int I2S_SLOT_BIT_WIDTH_16BIT=16;
 using i2s_tdm_slot_mask_t=int;
 constexpr int I2S_TDM_SLOT0=1, I2S_TDM_SLOT1=2, I2S_TDM_SLOT2=4, I2S_TDM_SLOT3=8;
-struct i2s_chan_config_t { int id,role; uint32_t dma_desc_num,dma_frame_num; };
-#define I2S_CHANNEL_DEFAULT_CONFIG(n,r) {n,r,6,240}
+struct i2s_chan_config_t {
+  int id,role;
+  uint32_t dma_desc_num,dma_frame_num;
+  bool auto_clear_after_cb;
+};
+#define I2S_CHANNEL_DEFAULT_CONFIG(n,r) {n,r,6,240,false}
 struct i2s_clk_config { uint32_t sample_rate_hz; int bclk_div; };
 struct i2s_slot_config {
   int data_bit_width,slot_mode,slot_mask;
@@ -23,7 +27,7 @@ struct i2s_slot_config {
   bool left_align=false;
 };
 struct i2s_gpio_config { int mclk,bclk,ws,dout,din; };
-struct i2s_chan_info_t { bool is_enabled; i2s_chan_handle_t pair_chan; };
+struct i2s_chan_info_t { bool is_enabled; i2s_chan_handle_t pair_chan; uint32_t total_dma_buf_size; };
 extern "C" {
 esp_err_t i2s_new_channel(const i2s_chan_config_t*,i2s_chan_handle_t*,i2s_chan_handle_t*);
 esp_err_t i2s_channel_enable(i2s_chan_handle_t);

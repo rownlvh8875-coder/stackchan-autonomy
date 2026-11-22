@@ -156,6 +156,7 @@ def _build_port(compiler, binary, app, *, embedded_trial=False):
         "null_read",
         "null_write",
         "info_fail",
+        "tx_callback_failed",
         "ctrl_out_init_read",
         "ctrl_out_init_write",
         "ctrl_in_init_read",

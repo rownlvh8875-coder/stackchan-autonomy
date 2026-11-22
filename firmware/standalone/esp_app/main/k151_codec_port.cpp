@@ -9,18 +9,24 @@
 #include "k151_output_evidence.hpp"
 #include "board_evidence.hpp"
 #include "audio_wipe.hpp"
+#include "k151_dma_tx_tail.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <utility>
 #include <driver/i2c_master.h>
+#include <esp_attr.h>
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 namespace stackchan::standalone {
 namespace {
 constexpr char kTag[] = "SC_K151_AUDIO";
 constexpr size_t kMaxFrames = kPcmFramesPerTenMs; // 10ms of PCM, NOT a driver timeout bound.
+static_assert(kMaxFrames == DmaTxTail::kFramesPerDescriptor);
 static_assert(k151::kProbeAddresses[k151::index(k151::Device::mic_es7210)] ==
               (ES7210_CODEC_DEFAULT_ADDR >> 1));
 static_assert(k151::kProbeAddresses[k151::index(k151::Device::amp_aw88298)] ==
@@ -28,6 +34,17 @@ static_assert(k151::kProbeAddresses[k151::index(k151::Device::amp_aw88298)] ==
 constexpr int kLowVolume = 10;
 constexpr int kInputGain = 30;
 constexpr int kI2cPort = 1;
+
+// I2S0 has one TX owner. Keep ISR storage alive even if SDK teardown fails.
+DRAM_ATTR DmaTxTail tx_tail;
+std::atomic_flag tx_tail_owned = ATOMIC_FLAG_INIT;
+
+bool IRAM_ATTR observe_codec_tx_tail(i2s_chan_handle_t, i2s_event_data_t* event, void* user) {
+  auto& tail = *static_cast<DmaTxTail*>(user);
+  tail.on_sent(event ? event->dma_buf : nullptr, event ? event->size : 0);
+  return false;
+}
+
 bool disable_owned_channel(i2s_chan_handle_t channel) {
   i2s_chan_info_t info{};
   if (i2s_channel_get_info(channel, &info) != ESP_OK) {
@@ -41,6 +58,8 @@ bool disable_owned_channel(i2s_chan_handle_t channel) {
 } // namespace
 
 const char* K151CodecPort::compiled_link_marker() {
+  auto volatile prepare = &K151CodecPort::prepare;
+  (void)prepare;
   return "K151 ES7210/AW88298 24kHz guarded driver compiled; NOT STARTED";
 }
 
@@ -156,8 +175,9 @@ bool K151CodecPort::prepare_i2s() {
 
   prepare_stage_ = K151MicWakeStage::i2s_rx;
   i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-  chan.dma_desc_num = 6;
-  chan.dma_frame_num = 240;
+  chan.dma_desc_num = DmaTxTail::kDescriptorCount;
+  chan.dma_frame_num = DmaTxTail::kFramesPerDescriptor;
+  chan.auto_clear_after_cb = !microphone_only();
   if (!input_allowed() ||
       i2s_new_channel(&chan, microphone_only() ? nullptr : &tx_, &rx_) != ESP_OK)
     return false;
@@ -207,7 +227,13 @@ bool K151CodecPort::prepare_i2s_tx() {
   tx_cfg.gpio_cfg.ws = static_cast<gpio_num_t>(k151::kI2sWs);
   tx_cfg.gpio_cfg.dout = static_cast<gpio_num_t>(k151::kI2sDout);
   tx_cfg.gpio_cfg.din = I2S_GPIO_UNUSED;
-  return i2s_channel_init_std_mode(tx_, &tx_cfg) == ESP_OK;
+  if (i2s_channel_init_std_mode(tx_, &tx_cfg) != ESP_OK || tx_tail_owned.test_and_set())
+    return false;
+  i2s_event_callbacks_t callbacks{};
+  callbacks.on_sent = observe_codec_tx_tail;
+  tx_tail_registered_ = i2s_channel_register_event_callback(tx_, &callbacks, &tx_tail) == ESP_OK;
+  if (!tx_tail_registered_) tx_tail_owned.clear();
+  return tx_tail_registered_;
 }
 
 bool K151CodecPort::prepare_codecs() {
@@ -333,10 +359,10 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> mono) {
 
 bool K151CodecPort::playback_available() const {
   // Source-derived AW9523/AXP2101 sequence is not a measured K151 power-up.
-  // No real reset, mute verification or DMA-drain observer exists in this image.
+  // The DMA observer still needs physical reset, mute and codec-idle evidence.
   if (!kK151PhysicalOutputEnabledInHoldImage ||
       !kK151SafeDmaDrainDriverAvailable) return false;
-  return !microphone_only() && prepared();
+  return !microphone_only() && tx_tail_registered_ && prepared();
 }
 
 bool K151CodecPort::speaker_on_low_volume() {
@@ -354,6 +380,7 @@ bool K151CodecPort::speaker_on_low_volume() {
 }
 
 bool K151CodecPort::speaker_off() {
+  output_pending_ = false;
   if (!output_open_) return !out_control_.faulted();
   const int rc = esp_codec_dev_close(out_dev_);
   if (rc != 0 || !data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT) || !out_control_.healthy()) {
@@ -374,12 +401,43 @@ bool K151CodecPort::play_mono_24k(std::span<const int16_t> mono) {
                                      static_cast<int>(mono.size() * sizeof(int16_t)));
   wipe_pcm(chunk);
   if (rc != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT)) return fail();
+  output_pending_ = true;
   return true;
 }
 
+bool K151CodecPort::wait_for_tx_tail(const std::atomic_bool& owner,
+                                    const std::atomic_bool& consent,
+                                    const std::atomic_bool& stop) {
+  if (!tx_tail_registered_ || !output_open_ || !std::exchange(output_pending_, false))
+    return false;
+  const auto allowed = [&] {
+    return owner.load() && consent.load() && !stop.load() &&
+           prepared() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT);
+  };
+  const auto reject = [&] {
+    tx_tail.abandon();
+    return fail();
+  };
+  i2s_chan_info_t info{};
+  if (!allowed() || i2s_channel_get_info(tx_, &info) != ESP_OK || !info.is_enabled ||
+      info.total_dma_buf_size % DmaTxTail::kDescriptorCount != 0)
+    return reject();
+  const auto started = esp_timer_get_time();
+  if (!allowed() ||
+      !tx_tail.arm(info.total_dma_buf_size / DmaTxTail::kDescriptorCount, started))
+    return reject();
+
+  for (;;) {
+    if (!allowed()) return reject();
+    const auto result = tx_tail.poll(esp_timer_get_time);
+    if (result == DmaTxTail::Result::observed && allowed()) return true;
+    if (result != DmaTxTail::Result::waiting) return reject();
+    vTaskDelay(1);
+  }
+}
+
 bool K151CodecPort::drain_output_before_mute() {
-  // esp_codec_dev_write success is NOT independently verified amp/DMA drain.
-  // Do not substitute a fixed delay or a queue-accepted acknowledgement.
+  // The DMA rotation alone does not observe idle at the amplifier.
   return false;
 }
 
@@ -423,9 +481,17 @@ bool K151CodecPort::shutdown() {
     else rx_ = nullptr; // IDF rejects a running channel before freeing it.
   }
   if (tx_) {
+    if (tx_tail_registered_) tx_tail.abandon();
     if (!disable_owned_channel(tx_)) cleanup_ok = false;
     if (i2s_del_channel(tx_) != ESP_OK) cleanup_ok = false;
-    else tx_ = nullptr;
+    else {
+      tx_ = nullptr;
+      if (tx_tail_registered_) {
+        tx_tail.reset_after_release();
+        tx_tail_registered_ = false;
+        tx_tail_owned.clear();
+      }
+    }
   }
   if (board_device_ && !release_board_device()) cleanup_ok = false;
   if (i2c_bus_ && !board_device_) {

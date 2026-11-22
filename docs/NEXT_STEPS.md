@@ -1,5 +1,15 @@
 # Next steps
 
+## 2026-11-22 오프라인 후속 — 마지막 재생 쓰기 뒤 DMA 완료 관측
+
+K151 송신 어댑터에서 마지막 PCM 쓰기 뒤 실제 GDMA 완료
+콜백을 기다린다. DMA 버퍼 여섯 개를 각각 확인한 뒤 첫 버퍼의
+다음 완료까지 관측하고, 그 시점을 재생 sink의 결과로 사용한다.
+불일치·역행·100ms 만료·STOP은 실패 처리한다. 완료한 버퍼는
+고정 ESP-IDF 드라이버가 지운다. 앰프의 실제 idle과 물리 STOP은
+실물 검증 대상이며 운영 출력 HOLD는 유지한다.
+[고정 ESP-IDF의 송신 완료 콜백](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_driver_i2s/i2s_common.c#L773).
+
 ## 2026-11-22 오프라인 후속 — K151 운영 음성 포트 연결
 
 `K151VoiceRuntime`이 기존 모델 검증·마이크·질문 캡처·HTTPS·저음량

@@ -40,6 +40,8 @@ class K151CodecPort final {
   bool speaker_on_low_volume();
   bool speaker_off();
   bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms PCM; not wall-clock latency.
+  bool wait_for_tx_tail(const std::atomic_bool& owner, const std::atomic_bool& consent,
+                        const std::atomic_bool& stop);
   bool drain_output_before_mute(); // False until real DMA+codec drain telemetry.
   bool quiet();      // Both codecs; error latches fault
   bool shutdown();   // One release attempt/handle; retains failed I2S, fault stays.
@@ -90,6 +92,8 @@ class K151CodecPort final {
   bool fault_ = false;
   bool input_open_ = false;
   bool output_open_ = false;
+  bool tx_tail_registered_ = false;
+  bool output_pending_ = false;
   K151MicWakeStage prepare_stage_ = K151MicWakeStage::admission;
   bool cleanup_unverified_ = false;
 };
