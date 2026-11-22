@@ -23,6 +23,40 @@ _HEAP_NUMBERS = frozenset(
     {"internal_free_at_start", "internal_min", "psram_free_at_start", "psram_min"}
 )
 _HEAP_FIELDS = _HEAP_NUMBERS | {"heap_window", "operating_admission"}
+_MIC_CLEAN = frozenset({"detected", "not_detected"})
+_MIC_RESULTS = _MIC_CLEAN | {"denied", "stopped", "fault", "memory_denied"}
+_MIC_FIELDS = frozenset({"mic_wake_trial", "result", "operating_admission"})
+_MIC_COUNT_FIELDS = frozenset({"frames_read", "all_zero_frames", "full_scale_samples"})
+
+
+def parse_mic_wake_trial_report(record: object) -> dict:
+    """Validate the fixed per-trial record emitted by the microphone diagnostic."""
+    if (
+        not isinstance(record, dict)
+        or record.get("mic_wake_trial") != "MIC_WAKE_TRIAL_V1"
+        or record.get("operating_admission") is not False
+        or not isinstance(record.get("result"), str)
+        or record["result"] not in _MIC_RESULTS
+    ):
+        raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
+    clean = record["result"] in _MIC_CLEAN
+    fields = _MIC_FIELDS | _MIC_COUNT_FIELDS if clean else _MIC_FIELDS
+    if set(record) != fields:
+        raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
+    if clean:
+        frames, zeroes, full_scale = (
+            record["frames_read"],
+            record["all_zero_frames"],
+            record["full_scale_samples"],
+        )
+        if (
+            any(type(value) is not int for value in (frames, zeroes, full_scale))
+            or not 1 <= frames <= 500
+            or not 0 <= zeroes <= frames
+            or not 0 <= full_scale <= (frames - zeroes) * 240
+        ):
+            raise ValueError("INVALID_MIC_WAKE_TRIAL_REPORT")
+    return record.copy()
 
 
 class WakeBenchTrace:

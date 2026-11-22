@@ -198,6 +198,39 @@ def test_actual_port_fault_boundaries(port_binary, mode):
     assert result.returncode == 0, result.stderr
 
 
+def test_firmware_mic_report_matches_host_contract(port_binary, monkeypatch):
+    monkeypatch.syspath_prepend(str(BASE / "tools"))
+    from wake_bench_trace import parse_mic_wake_trial_report
+
+    command = subprocess.run(
+        [str(port_binary), "mic_report"], capture_output=True, text=True, timeout=10
+    )
+    assert command.returncode == 0, command.stderr
+    lines = command.stdout.splitlines()
+    assert len(lines) == 6
+    reports = [parse_mic_wake_trial_report(json.loads(line)) for line in lines]
+    assert [r["result"] for r in reports] == [
+        "detected",
+        "not_detected",
+        "stopped",
+        "fault",
+        "denied",
+        "memory_denied",
+    ]
+    assert all(r["operating_admission"] is False for r in reports)
+    assert [
+        (r["frames_read"], r["all_zero_frames"], r["full_scale_samples"]) for r in reports[:2]
+    ] == [(4, 1, 6), (4, 1, 6)]
+    assert all("frames_read" not in r for r in reports[2:])
+    for case, expected in (
+        ("mic_only_trial_input_counts", reports[0]),
+        ("mic_only_trial_stop_on_drop", reports[2]),
+    ):
+        trial = subprocess.run([str(port_binary), case], capture_output=True, text=True, timeout=10)
+        assert trial.returncode == 0, trial.stderr
+        assert parse_mic_wake_trial_report(json.loads(trial.stdout)) == expected
+
+
 @pytest.mark.parametrize("operation", ["read_reg", "write_reg"])
 def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
     """An actual one-byte truncation must fail the real-port AW88298 boundary."""

@@ -6,16 +6,24 @@
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <span>
 
 namespace stackchan::standalone {
 
 enum class K151MicWakeTrialResult { denied, stopped, not_detected, detected, fault, memory_denied };
+inline constexpr uint32_t kK151MicWakeTrialFrameLimit = 500;
 
 struct K151MicWakeInputCounts {
   uint32_t frames_read = 0;
   uint32_t all_zero_frames = 0;
   uint32_t full_scale_samples = 0;
 };
+
+// Fixed diagnostic JSON line. Returns zero and clears the first byte on
+// invalid input or truncation. The caller owns the output buffer.
+size_t format_k151_mic_wake_report(K151MicWakeTrialResult result,
+                                 std::optional<K151MicWakeInputCounts> counts,
+                                 std::span<char> output);
 
 // Dormant diagnostic, one synchronous run per instance across both entry points.
 // Keep the input buffer off small task stacks. STOP and ownership loss must latch

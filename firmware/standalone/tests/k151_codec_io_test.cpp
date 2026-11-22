@@ -6,6 +6,7 @@
 #include "native_wake_input.hpp"
 #include <algorithm>
 #include <cassert>
+#include <cstdio>
 #include <cstring>
 #include <esp_heap_caps.h>
 #include <limits>
@@ -268,6 +269,26 @@ extern "C" int audio_codec_delete_gpio_if(const audio_codec_gpio_if_t*){return 0
 extern "C" int audio_codec_delete_data_if(const audio_codec_data_if_t* h){assert(h==&base && deleted==created);++data_deletes;return 0;}
 int main(int argc,char** argv) {
   assert(argc==2);mode=argv[1];
+  if (mode=="mic_report") {
+    using Outcome = K151MicWakeTrialResult;
+    std::array<char, 256> json{};
+    const K151MicWakeInputCounts observed{4,1,6};
+    const K151MicWakeInputCounts impossible{4,3,241};
+    assert(format_k151_mic_wake_report(Outcome::detected, impossible, json)==0);
+    assert(format_k151_mic_wake_report(Outcome::detected, std::nullopt, json)==0);
+    assert(format_k151_mic_wake_report(Outcome::stopped, observed, json)==0);
+    assert(format_k151_mic_wake_report(Outcome::detected, observed, std::span(json).first(8))==0);
+    assert(json[0]=='\0');
+    for (const auto outcome : {Outcome::detected, Outcome::not_detected, Outcome::stopped,
+                                Outcome::fault, Outcome::denied, Outcome::memory_denied}) {
+      const bool clean = outcome==Outcome::detected || outcome==Outcome::not_detected;
+      const auto counts = clean ? std::optional{observed} : std::nullopt;
+      const auto size = format_k151_mic_wake_report(outcome, counts, json);
+      assert(size!=0 && json[size-1]=='\n' && json[size]=='\0');
+      std::printf("%s", json.data());
+    }
+    return 0;
+  }
   if(mic_wake_trial()) {
     using Outcome = K151MicWakeTrialResult;
     K151MicWakeTrial trial;
@@ -301,6 +322,11 @@ int main(int argc,char** argv) {
       assert(counts->frames_read == static_cast<unsigned>(calls));
       assert(counts->all_zero_frames == (injected ? 1u : 0u));
       assert(counts->full_scale_samples == (injected ? 6u : 0u));
+    }
+    if (mode == "mic_only_trial_input_counts" || mode == "mic_only_trial_stop_on_drop") {
+      std::array<char, 256> json{};
+      assert(format_k151_mic_wake_report(outcome, counts, json) != 0);
+      std::printf("%s", json.data());
     }
     assert(trial_model_drops == 1);
     if (missing || no_owner || stop_before || bad_format || reset_fail || stop_on_reset) {

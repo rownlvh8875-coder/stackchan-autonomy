@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from wake_bench_trace import WakeBenchTrace  # noqa: E402
+from wake_bench_trace import WakeBenchTrace, parse_mic_wake_trial_report  # noqa: E402
 
 
 def waiting(nonce, reason):
@@ -154,3 +154,30 @@ def test_late_heap_window_is_rejected_after_wake_input_or_a_reset(repeat_boot):
     else:
         trace.observe_checkpoint(checkpoint("model_reset_begin"))
     assert not trace.observe_heap_window(heap_window())
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"raw_audio": "private text"},
+        {"frames_read": 501},
+        {"frames_read": 0},
+        {"all_zero_frames": True},
+        {"full_scale_samples": 721},
+        {"result": "stopped"},
+        {"result": "raw"},
+        {"operating_admission": True},
+    ],
+)
+def test_mic_wake_report_rejects_unexpected_or_impossible_values(change):
+    record = {
+        "mic_wake_trial": "MIC_WAKE_TRIAL_V1",
+        "result": "detected",
+        "operating_admission": False,
+        "frames_read": 4,
+        "all_zero_frames": 1,
+        "full_scale_samples": 6,
+    }
+    assert parse_mic_wake_trial_report(record) == record
+    with pytest.raises(ValueError, match="INVALID_MIC_WAKE_TRIAL_REPORT"):
+        parse_mic_wake_trial_report(record | change)

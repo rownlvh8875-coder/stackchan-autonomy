@@ -2,7 +2,9 @@
 #include "k151_mic_wake_trial.hpp"
 #include "k151_mic_wake_memory.hpp"
 #include "k151_mic_reader.hpp"
+#include "pcm_frame.hpp"
 #include <esp_timer.h>
+#include <cstdio>
 #include <limits>
 #include <utility>
 
@@ -11,7 +13,18 @@ namespace {
 using Result = K151MicWakeTrialResult;
 constexpr int64_t kCaptureWindowUs = 5'000'000;
 constexpr int64_t kMaxPollGapUs = 100'000;
-constexpr unsigned kMaxFrames = 500;  // 10 ms of 24 kHz PCM per frame.
+
+const char* result_name(Result result) {
+  switch (result) {
+    case Result::denied: return "denied";
+    case Result::stopped: return "stopped";
+    case Result::not_detected: return "not_detected";
+    case Result::detected: return "detected";
+    case Result::fault: return "fault";
+    case Result::memory_denied: return "memory_denied";
+  }
+  return nullptr;
+}
 
 class CountedMicReader final : public MonoMicReader {
  public:
@@ -49,7 +62,7 @@ Result listen(NativeWakeInput& input, MonoMicReader& mic, NativeWakePort& model,
     return now;
   };
 
-  for (unsigned frame = 0; frame < kMaxFrames; ++frame) {
+  for (unsigned frame = 0; frame < kK151MicWakeTrialFrameLimit; ++frame) {
     if (!allowed()) return Result::stopped;
     const auto before = clock();
     if (before < 0 || before - last_poll_us > kMaxPollGapUs) return Result::fault;
@@ -69,6 +82,36 @@ Result listen(NativeWakeInput& input, MonoMicReader& mic, NativeWakePort& model,
   return Result::not_detected;
 }
 }  // namespace
+
+size_t format_k151_mic_wake_report(K151MicWakeTrialResult result,
+                                 std::optional<K151MicWakeInputCounts> counts,
+                                 std::span<char> output) {
+  if (output.empty()) return 0;
+  output.front() = '\0';
+  const char* name = result_name(result);
+  const bool clean = result == Result::detected || result == Result::not_detected;
+  if (!name || clean != counts.has_value()) return 0;
+  if (counts &&
+      (counts->frames_read == 0 || counts->frames_read > kK151MicWakeTrialFrameLimit ||
+       counts->all_zero_frames > counts->frames_read ||
+       counts->full_scale_samples >
+           (counts->frames_read - counts->all_zero_frames) * kPcmFramesPerTenMs)) return 0;
+
+  const int written = counts ?
+      std::snprintf(output.data(), output.size(),
+                    "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V1\",\"result\":\"%s\","
+                    "\"operating_admission\":false,\"frames_read\":%u,"
+                    "\"all_zero_frames\":%u,\"full_scale_samples\":%u}\n",
+                    name, static_cast<unsigned>(counts->frames_read),
+                    static_cast<unsigned>(counts->all_zero_frames),
+                    static_cast<unsigned>(counts->full_scale_samples)) :
+      std::snprintf(output.data(), output.size(),
+                    "{\"mic_wake_trial\":\"MIC_WAKE_TRIAL_V1\",\"result\":\"%s\","
+                    "\"operating_admission\":false}\n", name);
+  if (written > 0 && static_cast<size_t>(written) < output.size()) return written;
+  output.front() = '\0';
+  return 0;
+}
 
 std::optional<K151MicWakeInputCounts> K151MicWakeTrial::take_input_counts() {
   return std::exchange(input_counts_, std::nullopt);
