@@ -7,6 +7,7 @@ module has no device/API client and never creates an approval record.
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +32,8 @@ class BoundPaidTrial:
     ota1: bytes = field(repr=False)
     nvs: bytes = field(repr=False)
     board_reference: bytes = field(repr=False)
+    factory_table_sha256: str
+    factory_otadata_sha256: str
 
 
 def _read_bounded(path: Path, limit: int) -> bytes:
@@ -68,6 +71,13 @@ def _bind_files(paths: PaidTrialPaths, reviewed: dict, approval: dict) -> BoundP
     recovery = reviewed["recovery"]
     if not isinstance(recovery, dict) or recovery.get("restore_authorized") is not False:
         raise ValueError("invalid recovery scope")
+    table_hash = recovery["factory_table_sha256"]
+    otadata_hash = recovery["factory_otadata_sha256"]
+    if not all(
+        isinstance(digest, str) and re.fullmatch("[0-9a-f]{64}", digest)
+        for digest in (table_hash, otadata_hash)
+    ):
+        raise ValueError("invalid factory metadata digest")
     ranges = recovery["restore_in_order"]
     if not isinstance(ranges, list) or len(ranges) != 2:
         raise ValueError("invalid recovery ranges")
@@ -87,6 +97,8 @@ def _bind_files(paths: PaidTrialPaths, reviewed: dict, approval: dict) -> BoundP
         ota1=_read_verified(paths.ota1, SLOT_BYTES, ranges[0]["sha256"]),
         nvs=_read_verified(paths.nvs, NVS_BYTES, ranges[1]["sha256"]),
         board_reference=board,
+        factory_table_sha256=table_hash,
+        factory_otadata_sha256=otadata_hash,
     )
 
 

@@ -115,6 +115,11 @@ def test_trial_restore_is_bound_to_factory_ota1_and_current_nvs_snapshot(synthet
     nvs = tmp_path / "pretrial-nvs.bin"
     nvs.write_bytes(b"x" * 0x4000)
     report = verify_trial_restore(a, b, digest, slot, nvs)
+    with a.open("rb") as backup:
+        backup.seek(0x8000)
+        assert report["factory_table_sha256"] == hashlib.sha256(backup.read(0x1000)).hexdigest()
+        backup.seek(0xD000)
+        assert report["factory_otadata_sha256"] == hashlib.sha256(backup.read(0x2000)).hexdigest()
     assert [part["offset"] for part in report["restore_in_order"]] == [0x510000, 0x9000]
     assert [part["bytes"] for part in report["restore_in_order"]] == [0x4F0000, 0x4000]
     assert report["pretrial_nvs_verified_against_device"] is False

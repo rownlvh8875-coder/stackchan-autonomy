@@ -14,7 +14,16 @@ import struct
 import sys
 from pathlib import Path
 
-from esp_app_image import NVS_BYTES, NVS_OFFSET, SLOT_BYTES, SLOT_OFFSET
+from esp_app_image import (
+    NVS_BYTES,
+    NVS_OFFSET,
+    OTADATA_BYTES,
+    OTADATA_OFFSET,
+    PARTITION_TABLE_BYTES,
+    PARTITION_TABLE_OFFSET,
+    SLOT_BYTES,
+    SLOT_OFFSET,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 # Reuse the repository's already-tested, hash-pinned partition-table parser.
@@ -130,6 +139,12 @@ def verify_copies(path_a: Path, path_b: Path, expected_sha256: str) -> dict:
         "factory_ota1_sha256": hashlib.sha256(
             images[0][SLOT_OFFSET : SLOT_OFFSET + SLOT_BYTES]
         ).hexdigest(),
+        "factory_table_sha256": hashlib.sha256(
+            images[0][PARTITION_TABLE_OFFSET : PARTITION_TABLE_OFFSET + PARTITION_TABLE_BYTES]
+        ).hexdigest(),
+        "factory_otadata_sha256": hashlib.sha256(
+            images[0][OTADATA_OFFSET : OTADATA_OFFSET + OTADATA_BYTES]
+        ).hexdigest(),
         "partition_table_md5_checked": True,
         "partition_count": len(EXPECTED_PARTITIONS),
         "ota_partition_count": 2,
@@ -162,6 +177,8 @@ def verify_trial_restore(
         raise ValueError("pretrial NVS snapshot size rejected")
     return {
         "matching_factory_copies": factory["backup_count"],
+        "factory_table_sha256": factory["factory_table_sha256"],
+        "factory_otadata_sha256": factory["factory_otadata_sha256"],
         "restore_in_order": [
             {
                 "partition": "ota_1",

@@ -28,7 +28,9 @@ def review(tmp_path):
     app, ota1, nvs = b"synthetic app", b"a" * 0x4F0000, b"n" * 0x4000
     for path, data in ((paths.app, app), (paths.ota1, ota1), (paths.nvs, nvs)):
         path.write_bytes(data)
-    paths.board_reference.write_bytes(b"synthetic private board reference")
+    paths.board_reference.write_bytes(
+        b"synthetic private board reference\nMAC: 02:00:00:00:00:01\n"
+    )
     manifest = {
         "kind": "LOCAL_ONE_PAID_TURN_REVIEW",
         "private_board_policy_embedded": True,
@@ -40,6 +42,8 @@ def review(tmp_path):
         "image_sha256": digest(app),
         "recovery": {
             "restore_authorized": False,
+            "factory_table_sha256": digest(b"m" * 0x1000),
+            "factory_otadata_sha256": digest(b"m" * 0x2000),
             "restore_in_order": [
                 {
                     "partition": "ota_1",
