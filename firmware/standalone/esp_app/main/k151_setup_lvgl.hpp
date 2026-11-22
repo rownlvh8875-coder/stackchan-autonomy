@@ -9,6 +9,8 @@
 
 namespace stackchan::standalone {
 
+class K151LcdPanel;
+
 class K151SetupLvgl final {
  public:
   static const char* compiled_link_marker();
@@ -16,9 +18,9 @@ class K151SetupLvgl final {
   K151SetupLvgl(const K151SetupLvgl&) = delete;
   K151SetupLvgl& operator=(const K151SetupLvgl&) = delete;
 
-  // Caller must have already initialized the exact panel variant and must hold
-  // the LVGL owner-task mutex. No SPI/I2C/PMIC operations occur here directly.
-  bool attach(lv_display_t* display, bool exact_panel_verified,
+  // View borrows a live port. Detach before destroying the port. The caller
+  // supplies local physical readability evidence and holds the LVGL lock.
+  bool attach(K151LcdPanel& panel, bool exact_panel_verified,
               bool lvgl_lock_held, bool trusted_local_owner);
   bool present(TouchConsentPhase touch, OwnerSetupPhase owner,
                bool trusted_input_ready, bool sensor_read_failed,
@@ -28,10 +30,11 @@ class K151SetupLvgl final {
   bool present_pairing_sas(std::string_view code, bool trusted_display,
                            bool owner_window, bool lvgl_lock_held);
   bool detach(bool lvgl_lock_held);
-  bool attached() const { return root_ != nullptr; }
+  bool attached() const;
 
  private:
   const std::atomic_bool& stop_;
+  K151LcdPanel* panel_ = nullptr;
   lv_obj_t* root_ = nullptr;
   lv_obj_t* title_ = nullptr;
   lv_obj_t* first_ = nullptr;

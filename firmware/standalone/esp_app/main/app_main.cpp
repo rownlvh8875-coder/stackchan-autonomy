@@ -28,6 +28,7 @@
 #include "k151_owner_setup.hpp"
 #include "k151_head_touch_owner.hpp"
 #include "k151_setup_lvgl.hpp"
+#include "k151_lcd_panel.hpp"
 #include "k151_secure_pc_setup.hpp"
 #include "k151_scps_usb.hpp"
 #include "k151_install_hold.hpp"
@@ -66,6 +67,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151LocalOwnerSetup::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151HeadTouchOwner::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151SetupLvgl::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151LcdPanel::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151SecurePcSetup::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151ScpsUsbPort::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151InstallHold::compiled_link_marker());

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
+inline constexpr uint32_t MALLOC_CAP_DMA = 1 << 3;
 inline constexpr uint32_t MALLOC_CAP_8BIT = 1 << 2;
 inline constexpr uint32_t MALLOC_CAP_INTERNAL = 1 << 11;
 inline constexpr uint32_t MALLOC_CAP_SPIRAM = 1 << 10;

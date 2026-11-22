@@ -1,5 +1,25 @@
 # Next steps
 
+## 2026-11-23 오프라인 후속 — K151 화면과 페어링 표시
+
+공유 I2C1에서 읽은 FT6336 값으로 ILI9342E 구동 후보를 선택한다.
+PMIC와 AW9523B 식별값, LCD 리셋 핀 설정을 확인한 뒤 SPI3를 연다.
+LCD 전송 중에는 같은 SPI 선을 쓰는 microSD 선택을 해제한다.
+LCD는 320×240 RGB565를 10줄씩 전송한다. 첫 프레임 뒤 기존 제조사
+설정의 25% 백라이트로 켠다. 시작 실패와 종료 때 백라이트를 끄고
+LCD를 리셋 상태로 둔다. 마이크·앰프·전원 버튼 레지스터에 쓰지
+않는다.
+
+기존 로컬 설정 화면을 이 포트에 연결했다. 페어링 코드에 대한 USB
+`display_ready` 응답은 독립적인 실물 화면 확인과 전체 프레임 전송
+성공을 요구한다. 프레임 누락, SPI 실패, STOP, 백라이트 오류 및 장치
+해제를 호스트에서 검증했다. 이 단계는 터치 컨트롤러가 이미 깨어
+있는 보드를 전제로 한다. 실물 LCD의 색상·방향·가독성과 콜드 부팅
+초기화는 실제 장치에서 확인해야 한다. 기본 앱은 HOLD다.
+[실물 FT6336 읽기 기록](validation/2026-11-21-k151-board-readback-live.md)
+[제조사 LCD 초기화](https://github.com/m5stack/StackChan/blob/28b9f0c8bd6acd81cb3c70f1a93c3e373b39d400/firmware/main/hal/board/stackchan.cc#L518-L576)
+[ESP-IDF SPI 전송](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/esp_lcd/spi/esp_lcd_panel_io_spi.c#L191-L239)
+
 ## 2026-11-23 오프라인 후속 — 화면 터치를 독립 STOP에 연결
 
 운영 시작부는 로컬 설정과 대화 실행기가 같은 STOP 신호를 쓰는지

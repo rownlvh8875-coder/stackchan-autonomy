@@ -60,18 +60,20 @@ constexpr std::size_t index(Device device) {
   return static_cast<std::size_t>(device);
 }
 
+constexpr bool ft6336_9342e_signature(const std::array<std::uint8_t, 6>& version) {
+  return version[0] != 0 && version[3] == 0x12 && version[5] == 0x11;
+}
+
 // M5Stack official source reads FT6336 at register 0xA3 (six bytes).
 // It uses a separate write to enter work mode; this observer NEVER sends it.
 // It consequently cannot claim to have definitively identified an LCD.
 constexpr PanelHint panel_hint(const ReadOnlyEvidence& evidence) {
   if (!evidence.finished_without_bus_error ||
       !evidence.acknowledged[index(Device::touch_ft6336)] ||
-      !evidence.touch_version_read || evidence.touch_version[0] == 0 ||
-      evidence.touch_version[5] == 0) {
+      !evidence.touch_version_read) {
     return PanelHint::unknown;
   }
-  if (evidence.touch_version[3] == 0x12 &&
-      evidence.touch_version[5] == 0x11) {
+  if (ft6336_9342e_signature(evidence.touch_version)) {
     return PanelHint::ili9342e_candidate;
   }
   // Never infer ILI9342C from a failed/mismatched read.
