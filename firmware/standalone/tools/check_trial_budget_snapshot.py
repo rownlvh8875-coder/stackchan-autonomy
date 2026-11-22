@@ -12,8 +12,8 @@ from typing import Any
 from zlib import crc32
 
 from check_idf_build import EXPECTED_IDF_SHA
+from esp_app_image import NVS_BYTES
 
-NVS_BYTES = 0x4000
 PAGE_BYTES = 0x1000
 VENDOR_PARSER = "components/nvs_flash/nvs_partition_tool/nvs_parser.py"
 

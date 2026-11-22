@@ -33,6 +33,13 @@ class TrialScopes:
     one_paid_turn: bool = False
     restore_nvs: bool = False
 
+    @property
+    def complete(self) -> bool:
+        return all(
+            scope is True
+            for scope in (self.install_and_restore_ota1, self.one_paid_turn, self.restore_nvs)
+        )
+
 
 @dataclass(frozen=True)
 class TrialResult:
@@ -71,10 +78,7 @@ def run_paid_trial(scopes: TrialScopes, perform: Callable[[TrialStep], bool]) ->
     REBIND_FOR_RESTORE re-verifies identity and immutable metadata before
     writing, even if the board or the serial connection reset during the trial.
     """
-    if not all(
-        scope is True
-        for scope in (scopes.install_and_restore_ota1, scopes.one_paid_turn, scopes.restore_nvs)
-    ):
+    if not scopes.complete:
         return TrialResult(approval_rejected=True)
     failure = _first_failed(perform, (TrialStep.PREFLIGHT, TrialStep.CLAIM_ONCE))
     if failure is not None:

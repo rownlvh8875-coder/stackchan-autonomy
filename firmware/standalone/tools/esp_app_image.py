@@ -6,6 +6,8 @@ import struct
 
 SLOT_OFFSET = 0x510000
 SLOT_BYTES = 5_177_344
+NVS_OFFSET = 0x9000
+NVS_BYTES = 0x4000
 
 
 def validate_source_head(value: str) -> str:

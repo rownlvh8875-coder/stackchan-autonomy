@@ -14,7 +14,7 @@ import struct
 import sys
 from pathlib import Path
 
-from esp_app_image import SLOT_BYTES, SLOT_OFFSET
+from esp_app_image import NVS_BYTES, NVS_OFFSET, SLOT_BYTES, SLOT_OFFSET
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 # Reuse the repository's already-tested, hash-pinned partition-table parser.
@@ -149,7 +149,6 @@ def verify_trial_restore(
 ) -> dict:
     """Describe a complete paid-trial rollback using local files only."""
     factory = verify_copies(factory_a, factory_b, expected_sha256)
-    nvs_offset, nvs_size = 0x9000, 0x4000
     with ota1.open("rb") as slot:
         ota1_bytes = slot.read(SLOT_BYTES + 1)
     if (
@@ -158,8 +157,8 @@ def verify_trial_restore(
     ):
         raise ValueError("factory OTA1 restore slice disagrees with the verified full backups")
     with pretrial_nvs.open("rb") as snapshot:
-        nvs_bytes = snapshot.read(nvs_size + 1)
-    if len(nvs_bytes) != nvs_size:
+        nvs_bytes = snapshot.read(NVS_BYTES + 1)
+    if len(nvs_bytes) != NVS_BYTES:
         raise ValueError("pretrial NVS snapshot size rejected")
     return {
         "matching_factory_copies": factory["backup_count"],
@@ -172,8 +171,8 @@ def verify_trial_restore(
             },
             {
                 "partition": "nvs",
-                "offset": nvs_offset,
-                "bytes": nvs_size,
+                "offset": NVS_OFFSET,
+                "bytes": NVS_BYTES,
                 "sha256": hashlib.sha256(nvs_bytes).hexdigest(),
             },
         ],
