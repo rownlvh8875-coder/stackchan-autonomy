@@ -137,11 +137,26 @@ struct WakeDetector : NativeWakePort {
   }
 };
 bool fail_rx_disable=false;
+std::array<std::array<uint8_t, 2>, 16> amp_registers{};
 bool ctrl_open(const audio_codec_ctrl_if_t* h) {assert(h==&controls[0] || h==&controls[1]);return true;}
 int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,bool write) {
   assert(h==&controls[0] || h==&controls[1]);const bool out=h==&controls[0];
-  assert(reg_len==1 && data && n==(out?2:1) && reg==(out?0x06:0x43));
+  assert(reg_len==1 && data && n==(out?2:1));
   auto* bytes=static_cast<uint8_t*>(data);
+  if (out && (reg == 0x04 || reg == 0x05 || reg == 0x0c)) {
+    auto& stored = amp_registers[reg];
+    if (write) {
+      if (reg == 0x04) assert((bytes[1] & 0x43) == 0x03);
+      if (reg == 0x05) assert(bytes[1] & 0x10);
+      if (reg == 0x0c) assert(bytes[0] == 0x60);
+      stored = {bytes[0], bytes[1]};
+    } else {
+      bytes[0] = stored[0];
+      bytes[1] = stored[1];
+    }
+    return ESP_CODEC_DEV_OK;
+  }
+  assert(reg==(out?0x06:0x43));
   if(!write){bytes[0]=out?0x12:0;if(out)bytes[1]=0x34;}
   else if(out){assert(bytes[0]==0xb7 && bytes[1]==0x6e);}
   const std::string path=out?"ctrl_out_":"ctrl_in_";
@@ -463,7 +478,17 @@ extern "C" const audio_codec_ctrl_if_t* audio_codec_new_i2c_ctrl(audio_codec_i2c
   c->is_open=ctrl_open;c->read_reg=ctrl_read;c->write_reg=ctrl_write;c->get_info=ctrl_info;return c;
 }
 extern "C" const audio_codec_gpio_if_t* audio_codec_new_gpio(){assert(!mic_only());return &gpio;}
-extern "C" const audio_codec_if_t* aw88298_codec_new(aw88298_codec_cfg_t* cfg){assert(!mic_only());codec_controls[0]=cfg->ctrl_if;codec_operation(0,"init");return &codecs[0];}
+extern "C" const audio_codec_if_t* aw88298_codec_new(aw88298_codec_cfg_t* cfg) {
+  assert(!mic_only());
+  const auto* control = cfg->ctrl_if;
+  codec_controls[0] = control;
+  codec_operation(0, "init");
+  uint8_t power[]{0x40, 0x40}, mute[]{0, 0x08}, volume[]{0x30, 0x64};
+  if (control->write_reg(control, 0x04, 1, power, 2) != ESP_CODEC_DEV_OK ||
+      control->write_reg(control, 0x05, 1, mute, 2) != ESP_CODEC_DEV_OK ||
+      control->write_reg(control, 0x0c, 1, volume, 2) != ESP_CODEC_DEV_OK) return nullptr;
+  return &codecs[0];
+}
 extern "C" const audio_codec_if_t* es7210_codec_new(es7210_codec_cfg_t* cfg){codec_controls[1]=cfg->ctrl_if;codec_operation(1,"init");return &codecs[1];}
 extern "C" esp_codec_dev_handle_t esp_codec_dev_new(esp_codec_dev_cfg_t* cfg) {
   if(mode=="mic_only_codec_prepare_fail")return nullptr;

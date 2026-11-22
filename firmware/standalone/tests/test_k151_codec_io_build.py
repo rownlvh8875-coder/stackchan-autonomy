@@ -483,7 +483,10 @@ def test_aw88298_two_byte_forwarding_negative_control(tmp_path, operation):
         shutil.copyfile(BASE / "esp_app/main" / name, app / name)
     header = app / "k151_codec_control.hpp"
     source = header.read_text()
-    original = f"p.base_->{operation}(p.base_, reg, len, data, size)"
+    if operation == "write_reg":
+        original = "return record(base_->write_reg(base_, reg, len, data, size));"
+    else:
+        original = "p.base_->read_reg(p.base_, reg, len, data, size)"
     assert source.count(original) == 1
     header.write_text(source.replace(original, original.replace(", size)", ", 1)")))
     binary = _build_port(compiler, tmp_path / "codec", app)
@@ -529,4 +532,72 @@ def control_binary(tmp_path_factory):
 @pytest.mark.parametrize("mode", ["raw_read", "guard_read", "guard_write", "boundaries", "lost"])
 def test_real_es7210_control_errors(control_binary, mode):
     result = subprocess.run([str(control_binary), mode], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.fixture(scope="module")
+def aw88298_startup_binary(tmp_path_factory):
+    compiler = shutil.which("g++")
+    if not compiler:
+        pytest.skip("C++20 compiler required")
+    folder = tmp_path_factory.mktemp("aw88298-startup")
+    includes = ["-isystem", str(SDK), "-I", str(BASE / "tests/codec_io_doubles")]
+    objects = []
+    for name in ("aw88298", "esp_codec_dev_vol"):
+        obj = folder / f"{name}.o"
+        result = subprocess.run(
+            [
+                compiler,
+                "-x",
+                "c",
+                "-std=c11",
+                "-O2",
+                "-include",
+                "stdlib.h",
+                *includes,
+                "-c",
+                str(SDK / f"{name}.c"),
+                "-o",
+                str(obj),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        assert result.returncode == 0, result.stderr
+        objects.append(str(obj))
+    executable = folder / "aw88298-startup"
+    result = subprocess.run(
+        [
+            compiler,
+            "-std=c++20",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pedantic",
+            *includes,
+            "-I",
+            str(BASE / "esp_app/main"),
+            str(BASE / "tests/k151_aw88298_muted_startup_test.cpp"),
+            *objects,
+            "-o",
+            str(executable),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert result.returncode == 0, result.stderr
+    return executable
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["raw", "held", "reset", "unknown_width", "read_failure", "readback_mismatch", "write_failure"],
+)
+def test_real_aw88298_startup_stays_quiet(aw88298_startup_binary, mode):
+    result = subprocess.run(
+        [str(aw88298_startup_binary), mode], capture_output=True, text=True, timeout=10
+    )
     assert result.returncode == 0, result.stderr

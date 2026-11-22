@@ -240,7 +240,7 @@ bool K151CodecPort::prepare_output_codec() {
   out_cfg.hw_gain.codec_dac_voltage = 3.3f;
   out_cfg.hw_gain.pa_gain = 1;
   out_codec_ = aw88298_codec_new(&out_cfg);
-  if (!out_codec_ || !out_control_.healthy()) return false;
+  if (!out_codec_ || !out_control_.muted_startup_verified()) return false;
 
   esp_codec_dev_cfg_t dev_cfg = {};
   dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_OUT;

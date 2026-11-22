@@ -17,6 +17,10 @@
     "esp_codec_dev_vol.h": "2ee723bc80dc9cc3478eeaf6920fbce2dc707dfef33d9b4deb2d9175d702c572",
     "es7210.c": "8c741993683579ffbffd05a227533f4a54d086921de8ed99ff6c12f6574d5921",
     "es7210_reg.h": "12b2a719e5feefa248e239c8368227dde8fd0a60c7f055eca60e800fc7371dcc",
-    "es_common.h": "bbc2d51cbb01d2a2e8d0430252a2fad40a0d1813c0b7bca9765ea2364bc3eb46"
+    "es_common.h": "bbc2d51cbb01d2a2e8d0430252a2fad40a0d1813c0b7bca9765ea2364bc3eb46",
+    "aw88298.c": "72351441560a3b20cdad509fab82d73325792006faf34fa5c4855ee1045db5e8",
+    "aw88298_reg.h": "519f1f68fc695a8c7300381dbf661568bd401b737adbb0e4a8836cad7b734761",
+    "esp_codec_dev_os.h": "51cfe15563e7178f6a947d44a9e07dbf4af3a34e4941e5d1ae08bcf67d2a745b",
+    "esp_codec_dev_vol.c": "3ec591e1757b331832c2b68c267bc18d0c6edc8b2a6933184c16935ca9ba102c"
   }
 }

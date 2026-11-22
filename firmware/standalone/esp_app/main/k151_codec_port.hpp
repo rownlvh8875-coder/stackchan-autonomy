@@ -77,7 +77,8 @@ class K151CodecPort final {
   K151BoundedI2s data_port_;
   const audio_codec_ctrl_if_t* in_ctrl_ = nullptr;
   const audio_codec_ctrl_if_t* out_ctrl_ = nullptr;
-  K151CodecControl in_control_, out_control_;
+  K151CodecControl in_control_;
+  K151CodecControl out_control_{K151CodecControl::Profile::aw88298_muted_startup};
   const audio_codec_if_t* in_codec_ = nullptr;
   const audio_codec_if_t* out_codec_ = nullptr;
   const audio_codec_gpio_if_t* gpio_if_ = nullptr;

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Playback lifecycle safety checks; no real codec, network or secrets.
 #include "guarded_voice_speaker.hpp"
+#include "pcm_chunk_guard.hpp"
 
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <iostream>
@@ -31,11 +33,14 @@ struct PcmFake final : VoiceSpeakerPort {
   AudioGuard& guard;
   std::atomic_bool& busy;
   std::atomic_bool& stop;
-  int calls = 0;
+  std::atomic_bool& consent;
+  int calls = 0, blocks = 0;
+  bool use_bounded_stream = false;
   bool fail = false, set_stop = false, invalid_time = false;
 
   PcmFake(AudioFake& h, AudioGuard& g, std::atomic_bool& b,
-          std::atomic_bool& s) : hardware(h), guard(g), busy(b), stop(s) {}
+          std::atomic_bool& s, std::atomic_bool& c)
+      : hardware(h), guard(g), busy(b), stop(s), consent(c) {}
 
   VoicePlaybackResult play_pcm24k(std::span<const int16_t> pcm,
                                   uint64_t now) override {
@@ -44,6 +49,21 @@ struct PcmFake final : VoiceSpeakerPort {
     assert(!pcm.empty());
     assert(!guard.capture_begin()); // Mic+amp duplex forbidden.
     ++calls;
+    if (use_bounded_stream) {
+      auto finished = stream_pcm_chunks_guarded(
+          pcm, now, stop, consent,
+          [&](std::span<const int16_t> chunk) {
+            assert(chunk.size() == 240 && hardware.amplifier && !hardware.microphone);
+            assert(std::ranges::min(chunk) == -256 && std::ranges::max(chunk) == 256);
+            ++blocks;
+            now += 10;
+            if (set_stop) stop.store(true);
+            return true;
+          },
+          [&] { return std::optional{now}; });
+      if (!finished) return {};
+      return {true, *finished};
+    }
     if (set_stop) stop.store(true);
     return {!fail, invalid_time ? now - 1 : now + 10};
   }
@@ -53,7 +73,7 @@ struct Fixture {
   AudioFake hardware;
   std::atomic_bool stop{false}, consent{true}, busy{false};
   AudioGuard guard{hardware.hooks()};
-  PcmFake sink{hardware, guard, busy, stop};
+  PcmFake sink{hardware, guard, busy, stop, consent};
   GuardedVoiceSpeaker speaker{guard, sink, stop, consent, busy};
   std::vector<int16_t> samples{1, 2, 3};
   Fixture() { assert(guard.initialize(true, true)); }
@@ -115,6 +135,24 @@ int main() {
     x.stop.store(true);
     assert(!x.speaker.play_pcm24k(x.samples, 1200).complete);
     assert(x.sink.calls == 0 && !x.hardware.amplifier);
+  }
+  // A non-voice signal traverses the same bounded PCM and playback guard.
+  constexpr std::array<int16_t, 8> period{0, 128, 256, 128, 0, -128, -256, -128};
+  std::array<int16_t, 480> test_tone{};
+  for (size_t i = 0; i < test_tone.size(); ++i) test_tone[i] = period[i % period.size()];
+  for (const bool stop_after_first : {false, true}) {
+    Fixture x;
+    x.sink.use_bounded_stream = true;
+    x.sink.set_stop = stop_after_first;
+    const auto playback = x.speaker.play_pcm24k(test_tone, 1200);
+    assert(x.sink.blocks == (stop_after_first ? 1 : 2));
+    assert(playback.complete == !stop_after_first && !x.hardware.amplifier);
+    if (stop_after_first) {
+      assert(x.guard.stopped() && x.speaker.latched() && x.hardware.drain_calls == 0);
+    } else {
+      assert(playback.finished_ms == 1220 && x.guard.state() == AudioState::idle);
+      assert(x.hardware.drain_calls == 1 && !x.busy.load());
+    }
   }
   std::cout << "guarded speaker: PASS (host fake only)\n";
 }
