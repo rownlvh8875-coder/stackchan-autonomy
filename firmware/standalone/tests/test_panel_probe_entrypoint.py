@@ -11,8 +11,8 @@ import pytest
 BASE = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture(scope="module")
-def panel_probe(tmp_path_factory):
+@pytest.fixture(scope="module", params=[False, True], ids=["panel-and-head", "screen-stop-only"])
+def panel_probe(tmp_path_factory, request):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("C++20 compiler required")
@@ -40,6 +40,8 @@ def panel_probe(tmp_path_factory):
     (sdk / "esp_random.h").write_text("#pragma once\n#include <cstdint>\nuint32_t esp_random();\n")
     binary = sdk / "panel"
     args = [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic"]
+    if request.param:
+        args.append("-DSTACKCHAN_K151_PANEL_STOP_ONLY=1")
     for directory in (
         sdk,
         BASE / "tests/lcd_io_doubles",
@@ -62,7 +64,7 @@ def panel_probe(tmp_path_factory):
         timeout=90,
     )
     assert ran.returncode == 0, ran.stderr
-    return binary
+    return binary, request.param
 
 
 @pytest.mark.parametrize(
@@ -80,6 +82,7 @@ def panel_probe(tmp_path_factory):
         ("frame_failure", "PANEL_FRAME_FAILED"),
         ("head_fault", "HEAD_READ_OR_TIMING_FAILED"),
         ("no_head", "HOST_STOP_OR_DEADLINE"),
+        ("no_screen_stop", "HOST_STOP_OR_DEADLINE"),
         ("host_stop", "HOST_STOP_OR_DEADLINE"),
         ("arm_failure", "DISPLAY_STOP_ARM_FAILED"),
         ("early_irq", "EARLY_DISPLAY_IRQ"),
@@ -87,7 +90,10 @@ def panel_probe(tmp_path_factory):
     ],
 )
 def test_panel_diagnostic(panel_probe, case, expected):
-    ran = subprocess.run([str(panel_probe), case], capture_output=True, text=True, timeout=10)
+    binary, stop_only = panel_probe
+    if stop_only and case in {"head_fault", "no_head"}:
+        expected = "DISPLAY_STOP_LATCHED"
+    ran = subprocess.run([str(binary), case], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 0, ran.stderr
     events = [json.loads(line) for line in ran.stdout.splitlines() if line.startswith("{")]
     result = next(event for event in events if "result" in event)
@@ -95,15 +101,19 @@ def test_panel_diagnostic(panel_probe, case, expected):
     if "cleanup" in result:
         assert result["cleanup"] is (case != "cleanup_failure")
     if expected == "DISPLAY_STOP_LATCHED":
-        assert any(event.get("probe") == "HEAD_CONFIRMED" for event in events)
+        assert any(event.get("probe") == "HEAD_CONFIRMED" for event in events) is not stop_only
         assert any(event.get("probe") == "WAIT_SCREEN_STOP" for event in events)
+    if stop_only:
+        assert not any(event.get("probe") == "PANEL_FRAME_READY" for event in events)
     assert all(not event.get("operating_admission", False) for event in events)
     assert "12345678" not in ran.stdout  # Optical code exists only in the LVGL call.
 
 
 async def test_panel_challenge_is_visible_before_host_sends_start(panel_probe):
+    binary, stop_only = panel_probe
+    challenge = "WAIT_SCREEN_STOP_START" if stop_only else "WAIT_LOCAL_START"
     probe = await asyncio.create_subprocess_exec(
-        str(panel_probe),
+        str(binary),
         "interactive",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
@@ -116,7 +126,7 @@ async def test_panel_challenge_is_visible_before_host_sends_start(panel_probe):
             if not line.startswith(b"{"):
                 continue
             record = json.loads(line)
-            if record["probe"] == "WAIT_LOCAL_START":
+            if record["probe"] == challenge:
                 break
             assert record == {"probe": "PANEL_USB_READY", "operating_admission": False}
             ready = True

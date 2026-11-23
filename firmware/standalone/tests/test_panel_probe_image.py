@@ -88,3 +88,33 @@ def test_panel_flag_rejects_another_project():
             partition_csv=TABLE,
             panel=True,
         )
+
+
+def test_stop_only_build_binds_a_separate_project_and_excludes_head_sensor():
+    from check_board_probe import inspect_image
+
+    stop_protocol = b"K151_PANEL_SCREEN_STOP_PROBE_NOT_OPERATIONAL\x00"
+    report = inspect_image(
+        image(stop_protocol, project=b"k151_screen_stop_probe"),
+        ELF_SHA,
+        write_offset=0x510000,
+        partition_csv=TABLE,
+        screen_stop_only=True,
+    )
+    assert report["kind"] == "PANEL_SCREEN_STOP_PROBE_NOT_OPERATIONAL"
+    assert report["head_sensor_in_trial"] is False
+    assert report["maximum_trial_ms"] == 10000
+    assert report["install_authorized"] is report["operating_admission"] is False
+    with pytest.raises(ValueError, match="protocol marker absent"):
+        inspect_image(
+            image(b"another protocol", project=b"k151_screen_stop_probe"),
+            ELF_SHA,
+            write_offset=0x510000,
+            partition_csv=TABLE,
+            screen_stop_only=True,
+        )
+    with pytest.raises(ValueError, match="unexpected head sensor symbol"):
+        verify_panel_symbols(
+            "40380000 T app_main\n40380004 T _ZN17K151HeadTouchOwner13poll_once\n",
+            screen_stop_only=True,
+        )

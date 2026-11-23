@@ -20,6 +20,11 @@ struct lv_display_t {};
 struct lv_obj_t {};
 
 namespace {
+#ifdef STACKCHAN_K151_PANEL_STOP_ONLY
+constexpr bool kStopOnly = true;
+#else
+constexpr bool kStopOnly = false;
+#endif
 i2c_master_bus_t board;
 lv_display_t lcd_display;
 lv_obj_t screen, label;
@@ -43,7 +48,7 @@ extern "C" int64_t esp_timer_get_time() { return 1000 * static_cast<int64_t>(ms)
 void vTaskDelay(unsigned wait) {
   ms += wait;
   if (irq && ms - armed_since >= (scenario == "early_irq" ? 25U : 400U))
-    stop = scenario != "host_stop";
+    stop = scenario != "host_stop" && scenario != "no_screen_stop";
 }
 int usb_serial_jtag_read_bytes(void* byte, uint32_t length, uint32_t timeout) {
   assert(usb_open && length == 1);
@@ -51,7 +56,9 @@ int usb_serial_jtag_read_bytes(void* byte, uint32_t length, uint32_t timeout) {
     ms += timeout;
     return 0;
   }
-  if (scenario == "host_stop" && head && ms - head_since >= 200U && !host_stop_sent) {
+  const bool may_stop = kStopOnly ? irq && ms - armed_since >= 200U
+                                  : head && ms - head_since >= 200U;
+  if (scenario == "host_stop" && may_stop && !host_stop_sent) {
     host_stop_sent = true;
     input = "STOP\n";
   }
@@ -104,7 +111,9 @@ extern "C" void lv_label_set_text(lv_obj_t* obj, const char* text) {
 namespace stackchan::standalone {
 const std::atomic_bool& K151DisplayStop::flag() { return stop; }
 K151DisplayStop::ArmResult K151DisplayStop::arm(i2c_master_bus_handle_t bus, K151LcdPanel&) {
-  assert(bus_open && bus == &board && head && panel && frames == 2);
+  assert(bus_open && bus == &board && head != kStopOnly && panel);
+  assert(frames == (kStopOnly ? 1 : 2));
+  if (kStopOnly) assert(ms < 1500); // No head hold before STOP is armed.
   if (scenario == "arm_failure") return ArmResult::owned_unarmed;
   irq = true;
   armed_since = ms;
@@ -128,6 +137,7 @@ bool K151LcdPanel::present_now() { ++frames; return scenario != "frame_failure";
 bool K151LcdPanel::shutdown() { assert(!irq && !head); panel = false; return true; }
 K151HeadTouchOwner::~K151HeadTouchOwner() = default;
 bool K151HeadTouchOwner::attach_for_setup(i2c_master_bus_handle_t bus, bool verified, bool exclusive) {
+  assert(!kStopOnly);
   assert(bus == &board && panel && frames == 1 && verified && exclusive && !head);
   head = true;
   head_since = ms;
@@ -159,10 +169,11 @@ int main(int argc, char* argv[]) {
   if (scenario == "already_on_usb") usb_open = true;
   app_main();
   if (scenario == "cleanup_failure") {
-    assert(irq_cleanup_failed && irq && head && panel && lvgl && bus_open);
+    assert(irq_cleanup_failed && irq && head != kStopOnly && panel && lvgl && bus_open);
   } else {
     assert(!bus_open && !head && !panel && !lvgl && !irq);
   }
   assert(usb_open == (scenario == "already_on_usb"));
-  if (scenario == "no_head") assert(ms - head_since <= 10051);
+  if (scenario == "no_head" && !kStopOnly) assert(ms - head_since <= 10051);
+  if (scenario == "no_screen_stop") assert(ms <= 11150);
 }

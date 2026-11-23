@@ -3,7 +3,9 @@
 #include "board_evidence.hpp"
 #include "k151_board_bus.hpp"
 #include "k151_display_stop.hpp"
+#ifndef STACKCHAN_K151_PANEL_STOP_ONLY
 #include "k151_head_touch_owner.hpp"
+#endif
 #include "k151_lcd_panel.hpp"
 
 #include <atomic>
@@ -19,6 +21,16 @@
 
 namespace stackchan::standalone {
 namespace {
+#ifdef STACKCHAN_K151_PANEL_STOP_ONLY
+constexpr char kProtocol[] = "K151_PANEL_SCREEN_STOP_PROBE_NOT_OPERATIONAL";
+constexpr char kChallenge[] = "WAIT_SCREEN_STOP_START";
+constexpr char kInitialPrompt[] = "Wait for PC, then tap screen";
+#else
+constexpr char kProtocol[] = "K151_PANEL_HEAD_STOP_PROBE_NOT_OPERATIONAL";
+constexpr char kChallenge[] = "WAIT_LOCAL_START";
+constexpr char kInitialPrompt[] = "Touch top for 3s, then lift";
+#endif
+
 int64_t now_ms() {
   const auto now_us = esp_timer_get_time();
   return now_us < 0 ? -1 : now_us / 1000;
@@ -55,8 +67,8 @@ class LocalGate final {
     const auto now = now_ms();
     gate_.tick(now);
     if (count == 1 && gate_.feed(byte, now)) {
-      std::printf("{\"probe\":\"WAIT_LOCAL_START\",\"nonce\":\"%08lX\"}\n",
-                  static_cast<unsigned long>(challenge_));
+      std::printf("{\"probe\":\"%s\",\"nonce\":\"%08lX\"}\n",
+                  kChallenge, static_cast<unsigned long>(challenge_));
       (void)std::fflush(stdout);
     }
     if (count < 0 || count > 1) {
@@ -95,10 +107,13 @@ class K151PanelProbe final {
     lv_obj_center(label);
     const auto code = static_cast<unsigned long>(esp_random() % 100000000U);
     char page[64]{};
-    std::snprintf(page, sizeof(page), "DISPLAY TEST %08lu\nTouch top for 3s, then lift", code);
+    std::snprintf(page, sizeof(page), "DISPLAY TEST %08lu\n%s", code, kInitialPrompt);
     lv_label_set_text(label, page);
     if (!panel_.present_now()) return "PANEL_FRAME_FAILED";
     if (!gate.running()) return "HOST_STOP_OR_DEADLINE";
+#ifdef STACKCHAN_K151_PANEL_STOP_ONLY
+    return observe_stop(gate);
+#else
     // The app has passed the reviewed running slot/chip check and the same
     // board's live PMIC, AW9523B and FT6336 checks in panel_.start.
     if (!head_.attach_for_setup(bus_, panel_.ready(), true)) return "HEAD_PREPARE_FAILED";
@@ -119,6 +134,7 @@ class K151PanelProbe final {
       pause_ms(50);
     }
     return "HOST_STOP_OR_DEADLINE";
+#endif
   }
 
   const char* observe_stop(LocalGate& gate) {
@@ -142,7 +158,11 @@ class K151PanelProbe final {
   bool release() {
     if (stop_owned_ && !K151DisplayStop::disarm()) return false;
     stop_owned_ = false;
+#ifndef STACKCHAN_K151_PANEL_STOP_ONLY
     const bool head_released = head_.detach();
+#else
+    constexpr bool head_released = true;
+#endif
     const bool panel_released = panel_.shutdown();
     if (panel_released && lvgl_owned_) {
       lv_deinit();
@@ -155,9 +175,11 @@ class K151PanelProbe final {
   }
 
   const std::atomic_bool& stop_ = K151DisplayStop::flag();
-  std::atomic_bool owner_{false};
   K151LcdPanel panel_{stop_};
+#ifndef STACKCHAN_K151_PANEL_STOP_ONLY
+  std::atomic_bool owner_{false};
   K151HeadTouchOwner head_{owner_, stop_};
+#endif
   i2c_master_bus_handle_t bus_ = nullptr;
   bool stop_owned_ = false;
   bool lvgl_owned_ = false;
@@ -166,7 +188,7 @@ class K151PanelProbe final {
 
 extern "C" void app_main() {
   using namespace stackchan::standalone;
-  announce("K151_PANEL_HEAD_STOP_PROBE_NOT_OPERATIONAL");
+  announce(kProtocol);
   esp_chip_info_t chip{};
   esp_chip_info(&chip);
   const auto* partition = esp_ota_get_running_partition();

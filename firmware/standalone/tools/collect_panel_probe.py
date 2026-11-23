@@ -11,6 +11,10 @@ SCOPE = "ONE_PANEL_HEAD_STOP_PROBE_AND_OTA1_RESTORE"
 MODE = "PANEL_HEAD_STOP_ONLY"
 KIND = "REVIEW_ONLY_PANEL_PROBE_V1"
 PROTOCOL = "K151_PANEL_HEAD_STOP_PROBE_NOT_OPERATIONAL"
+STOP_SCOPE = "ONE_PANEL_SCREEN_STOP_PROBE_AND_OTA1_RESTORE"
+STOP_MODE = "PANEL_SCREEN_STOP_ONLY"
+STOP_KIND = "REVIEW_ONLY_PANEL_SCREEN_STOP_V1"
+STOP_PROTOCOL = "K151_PANEL_SCREEN_STOP_PROBE_NOT_OPERATIONAL"
 STAGES = {
     "PANEL_FRAME_READY": "숫자가 보이면 머리 윗면에 손가락을 3초 가볍게 댄 뒤 떼세요.",
     "HEAD_CONFIRMED": "머리 터치가 확인됐습니다. 화면 터치 안내를 기다려 주세요.",
@@ -43,7 +47,10 @@ class PanelProbeFailure(ValueError):
         self.report = {"failure": reason}
 
 
-def receive_once(port, announce, reserve, clock=time.monotonic):
+def receive_once(port, announce, reserve, clock=time.monotonic, *, stop_only=False):
+    protocol = STOP_PROTOCOL if stop_only else PROTOCOL
+    challenge = "WAIT_SCREEN_STOP_START" if stop_only else "WAIT_LOCAL_START"
+    expected_stages = ("WAIT_SCREEN_STOP",) if stop_only else tuple(STAGES)
     next_hello = clock()
     deadline = next_hello + 8
     outstanding = 0
@@ -70,7 +77,7 @@ def receive_once(port, announce, reserve, clock=time.monotonic):
             if not pending.endswith(b"\n"):
                 continue
             try:
-                if pending.strip() == PROTOCOL.encode("ascii"):
+                if pending.strip() == protocol.encode("ascii"):
                     evidence["boot_seen"] = True
                     continue
                 record = json.loads(pending)
@@ -84,7 +91,9 @@ def receive_once(port, announce, reserve, clock=time.monotonic):
             marker = record.get("probe")
             if marker == "PANEL_USB_READY" and record.get("operating_admission") is False:
                 evidence["usb_ready"] = True
-            elif marker == "WAIT_LOCAL_START":
+            elif marker in ("WAIT_LOCAL_START", "WAIT_SCREEN_STOP_START"):
+                if marker != challenge:
+                    raise PanelProbeFailure("unexpected_trial_mode")
                 offered = record.get("nonce")
                 if (
                     not outstanding
@@ -114,7 +123,7 @@ def receive_once(port, announce, reserve, clock=time.monotonic):
                 if (
                     nonce is None
                     or result is not None
-                    or stages + [marker] != list(STAGES)[: len(stages) + 1]
+                    or (*stages, marker) != expected_stages[: len(stages) + 1]
                 ):
                     raise PanelProbeFailure("unexpected_stage")
                 stages.append(marker)
@@ -130,7 +139,7 @@ def receive_once(port, announce, reserve, clock=time.monotonic):
                     or label not in RESULTS
                     or record.get("operating_admission") is not False
                     or type(record.get("cleanup")) is not bool
-                    or (label == "DISPLAY_STOP_LATCHED" and stages != list(STAGES))
+                    or (label == "DISPLAY_STOP_LATCHED" and tuple(stages) != expected_stages)
                 ):
                     raise PanelProbeFailure("invalid_result")
                 result = {"result": label, "cleanup": record["cleanup"]}
@@ -167,14 +176,20 @@ def verified_port(directory):
     )
     digest = review["image_sha256"]
     port = review["port"]
+    stop_only = review.get("kind") == STOP_KIND
+    scope, mode, kind, protocol, image_name = (
+        (STOP_SCOPE, STOP_MODE, STOP_KIND, STOP_PROTOCOL, "k151_screen_stop_probe.bin")
+        if stop_only
+        else (SCOPE, MODE, KIND, PROTOCOL, "k151_panel_probe.bin")
+    )
     if not (
         isinstance(digest, str)
         and re.fullmatch("[0-9a-f]{64}", digest)
         and port == "COM3"
-        and review.get("kind") == KIND
-        and review.get("expected_protocol") == PROTOCOL
-        and review.get("scope") == approval.get("scope") == SCOPE
-        and review.get("operator_mode") == approval.get("operator_mode") == MODE
+        and review.get("kind") == kind
+        and review.get("expected_protocol") == protocol
+        and review.get("scope") == approval.get("scope") == scope
+        and review.get("operator_mode") == approval.get("operator_mode") == mode
         and all(
             record.get("review_id") == directory.name for record in (review, approval, installed)
         )
@@ -185,13 +200,13 @@ def verified_port(directory):
         and installed.get("port") == port
     ):
         raise ValueError("Reviewed scope and independent install verification required")
-    image = directory / "artifact/k151_panel_probe.bin"
+    image = directory / "artifact" / image_name
     if (
         image.stat().st_size != review["write_bytes"]
         or hashlib.sha256(image.read_bytes()).hexdigest() != digest
     ):
         raise ValueError("Reviewed image mismatch")
-    return port, digest
+    return port, digest, stop_only
 
 
 def main():
@@ -201,7 +216,7 @@ def main():
     intent = directory / "panel-trial-intent.json"
     result_file = directory / "panel-result.json"
     try:
-        name, digest = verified_port(directory)
+        name, digest, stop_only = verified_port(directory)
         if any(path.exists() for path in (intent, result_file, directory / "restore-started.json")):
             raise ValueError("Trial already attempted")
         import serial
@@ -211,7 +226,7 @@ def main():
 
     def reserve():
         with intent.open("x", encoding="utf-8") as out:
-            json.dump({"image_sha256": digest, "scope": SCOPE}, out)
+            json.dump({"image_sha256": digest, "scope": STOP_SCOPE if stop_only else SCOPE}, out)
 
     port = serial.Serial(port=None, baudrate=115200, timeout=0.08, write_timeout=0.5)
     port.port = name
@@ -222,7 +237,9 @@ def main():
         report = {"failure": "serial_open_failed"}
     else:
         try:
-            report = receive_once(port, lambda message: print(message, flush=True), reserve)
+            report = receive_once(
+                port, lambda message: print(message, flush=True), reserve, stop_only=stop_only
+            )
         except PanelProbeFailure as exc:
             report = exc.report
         finally:

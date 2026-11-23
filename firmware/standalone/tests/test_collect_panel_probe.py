@@ -102,6 +102,38 @@ def test_challenge_received_after_deadline_cannot_send_start():
     assert port.writes == [b"HELLO\n", b"STOP\n"]
 
 
+@pytest.mark.parametrize("stop_only", [False, True])
+def test_screen_stop_only_requires_its_own_challenge_and_one_stage(stop_only):
+    challenge = CHALLENGE.replace(b"WAIT_LOCAL_START", b"WAIT_SCREEN_STOP_START")
+
+    def respond(port, data):
+        if data == b"HELLO\n":
+            port.messages.append(challenge)
+        if data == b"START C07ACAFE\n":
+            port.messages.extend(
+                [
+                    b'{"probe":"WAIT_SCREEN_STOP"}\n',
+                    b'{"result":"DISPLAY_STOP_LATCHED","cleanup":true,"operating_admission":false}\n',
+                    b'{"probe":"HOLD_UNTIL_RESET","operating_admission":false}\n',
+                ]
+            )
+
+    port = Port(callback=respond)
+    if not stop_only:
+        with pytest.raises(probe.PanelProbeFailure):
+            probe.receive_once(
+                port, lambda _: None, lambda: pytest.fail("cross-mode START"), lambda: port.now
+            )
+        assert b"START C07ACAFE\n" not in port.writes
+        return
+    cues = []
+    result = probe.receive_once(port, cues.append, lambda: None, lambda: port.now, stop_only=True)
+    assert result["stages"] == ["WAIT_SCREEN_STOP"]
+    assert cues == [probe.STAGES["WAIT_SCREEN_STOP"]]
+    assert result["result"] == "DISPLAY_STOP_LATCHED"
+    assert port.writes == [b"HELLO\n", b"START C07ACAFE\n"]
+
+
 def test_serial_open_failure_is_distinct_and_never_records_start(tmp_path, monkeypatch):
     image = tmp_path / "artifact/k151_panel_probe.bin"
     image.parent.mkdir()
@@ -133,3 +165,33 @@ def test_serial_open_failure_is_distinct_and_never_records_start(tmp_path, monke
         "failure": "serial_open_failed"
     }
     assert not (tmp_path / "panel-trial-intent.json").exists()
+
+
+def test_stop_only_rejects_prior_panel_approval(tmp_path):
+    image = tmp_path / "artifact/k151_screen_stop_probe.bin"
+    image.parent.mkdir()
+    image.write_bytes(b"synthetic STOP-only image")
+    digest = hashlib.sha256(image.read_bytes()).hexdigest()
+    base = {"image_sha256": digest, "review_id": tmp_path.name, "port": "COM3"}
+    records = {
+        "review-manifest.json": {
+            "scope": probe.STOP_SCOPE,
+            "operator_mode": probe.STOP_MODE,
+            "kind": probe.STOP_KIND,
+            "expected_protocol": probe.STOP_PROTOCOL,
+            "write_bytes": image.stat().st_size,
+        },
+        "approval.json": {"scope": probe.SCOPE, "operator_mode": probe.MODE, "approved": True},
+        "install-verified.json": {"independent_verify_passed": True, "offset": 0x510000},
+    }
+    for filename, record in records.items():
+        (tmp_path / filename).write_text(json.dumps({**base, **record}), encoding="utf-8")
+    with pytest.raises(ValueError, match="Reviewed scope"):
+        probe.verified_port(tmp_path)
+    fresh_approval = base | {
+        "scope": probe.STOP_SCOPE,
+        "operator_mode": probe.STOP_MODE,
+        "approved": True,
+    }
+    (tmp_path / "approval.json").write_text(json.dumps(fresh_approval), encoding="utf-8")
+    assert probe.verified_port(tmp_path) == ("COM3", digest, True)
