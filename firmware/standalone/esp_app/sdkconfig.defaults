@@ -17,3 +17,5 @@ CONFIG_WS_TRANSPORT=y
 
 # The Wi-Fi adapter additionally sets WIFI_STORAGE_RAM + init.nvs_enable=0.
 CONFIG_ESP_WIFI_NVS_ENABLED=n
+# Renew wall time before the 15-minute admission window expires.
+CONFIG_LWIP_SNTP_UPDATE_DELAY=600000

@@ -13,11 +13,14 @@
 #include <esp_wifi_default.h>
 #include <esp_netif_sntp.h>
 #include <esp_event.h>
+#include <sdkconfig.h>
 
 namespace stackchan::standalone {
 namespace {
 constexpr size_t kQueueLength = 16;
 constexpr char kNtpServer[] = "pool.ntp.org";
+static_assert(CONFIG_LWIP_SNTP_UPDATE_DELAY < NetworkTimeGuard::kMaxClockAgeMs,
+              "SNTP must refresh before K151 clock admission expires");
 uint64_t millis() {
   const int64_t t = esp_timer_get_time();
   return t <= 0 ? 0 : static_cast<uint64_t>(t / 1000);

@@ -95,6 +95,24 @@ int main() {
     assert(!t.claim_connect(999999));
   }
   {
+    // Run the configured ESP-IDF refresh cadence on the production guard.
+    NetworkTimeGuard t;
+    assert(t.arm(true,true,0));
+    const auto attempt=t.claim_connect(0);
+    assert(attempt && t.associated(*attempt,0) && t.ip_acquired(*attempt,0));
+    assert(t.time_synchronized(*attempt,e,0));
+    uint64_t next_refresh=TEST_SNTP_REFRESH_MS;
+    for (uint64_t elapsed=1000;elapsed<=80*60*1000;elapsed+=1000) {
+      const auto wall=e+elapsed/1000;
+      assert(t.tick(elapsed));
+      assert(t.can_attempt_paid_request(elapsed,wall,true,false));
+      if (elapsed>=next_refresh) {
+        assert(t.time_synchronized(*attempt,wall,elapsed));
+        next_refresh+=TEST_SNTP_REFRESH_MS;
+      }
+    }
+  }
+  {
     NetworkTimeGuard t;
     assert(t.arm(true,true,1000));
     auto token=t.claim_connect(1000);
