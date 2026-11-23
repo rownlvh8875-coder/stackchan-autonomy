@@ -51,7 +51,7 @@ class K151WifiTimePort final {
 
  private:
   enum class EventType : uint8_t { started, associated, disconnected, ip, sync };
-  struct Event { EventType type; uint64_t epoch_seconds; };
+  struct Event { EventType type; uint64_t epoch_seconds; uint64_t route_revision; };
   static void on_event(void* arg, esp_event_base_t base, int32_t id, void* data);
   bool handle_event(const Event& evt, uint64_t now_ms);
   bool fail();
@@ -59,6 +59,10 @@ class K151WifiTimePort final {
   RuntimeSecrets secrets_;
   mutable std::mutex secrets_mutex_;
   NetworkTimeGuard policy_;
+  // Serialize event-side revocation with owner-side clock admission.
+  std::mutex route_mutex_;
+  uint64_t route_revision_ = 0;
+  uint64_t acquired_ip_revision_ = 0; // Owner task only.
   QueueHandle_t queue_ = nullptr;
   esp_netif_t* station_ = nullptr;
   esp_event_handler_instance_t start_h_ = nullptr;
