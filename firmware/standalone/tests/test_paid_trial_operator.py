@@ -1,11 +1,13 @@
 """Exercise the approved one-turn operator sequence without opening any ports."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import serial
 from serial.tools import list_ports
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -16,6 +18,69 @@ from test_paid_trial_binding import review as review_fixture  # noqa: E402
 from test_paid_trial_rom import Chip, Tool  # noqa: E402
 
 review = review_fixture
+
+
+def trial_args(paths):
+    return [
+        "--review-dir",
+        str(paths.review_dir),
+        "--app",
+        str(paths.app),
+        "--factory-ota1",
+        str(paths.ota1),
+        "--pretrial-nvs",
+        str(paths.nvs),
+        "--board-reference",
+        str(paths.board_reference),
+        "--port",
+        "COM3",
+    ]
+
+
+def test_cli_needs_explicit_execution_and_all_approvals(review, monkeypatch, capsys):
+    paths, _, approval = review
+
+    def never(*_):
+        pytest.fail("serial prerequisites ran without approved execution")
+
+    monkeypatch.setattr(list_ports, "comports", never)
+    monkeypatch.setattr("paid_trial_rom._load_esptool", never)
+    with pytest.raises(SystemExit) as denied:
+        operator_tool.main(trial_args(paths))
+    assert denied.value.code == 2
+    approval.unlink()
+    assert operator_tool.main(["--execute", *trial_args(paths)]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["approval_rejected"]
+    assert not report["install_attempted"]
+    assert not (paths.review_dir / "install-started.json").exists()
+
+
+@pytest.mark.parametrize("occupied", [False, True])
+def test_port_check_requests_an_exclusive_handle_and_closes_it(monkeypatch, occupied):
+    events = []
+
+    def open_handle(*args):
+        events.append(("open", args))
+        return -1 if occupied else 12
+
+    def close_handle(handle):
+        events.append(("close", handle))
+        return 1
+
+    fake = SimpleNamespace(
+        CreateFile=open_handle,
+        CloseHandle=close_handle,
+        INVALID_HANDLE_VALUE=-1,
+        GENERIC_READ=1,
+        GENERIC_WRITE=2,
+        OPEN_EXISTING=3,
+        FILE_ATTRIBUTE_NORMAL=4,
+    )
+    monkeypatch.setattr(serial, "win32", fake, raising=False)
+    assert operator_tool._windows_port_available("COM3") is not occupied
+    assert events[0] == ("open", (r"\\.\COM3", 3, 0, None, 3, 4, None))
+    assert events[1:] == ([] if occupied else [("close", 12)])
 
 
 class SimulatedOperator:
@@ -90,15 +155,16 @@ def test_missing_observation_or_attachment_cannot_report_a_successful_turn(setti
     assert operator.seconds <= 215
 
 
-@pytest.mark.parametrize("replacement", [False, True])
-def test_operator_bridge_waits_for_original_usb_identity_and_restores_reviewed_ranges(
-    review, monkeypatch, replacement
+@pytest.mark.parametrize("outcome", ["ready", "replacement", "occupied"])
+def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
+    review, monkeypatch, capsys, outcome
 ):
     paths, _, _ = review
     device = Tool(paths)
     operator = SimulatedOperator()
-    original = SimpleNamespace(vid=0x303A, pid=0x1001, device="mock-port", serial_number="original")
-    other = SimpleNamespace(vid=0x303A, pid=0x1001, device="mock-port", serial_number="other")
+    original = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="original")
+    other = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="other")
+    checks = []
 
     def ports():
         if not device.events:
@@ -108,14 +174,14 @@ def test_operator_bridge_waits_for_original_usb_identity_and_restores_reviewed_r
         if ("trial", 1) not in device.events or operator.seconds < operator.unplug_at:
             return [original]
         if operator.seconds >= operator.reconnect_at:
-            return [other if replacement else original]
+            return [other if outcome == "replacement" else original]
         return []
 
     def run_pairing(arguments, *, timeout, check):
         assert device.events[-1] == ("close", 1)
         assert operator.seconds >= 1
         assert Path(arguments[1]).name == "scps_usb_cli.py"
-        assert arguments[2:] == ["--port", "mock-port", "--interactive"]
+        assert arguments[2:] == ["--port", "COM3", "--interactive"]
         assert 0 < timeout <= 145 and check is False
         operator.unplug_at, operator.reconnect_at = 2, 5
         device.events.append(("trial", 1))
@@ -132,15 +198,35 @@ def test_operator_bridge_waits_for_original_usb_identity_and_restores_reviewed_r
     monkeypatch.setattr(list_ports, "comports", ports)
     monkeypatch.setitem(sys.modules, "msvcrt", keyboard)
     monkeypatch.setitem(sys.modules, "scps_reference", SimpleNamespace(PcSession=object))
-    monkeypatch.setattr("paid_trial_rom._load_esptool", lambda: (device.detect, Chip, device))
 
-    result = operator_tool.run_operator_paid_trial(paths, "mock-port", lambda name: True)
-    assert ("trial", 1) in device.events
-    if replacement:
-        assert result.recovery_failure is TrialStep.REBIND_FOR_RESTORE
-        assert not result.factory_boot_requested
+    def detect(port, **args):
+        assert port == "COM3"
+        return device.detect("mock-port", **args)
+
+    def available(port):
+        checks.append(port)
+        return outcome != "occupied"
+
+    monkeypatch.setattr("paid_trial_rom._load_esptool", lambda: (detect, Chip, device))
+    monkeypatch.setattr(operator_tool, "_windows_port_available", available, raising=False)
+
+    status = operator_tool.main(["--execute", *trial_args(paths)])
+    result = json.loads(capsys.readouterr().out.splitlines()[-1])
+    if outcome == "occupied":
+        assert status == 2
+        assert result["trial_failure"] == TrialStep.PREFLIGHT
+        assert not result["install_attempted"]
+        assert device.events == []
+        assert checks == ["COM3"]
+    elif outcome == "replacement":
+        assert status == 3
+        assert result["recovery_failure"] == TrialStep.REBIND_FOR_RESTORE
+        assert not result["factory_boot_requested"]
         assert device.connections == 1
         assert device.flash[0x9000] != paths.nvs.read_bytes()
     else:
-        assert result.trial_failure is None and result.factory_boot_requested
+        assert status == 0
+        assert result["trial_failure"] is None and result["factory_boot_requested"]
         assert device.flash[0x9000] == paths.nvs.read_bytes()
+        assert checks == ["COM3", "COM3"]
+        assert device.events[-2:] == [("reset", 2), ("close", 2)]

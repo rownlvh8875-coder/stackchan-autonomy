@@ -1,5 +1,29 @@
 # Next steps
 
+## 2026-11-23 오프라인 후속 — 독립 대화 한 턴의 Windows 실행 명령
+
+Windows 로컬 콘솔의 다음 명령은 비공개 검토 파일과 세 가지 별도
+승인 범위가 준비된 뒤 사용한다. 아래 변수는 해당 검토서에 지정된
+폴더, 파일 및 COM 포트다.
+
+~~~powershell
+uv run --offline --frozen --with esptool==5.6.0 --with cryptography==46.0.4 python `
+  firmware/standalone/tools/paid_trial_operator.py --execute --port $Port `
+  --review-dir $Review --app $App --factory-ota1 $FactoryOta1 `
+  --pretrial-nvs $PretrialNvs --board-reference $BoardReference
+~~~
+
+실행기는 승인과 이미지·복구 파일을 확인한 뒤, 같은 USB 장치인지
+대조하고 독점 핸들로 포트 점유를 확인한다. 기기 설정을 바꾸는
+ROM 단계는 이후에 시작한다. 기존 설치·검증·재연결·출고 복구
+순서를 그대로 사용한다. 최종 JSON에는 단계별 성공 또는 실패와
+출고 재부팅 요청 결과만 남긴다. 출고 화면 복귀는 기기에서 확인한다.
+종료 코드 0은 한 턴 관찰과 복구 완료, 1은 시험 실패 후 복구 완료,
+2는 설치 전 거부, 3은 복구 단계 실패를 뜻한다.
+
+승인 누락, 포트 점유, 다른 USB 기기의 재연결, 정상 복구를 모의
+검증했다. 이 검증에서 실제 포트와 유료 API는 열지 않았다.
+
 ## 2026-11-23 오프라인 후속 — 독립 대화 설정 시작 안내
 
 한 턴 시험의 PC 실행기는 USB 포트가 열린 뒤에만 머리 터치 안내를

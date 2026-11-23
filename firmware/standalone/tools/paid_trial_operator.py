@@ -1,15 +1,35 @@
-"""Run the owner-led part of a scoped K151 trial in a Windows console."""
+"""Run a locally approved K151 one-turn trial and recovery in a Windows console."""
 
+import argparse
+import json
+import re
 import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from importlib import import_module
 from pathlib import Path
 
 from paid_trial_binding import PaidTrialPaths
 from paid_trial_rom import run_rom_paid_trial
 from paid_trial_sequence import TrialResult
+
+
+def _windows_port_available(port: str) -> bool:
+    from serial import win32
+
+    # Take an exclusive handle to test ownership without configuring DTR/RTS.
+    handle = win32.CreateFile(
+        "\\\\.\\" + port,
+        win32.GENERIC_READ | win32.GENERIC_WRITE,
+        0,
+        None,
+        win32.OPEN_EXISTING,
+        win32.FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
+    return handle != win32.INVALID_HANDLE_VALUE and bool(win32.CloseHandle(handle))
 
 
 def _wait_for(predicate, seconds, now, sleep) -> bool:
@@ -135,3 +155,34 @@ def run_operator_paid_trial(
             time.sleep,
         ),
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--execute", action="store_true", required=True)
+    parser.add_argument("--port", required=True, help="Exact Windows COM port")
+    parser.add_argument("--review-dir", type=Path, required=True)
+    parser.add_argument("--app", type=Path, required=True)
+    parser.add_argument("--factory-ota1", type=Path, required=True)
+    parser.add_argument("--pretrial-nvs", type=Path, required=True)
+    parser.add_argument("--board-reference", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if re.fullmatch(r"COM[1-9][0-9]*", args.port, re.IGNORECASE) is None:
+        parser.error("the port must be a Windows COM name")
+    paths = PaidTrialPaths(
+        args.review_dir, args.app, args.factory_ota1, args.pretrial_nvs, args.board_reference
+    )
+    result = run_operator_paid_trial(paths, args.port.upper(), _windows_port_available)
+    print(
+        json.dumps({**asdict(result), "factory_boot_requested": result.factory_boot_requested}),
+        flush=True,
+    )
+    if result.recovery_failure is not None:
+        return 3
+    if not result.install_attempted:
+        return 2
+    return int(result.trial_failure is not None)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
