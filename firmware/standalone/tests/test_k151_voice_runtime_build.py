@@ -112,6 +112,7 @@ def runtime_binary(tmp_path_factory):
         "bootstrap_conversation_tts_failure",
         "bootstrap_conversation_stop",
         "bootstrap_conversation_stop_during_display",
+        "bootstrap_conversation_stop_during_release",
         "bootstrap_conversation_unverified_release",
         "bootstrap_existing",
         "bootstrap_hold",

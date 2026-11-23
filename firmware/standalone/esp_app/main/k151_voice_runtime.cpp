@@ -130,7 +130,7 @@ NativeVoiceStep K151VoiceRuntime::poll() {
         case NativeVoiceStep::questioning: shown = publish_status(K151VoiceStatus::question); break;
         case NativeVoiceStep::answered:
         case NativeVoiceStep::cooldown: shown = publish_status(K151VoiceStatus::returning); break;
-        case NativeVoiceStep::trial_standby: shown = publish_status(K151VoiceStatus::trial_finished); break;
+        case NativeVoiceStep::trial_standby: return step;
         default: break;
       }
       if (shown) return step;

@@ -378,7 +378,10 @@ bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
     case K151VoiceStatus::playing: assert(!mic_open && !amp_open && calls_this_turn == 3); break;
     default: break;
   }
-  if (status == K151VoiceStatus::trial_finished) assert(mic_open && mic_opens == 3 && plays == 1);
+  if (status == K151VoiceStatus::trial_finished) {
+    assert(mic_opens == 3 && plays == 1 && !mic_open && !amp_open && !pending_pcm);
+    assert(!codec_running && !model_loaded && codec_stops == 1 && network_stops == 1);
+  }
   if (status == K151VoiceStatus::transcribing && scenario == "bootstrap_conversation_stop_during_display")
     display_press();
   return !K151DisplayStop::flag();
@@ -465,7 +468,10 @@ bool K151CodecPort::drain_output_before_mute() {
 bool K151CodecPort::speaker_off() { amp_open = false; return true; }
 bool K151CodecPort::shutdown() {
   assert(!mic_open && !amp_open);
-  if (codec_running) ++codec_stops;
+  if (codec_running) {
+    ++codec_stops;
+    if (scenario == "bootstrap_conversation_stop_during_release") display_press();
+  }
   prepared_ = codec_running = false;
   if (scenario == "bootstrap_conversation_unverified_release") cleanup_unverified_ = true;
   return true;
@@ -665,8 +671,14 @@ void exercise_conversation() {
     return;
   }
   assert(mic_opens == 3 && plays == 1 && !pending_pcm && !mic_open && !amp_open);
+  if (scenario == "bootstrap_conversation_stop_during_release") {
+    assert(state.phase == Phase::stopped && !board_bus_registered && !stop_timer_active);
+    assert(voice_status.back() == K151VoiceStatus::returning && calls == 3);
+    return;
+  }
   if (scenario == "bootstrap_conversation_unverified_release") {
     assert(state.phase == Phase::fault && !conversation.shutdown() && board_bus_registered);
+    assert(voice_status.back() == K151VoiceStatus::returning);
     std::_Exit(0); // The real owner task and borrowed board live until reset.
   }
   assert(state.phase == Phase::showing_trial_result && state.voice == NativeVoiceStep::trial_standby);

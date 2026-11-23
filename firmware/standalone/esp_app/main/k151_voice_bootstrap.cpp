@@ -96,8 +96,14 @@ NativeVoiceStep K151VoiceBootstrap::poll() {
   if (authorized()) {
     const auto result = voice_.poll();
     if (result == NativeVoiceStep::trial_standby) {
+      // Close the voice ports before displaying success. The display STOP
+      // monitor stays armed for the final frame.
+      voice_.stop();
+      const bool completed = voice_.board_release_verified() && authorized() &&
+                             (!view_ || view_->present_voice_status(K151VoiceStatus::trial_finished)) &&
+                             authorized();
       stop();
-      return board_release_verified() ? result : NativeVoiceStep::stopped;
+      return completed && board_release_verified() ? result : NativeVoiceStep::stopped;
     }
     if (result != NativeVoiceStep::stopped) return result;
     // Only an internal trial failure can keep the last rendered frame. A
