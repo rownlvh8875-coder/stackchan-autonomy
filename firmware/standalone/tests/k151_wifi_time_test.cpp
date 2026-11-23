@@ -27,7 +27,7 @@ void emit(esp_event_base_t base, int32_t id, void* data = nullptr) {
   entry.handle(entry.context, base, id, data);
 }
 
-void sync() {
+void emit_clock_sync() {
   esp_netif_sntp_time_sync_t sample{};
   sample.tv.tv_sec = std::time(nullptr);
   emit(NETIF_SNTP_EVENT, NETIF_SNTP_TIME_SYNC, &sample);
@@ -81,10 +81,10 @@ int main() {
     emit(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED);
     emit(IP_EVENT, IP_EVENT_STA_GOT_IP);
     assert(port.poll(stop));
-    sync();
+    emit_clock_sync();
     assert(port.poll(stop) && port.allow_paid_request(true, false));
 
-    sync(); // Queued on the old route, then delayed until after route revocation.
+    emit_clock_sync(); // Queued on the old route, then delayed until after route revocation.
     emit(route_event == WIFI_EVENT_STA_DISCONNECTED ? WIFI_EVENT : IP_EVENT, route_event);
     assert(!port.allow_paid_request(true, false));
     before_receive = [&] {
@@ -96,7 +96,7 @@ int main() {
     assert(!port.allow_paid_request(true, false));
 
     if (route_event == WIFI_EVENT_STA_DISCONNECTED) {
-      sync(); // Disconnection with a queued SDK notification but no new IP.
+      emit_clock_sync(); // Disconnection with a queued SDK notification but no new IP.
       assert(port.poll(stop) && !port.allow_paid_request(true, false));
       now_us += 1'000'000;
       assert(port.poll(stop));
@@ -104,7 +104,7 @@ int main() {
       emit(IP_EVENT, IP_EVENT_STA_GOT_IP);
       assert(port.poll(stop));
     }
-    sync();
+    emit_clock_sync();
     assert(port.poll(stop) && port.allow_paid_request(true, false));
   }
 }
