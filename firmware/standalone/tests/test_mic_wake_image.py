@@ -127,10 +127,16 @@ def test_silent_tx_image_is_distinct_and_has_no_voice_trial(model_fixture):
         )
 
 
-def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture):
+@pytest.mark.parametrize("protocol", ["K151_SPEAKER_V1", "K151_SPEAKER_V2"])
+def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, protocol):
     from check_mic_wake_image import inspect_image
 
-    markers = b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0WAIT_SPEAKER_LOCAL_START\0K151_SPEAKER_V1\0"
+    challenge = (
+        b"WAIT_SPEAKER_LOCAL_START\0"
+        if protocol == "K151_SPEAKER_V1"
+        else b'WAIT_SPEAKER_STARTUP_LOCAL_START\0"startup_stage"\0'
+    )
+    markers = b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0" + challenge + protocol.encode() + b"\0"
     project = b"k151_speaker_probe"
     manifest = inspect_image(image(markers, project=project), ELF_SHA, SLOT_CSV, speaker=True)
     assert manifest["kind"] == "SYNTHETIC_SPEAKER_PROBE_NOT_OPERATIONAL"
@@ -139,6 +145,7 @@ def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture):
     assert manifest["tone_samples"] == 6000
     assert manifest["tone_peak_pcm16"] == 4096
     assert manifest["install_authorized"] is False
+    assert manifest["expected_protocol"] == protocol
     for unexpected in (model_fixture, b"LISTEN_NOW\0", b"QUESTION_ONLY_NOW\0", b"api.openai.com\0"):
         with pytest.raises(ValueError):
             inspect_image(

@@ -13,6 +13,7 @@
 namespace stackchan::standalone {
 namespace {
 using Result = K151SpeakerProbeResult;
+using Stage = K151SpeakerStartupStage;
 constexpr size_t kToneSamples = 6000; // 250 ms at 24 kHz.
 constexpr int16_t kPeakPcm = 4096;
 constexpr size_t kFadeSamples = kPcmOutputChunkSamples;
@@ -30,33 +31,59 @@ constexpr auto tone = [] {
 std::atomic_flag attempted = ATOMIC_FLAG_INIT;
 }
 
-K151SpeakerProbeResult run_k151_speaker_probe(const std::atomic_bool& owner,
+K151SpeakerProbeReport run_k151_speaker_probe(const std::atomic_bool& owner,
     const std::atomic_bool& stop, K151AudioBoardEvidence evidence) {
   const auto allowed = [&] { return owner.load() && !stop.load(); };
-  if (stop.load()) return Result::stopped;
-  if (!owner.load() || !evidence.verified() || attempted.test_and_set()) return Result::denied;
+  if (stop.load()) return {Result::stopped};
+  if (!owner.load() || !evidence.verified() || attempted.test_and_set()) return {Result::denied};
 
   K151CodecPort codec;
   // The one-shot benchmark uses the local START permission for synthetic
   // playback. This image links no cloud client or microphone codec.
   AudioGuard audio{k151_audio_hooks(codec, owner, stop, owner, evidence)};
   K151PcmSpeakerSink sink{codec, stop, owner, owner};
-  const auto finish = [&](Result result) {
+  const auto finish = [&](Result result, Stage stage = Stage::none) -> K151SpeakerProbeReport {
     if (audio.state() == AudioState::playback) audio.stop();
     const bool released = codec.shutdown();
     if (codec.cleanup_unverified() || (result == Result::observed && !released))
-      return Result::cleanup_failed;
-    return allowed() ? result : Result::stopped;
+      return {Result::cleanup_failed, stage};
+    return allowed() ? K151SpeakerProbeReport{result, stage} : K151SpeakerProbeReport{Result::stopped};
   };
   if (!audio.initialize(allowed(), evidence.verified())) return finish(Result::codec_prepare_failed);
   if (!allowed()) return finish(Result::stopped);
-  if (!audio.playback_begin()) return finish(Result::amplifier_start_failed);
+  if (!audio.playback_begin())
+    return finish(Result::amplifier_start_failed, codec.speaker_startup_stage());
   const auto started_us = esp_timer_get_time();
   if (started_us < 0) return finish(Result::clock_fault);
   const auto playback = sink.play_pcm24k(tone, static_cast<uint64_t>(started_us / 1000));
   if (!playback.complete) return finish(Result::transfer_failed);
   if (!audio.playback_end()) return finish(Result::mute_confirmation_failed);
   return finish(Result::observed);
+}
+
+const char* speaker_startup_stage_name(Stage stage) {
+  switch (stage) {
+    case Stage::none: return "none";
+    case Stage::audio_guard: return "audio_guard";
+    case Stage::admission: return "admission";
+    case Stage::codec_open: return "codec_open";
+    case Stage::codec_ready: return "codec_ready";
+    case Stage::i2s_tx_state: return "i2s_tx_state";
+    case Stage::volume: return "volume";
+    case Stage::muted_admission: return "muted_admission";
+    case Stage::clock_origin: return "clock_origin";
+    case Stage::standby_readback: return "standby_readback";
+    case Stage::clock_enable: return "clock_enable";
+    case Stage::wait_clock: return "wait_clock";
+    case Stage::mute_readback: return "mute_readback";
+    case Stage::amplifier_enable: return "amplifier_enable";
+    case Stage::wait_switching: return "wait_switching";
+    case Stage::attenuation: return "attenuation";
+    case Stage::pre_unmute_status: return "pre_unmute_status";
+    case Stage::unmute: return "unmute";
+    case Stage::post_unmute_status: return "post_unmute_status";
+  }
+  return nullptr;
 }
 
 } // namespace stackchan::standalone

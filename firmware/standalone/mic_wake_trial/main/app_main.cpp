@@ -55,7 +55,7 @@ const char* tx_result_name(K151SilentTxResult result) {
 }
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_SPEAKER_LOCAL_START";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_STARTUP_LOCAL_START";
 
 const char* speaker_result_name(K151SpeakerProbeResult result) {
   using Result = K151SpeakerProbeResult;
@@ -200,9 +200,12 @@ extern "C" void app_main() {
     }
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
     const K151AudioBoardEvidence evidence{expected_location, true};
-    if (const char* result = speaker_result_name(run_k151_speaker_probe(owner, stop, evidence))) {
-      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V1\",\"result\":\"%s\","
-                  "\"operating_admission\":false}\n", result);
+    const auto report = run_k151_speaker_probe(owner, stop, evidence);
+    const char* result = speaker_result_name(report.result);
+    const char* stage = speaker_startup_stage_name(report.startup_stage);
+    if (result && stage) {
+      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V2\",\"result\":\"%s\","
+                  "\"startup_stage\":\"%s\",\"operating_admission\":false}\n", result, stage);
     }
 #else
     // This app has one I2S caller, using the port's exclusive RX allocation.

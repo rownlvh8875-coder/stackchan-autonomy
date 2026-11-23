@@ -61,6 +61,7 @@ class K151CodecPort final {
     return fault_ || data_port_.faulted() || in_control_.faulted() || out_control_.faulted();
   }
   K151MicWakeStage prepare_stage() const { return prepare_stage_; }
+  K151SpeakerStartupStage speaker_startup_stage() const { return speaker_startup_stage_; }
   bool cleanup_unverified() const { return cleanup_unverified_; }
 
  private:
@@ -119,6 +120,7 @@ class K151CodecPort final {
   bool tx_tail_registered_ = false;
   OutputData output_data_ = OutputData::empty;
   K151MicWakeStage prepare_stage_ = K151MicWakeStage::admission;
+  K151SpeakerStartupStage speaker_startup_stage_ = K151SpeakerStartupStage::audio_guard;
   bool cleanup_unverified_ = false;
 };
 

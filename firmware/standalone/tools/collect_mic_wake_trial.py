@@ -18,6 +18,15 @@ SILENT_TX_SCOPE = "ONE_SILENT_TX_PROBE_AND_OTA1_RESTORE"
 SILENT_TX_PROTOCOL = "K151_SILENT_TX_V1"
 SPEAKER_SCOPE = "ONE_SYNTHETIC_SPEAKER_PROBE_AND_OTA1_RESTORE"
 SPEAKER_PROTOCOL = "K151_SPEAKER_V1"
+SPEAKER_STARTUP_PROTOCOL = "K151_SPEAKER_V2"
+SPEAKER_CHALLENGES = {
+    SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
+    SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
+}
+SPEAKER_REVIEW_KINDS = {
+    SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
+    SPEAKER_STARTUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V2",
+}
 SILENT_TX_RESULTS = {
     "denied",
     "stopped",
@@ -41,6 +50,26 @@ SPEAKER_RESULTS = {
     "mute_confirmation_failed",
     "cleanup_failed",
     "dma_and_mute_observed",
+}
+SPEAKER_STARTUP_STAGES = {
+    "audio_guard",
+    "admission",
+    "codec_open",
+    "codec_ready",
+    "i2s_tx_state",
+    "volume",
+    "muted_admission",
+    "clock_origin",
+    "standby_readback",
+    "clock_enable",
+    "wait_clock",
+    "mute_readback",
+    "amplifier_enable",
+    "wait_switching",
+    "attenuation",
+    "pre_unmute_status",
+    "unmute",
+    "post_unmute_status",
 }
 WIRE_LIMIT = 512
 QUESTION_BEFORE_CUE = {"not_run", "memory_denied", "prepare_failed", "open_failed", "quiet_timeout"}
@@ -84,21 +113,36 @@ def validate_question_report(record, *, cue_seen, wake=None):
     return record
 
 
-def validate_output_report(record, *, speaker):
+def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL):
     field, protocol, results = (
-        ("speaker_probe", SPEAKER_PROTOCOL, SPEAKER_RESULTS)
+        ("speaker_probe", speaker_protocol, SPEAKER_RESULTS)
         if speaker
         else ("tx_dma_probe", SILENT_TX_PROTOCOL, SILENT_TX_RESULTS)
     )
     result = record.get("result")
+    expected_fields = {field, "result", "operating_admission"}
+    if speaker and speaker_protocol == SPEAKER_STARTUP_PROTOCOL:
+        expected_fields.add("startup_stage")
     if (
-        set(record) != {field, "result", "operating_admission"}
+        set(record) != expected_fields
         or record.get(field) != protocol
         or record.get("operating_admission") is not False
         or not isinstance(result, str)
         or result not in results
     ):
         raise ValueError("Invalid output diagnostic result")
+    if "startup_stage" in expected_fields:
+        stage = record["startup_stage"]
+        if not isinstance(stage, str):
+            raise ValueError("Invalid speaker startup checkpoint")
+        if result == "amplifier_start_failed":
+            allowed = SPEAKER_STARTUP_STAGES
+        elif result == "cleanup_failed":
+            allowed = SPEAKER_STARTUP_STAGES | {"none"}
+        else:
+            allowed = {"none"}
+        if stage not in allowed:
+            raise ValueError("Invalid speaker startup checkpoint")
     return record
 
 
@@ -111,6 +155,7 @@ def receive_once(
     question_only=False,
     silent_tx=False,
     speaker=False,
+    speaker_protocol=SPEAKER_PROTOCOL,
     before_start=lambda: None,
     clock=time.monotonic,
 ):
@@ -123,7 +168,7 @@ def receive_once(
     ):
         raise ValueError("Select a single trial mode")
     if speaker:
-        challenge = "WAIT_SPEAKER_LOCAL_START"
+        challenge = SPEAKER_CHALLENGES[speaker_protocol]
     elif silent_tx:
         challenge = "WAIT_SILENT_TX_LOCAL_START"
     elif question_only:
@@ -173,6 +218,7 @@ def receive_once(
                 "WAIT_QUESTION_ONLY_START",
                 "WAIT_SILENT_TX_LOCAL_START",
                 "WAIT_SPEAKER_LOCAL_START",
+                "WAIT_SPEAKER_STARTUP_LOCAL_START",
             ):
                 nonce = record.get("nonce")
                 if (
@@ -228,7 +274,9 @@ def receive_once(
             elif "tx_dma_probe" in record or "speaker_probe" in record:
                 if not output_only or not started or report is not None:
                     raise ValueError("Unexpected or repeated output result")
-                report = validate_output_report(record, speaker=speaker)
+                report = validate_output_report(
+                    record, speaker=speaker, speaker_protocol=speaker_protocol
+                )
             elif "mic_wake_trial" in record:
                 if output_only or question_only or not started or report is not None:
                     raise ValueError("Unexpected or repeated trial result")
@@ -275,6 +323,7 @@ def verified_port(
     question_only=False,
     silent_tx=False,
     speaker=False,
+    speaker_protocol=SPEAKER_PROTOCOL,
 ):
     if sum((question, wake_only_control, question_only, silent_tx, speaker)) > 1:
         raise ValueError("Select a single trial mode")
@@ -291,8 +340,8 @@ def verified_port(
     if silent_tx or speaker:
         if speaker:
             scope = SPEAKER_SCOPE
-            protocol = SPEAKER_PROTOCOL
-            expected_kind = "REVIEW_ONLY_SPEAKER_PROBE_V1"
+            protocol = speaker_protocol
+            expected_kind = SPEAKER_REVIEW_KINDS[protocol]
             if any(
                 item.get("operator_mode") != "SYNTHETIC_SPEAKER_ONLY"
                 for item in (manifest, approved)
@@ -362,7 +411,10 @@ def main():
     mode.add_argument("--question-only", action="store_true")
     mode.add_argument("--silent-tx", action="store_true")
     mode.add_argument("--speaker", action="store_true")
+    parser.add_argument("--speaker-protocol", choices=SPEAKER_CHALLENGES, default=SPEAKER_PROTOCOL)
     args = parser.parse_args()
+    if not args.speaker and args.speaker_protocol != SPEAKER_PROTOCOL:
+        parser.error("--speaker-protocol requires --speaker")
     try:
         port_name, digest = verified_port(
             args.review_dir,
@@ -371,6 +423,7 @@ def main():
             question_only=args.question_only,
             silent_tx=args.silent_tx,
             speaker=args.speaker,
+            speaker_protocol=args.speaker_protocol,
         )
         intent = args.review_dir / "mic-receive-intent.json"
         if intent.exists():
@@ -405,6 +458,7 @@ def main():
                 question_only=args.question_only,
                 silent_tx=args.silent_tx,
                 speaker=args.speaker,
+                speaker_protocol=args.speaker_protocol,
             )
         finally:
             port.close()

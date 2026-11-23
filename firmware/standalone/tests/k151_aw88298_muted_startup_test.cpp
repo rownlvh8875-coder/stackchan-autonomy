@@ -137,7 +137,8 @@ int main(int argc, char** argv) {
       if (scenario == "start_revoked_initially") allowed = false;
       const int before = writes;
       activating = true;
-      const bool started = guarded.start_aw88298_low_volume(
+      using Stage = K151SpeakerStartupStage;
+      const auto stage = guarded.start_aw88298_low_volume(
           [] { return allowed; }, [] { return now_us; }, [] {
             if (scenario != "start_frozen_clock")
               now_us += scenario == "start_clock_reversed" ? -1 : 1000;
@@ -147,7 +148,13 @@ int main(int argc, char** argv) {
       const bool success = scenario == "start_low_volume";
       const bool side_effect = success || scenario == "start_revoked_at_unmute" ||
                                scenario == "start_clock_lost_at_unmute";
-      assert(started == success && unmuted == side_effect);
+      assert((stage == Stage::none) == success && unmuted == side_effect);
+      if (scenario == "start_no_clock") assert(stage == Stage::wait_clock);
+      if (scenario == "start_no_switching" || scenario == "start_fault")
+        assert(stage == Stage::wait_switching);
+      if (scenario == "start_excess_gain") assert(stage == Stage::attenuation);
+      if (scenario == "start_revoked_initially") assert(stage == Stage::muted_admission);
+      if (scenario == "start_clock_lost_at_unmute") assert(stage == Stage::post_unmute_status);
       if (scenario == "start_revoked_initially") assert(writes == before);
       if (success) {
         assert((registers[0x04] & 0x43) == 0x40 && (registers[0x05] & 0x10) == 0);

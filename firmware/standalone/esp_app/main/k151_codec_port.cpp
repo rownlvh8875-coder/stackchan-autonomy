@@ -465,6 +465,8 @@ bool K151CodecPort::playback_available() const {
 }
 
 bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
+  using Stage = K151SpeakerStartupStage;
+  speaker_startup_stage_ = Stage::admission;
   if (!playback_available() || input_open_ || output_open_) return false;
   if (!consent.load()) return false;
   // Board bring-up can leave RX clocked before the SDK codec was ever opened.
@@ -481,18 +483,22 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
   fs.sample_rate = k151::kOutputHz;
   // Preserve a best-effort close even after a partially failed open.
   output_open_ = true;
-  if (esp_codec_dev_open(out_dev_, &fs) != 0 || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT) ||
-      !out_control_.healthy()) return fail();
+  speaker_startup_stage_ = Stage::codec_open;
+  if (esp_codec_dev_open(out_dev_, &fs) != 0) return fail();
+  speaker_startup_stage_ = Stage::codec_ready;
+  if (!data_port_.ready(ESP_CODEC_DEV_TYPE_OUT) || !out_control_.healthy()) return fail();
+  speaker_startup_stage_ = Stage::i2s_tx_state;
   i2s_chan_info_t tx_info{};
   if (i2s_channel_get_info(tx_, &tx_info) != ESP_OK || !tx_info.is_enabled ||
       (speaker_probe_build() ? tx_info.pair_chan != nullptr : !channel_is_idle(rx_))) return fail();
   const auto allowed = [&] {
     return consent.load() && prepared() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT);
   };
-  if (!allowed() || esp_codec_dev_set_out_vol(out_dev_, kLowVolume) != 0 ||
-      !out_control_.start_aw88298_low_volume(allowed, esp_timer_get_time, [] { vTaskDelay(1); }))
-    return fail();
-  return true;
+  speaker_startup_stage_ = Stage::volume;
+  if (!allowed() || esp_codec_dev_set_out_vol(out_dev_, kLowVolume) != 0) return fail();
+  speaker_startup_stage_ =
+      out_control_.start_aw88298_low_volume(allowed, esp_timer_get_time, [] { vTaskDelay(1); });
+  return speaker_startup_stage_ == Stage::none ? true : fail();
 }
 
 bool K151CodecPort::speaker_off() {

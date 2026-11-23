@@ -154,6 +154,7 @@ struct WakeDetector : NativeWakePort {
   }
 };
 bool fail_rx_disable=false;
+bool inject_speaker_tx_pair = false;
 std::array<std::array<uint8_t, 2>, 16> amp_registers{};
 bool ctrl_open(const audio_codec_ctrl_if_t* h) {assert(h==&controls[0] || h==&controls[1]);return true;}
 int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,bool write) {
@@ -169,7 +170,9 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
       const auto power = amp_registers[0x04][1] & 0x43;
       bytes[0] = power == 0x40 ||
                  (speaker_unmuted && mode == "speaker_probe_mute_failure") ? 1 : 0;
-      bytes[1] = tx.enabled && power != 3 && mode != "speaker_probe_clock_failure" ? 0x11 : 0;
+      const bool clock_missing = mode == "speaker_probe_clock_failure" ||
+                                 mode == "speaker_probe_clock_and_release_failure";
+      bytes[1] = tx.enabled && power != 3 && !clock_missing ? 0x11 : 0;
     }
     return ESP_CODEC_DEV_OK;
   }
@@ -200,6 +203,8 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
   if(!write){bytes[0]=out?0x12:0;if(out)bytes[1]=0x34;}
   else if(out){assert(bytes[0]==0xb7 && bytes[1]==0x6e);}
   const std::string path=out?"ctrl_out_":"ctrl_in_";
+  if (out && !write && phase == "open" && mode == "speaker_probe_codec_ready")
+    return ESP_CODEC_DEV_DRV_ERR;
   if (!out && !write &&
       (mode=="mic_only_codec_open_reg_error" || mode=="mic_only_codec_open_and_cleanup_error") &&
       (phase=="open" || (mode=="mic_only_codec_open_and_cleanup_error" && phase=="close")))
@@ -490,7 +495,8 @@ extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
 }
 extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
   assert(h->alive);++h->deletes;
-  if (speaker_probe() && mode=="speaker_probe_release_failure") return ESP_FAIL;
+  if (mode=="speaker_probe_release_failure" || mode=="speaker_probe_clock_and_release_failure")
+    return ESP_FAIL;
   if(h->enabled)return ESP_ERR_INVALID_STATE; // Pinned IDF refuses BEFORE free.
   h->alive=false;return 0;
 }
@@ -499,7 +505,9 @@ extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* i
   if(exercise_release_faults && (mode=="info_fail" || (mode=="release_rx_info" && h==&rx)))
     return ESP_FAIL;
   info->is_enabled=h->enabled;
-  info->pair_chan=mode=="mic_only_peer"?&tx:mode=="speaker_probe_paired"?&rx:nullptr;
+  const bool invalid_speaker_pair = mode=="speaker_probe_paired" || inject_speaker_tx_pair;
+  inject_speaker_tx_pair = false;
+  info->pair_chan=mode=="mic_only_peer"?&tx:invalid_speaker_pair?&rx:nullptr;
   if (speaker_probe()) info->total_dma_buf_size=6*480;
   return 0;
 }
@@ -643,7 +651,9 @@ extern "C" int esp_codec_dev_open(esp_codec_dev_handle_t h,esp_codec_dev_sample_
   auto* d=static_cast<Dev*>(h);d->open=true;
   d->data->set_fmt(d->data,d->type,fs);d->data->enable(d->data,d->type,true);
   codec_operation(d->type==ESP_CODEC_DEV_TYPE_IN?1:0,"open");
-  return 0; // pinned SDK ignores these two callback errors
+  inject_speaker_tx_pair = mode=="speaker_probe_tx_state";
+  // The pinned SDK ignores the format and enable callback errors.
+  return mode=="speaker_probe_codec_open"?ESP_CODEC_DEV_INVALID_ARG:0;
 }
 extern "C" int esp_codec_dev_close(esp_codec_dev_handle_t h) {
   auto* d=static_cast<Dev*>(h);if(d->open){codec_operation(d->type==ESP_CODEC_DEV_TYPE_IN?1:0,"close");d->data->enable(d->data,d->type,false);d->open=false;}return 0;
@@ -651,7 +661,7 @@ extern "C" int esp_codec_dev_close(esp_codec_dev_handle_t h) {
 extern "C" int esp_codec_dev_set_in_channel_gain(esp_codec_dev_handle_t,uint16_t,float){++gains;codec_operation(1,"gain");return 0;}
 extern "C" int esp_codec_dev_set_out_vol(esp_codec_dev_handle_t,int volume){
   if(speaker_probe())assert(volume==10 && !speaker_unmuted);
-  return 0;
+  return mode=="speaker_probe_volume"?ESP_CODEC_DEV_INVALID_ARG:0;
 }
 extern "C" int esp_codec_dev_read(esp_codec_dev_handle_t h,void* p,int n){auto* d=static_cast<Dev*>(h);return d->data->read(d->data,static_cast<uint8_t*>(p),n);}
 extern "C" int esp_codec_dev_write(esp_codec_dev_handle_t h,void* p,int n){auto* d=static_cast<Dev*>(h);return d->data->write(d->data,static_cast<uint8_t*>(p),n);}
@@ -680,9 +690,11 @@ int main(int argc,char** argv) {
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
   if (speaker_probe()) {
     using Result=K151SpeakerProbeResult;
+    using Stage=K151SpeakerStartupStage;
     local_stop=mode=="speaker_probe_stop_before";
     const bool evidence=mode!="speaker_probe_denied";
-    const auto result=run_k151_speaker_probe(local_owner,local_stop,{evidence,true});
+    const auto report=run_k151_speaker_probe(local_owner,local_stop,{evidence,true});
+    const auto result=report.result;
     if (mode=="speaker_probe_denied" || mode=="speaker_probe_stop_before") {
       assert(result==(evidence?Result::stopped:Result::denied));
       assert(bus_created==0 && channels_created==0 && calls==0);
@@ -690,20 +702,35 @@ int main(int argc,char** argv) {
     }
     if (mode=="speaker_probe_ok") {
       assert(result==Result::observed && speaker_peak==4096 && calls==25 && speaker_eof==7);
-      assert(run_k151_speaker_probe(local_owner,local_stop,{true,true})==Result::denied);
+      assert(run_k151_speaker_probe(local_owner,local_stop,{true,true}).result==Result::denied);
     } else if (mode=="speaker_probe_stop_write") {
       assert(result==Result::stopped && calls==1 && speaker_eof==0);
     } else if (mode=="speaker_probe_write_failure" || mode=="speaker_probe_dma_failure") {
       assert(result==Result::transfer_failed);
     } else if (mode=="speaker_probe_mute_failure") {
       assert(result==Result::mute_confirmation_failed && speaker_eof==7);
-    } else if (mode=="speaker_probe_clock_failure") {
+    } else if (mode=="speaker_probe_clock_failure" || mode=="speaker_probe_codec_open" ||
+               mode=="speaker_probe_tx_state" || mode=="speaker_probe_volume") {
       assert(result==Result::amplifier_start_failed && !speaker_unmuted && calls==0);
+      const auto expected =
+          mode=="speaker_probe_codec_open"?Stage::codec_open:
+          mode=="speaker_probe_tx_state"?Stage::i2s_tx_state:
+          mode=="speaker_probe_volume"?Stage::volume:Stage::wait_clock;
+      assert(report.startup_stage==expected);
+    } else if (mode=="speaker_probe_clock_and_release_failure") {
+      assert(result==Result::cleanup_failed && report.startup_stage==Stage::wait_clock);
+      assert(!speaker_unmuted && calls==0);
+    } else if (mode=="speaker_probe_codec_ready") {
+      assert(result==Result::cleanup_failed && report.startup_stage==Stage::codec_ready);
+      assert(!speaker_unmuted && calls==0);
     } else if (mode=="speaker_probe_paired") {
       assert(result==Result::codec_prepare_failed && !speaker_unmuted && calls==0);
     } else {
       assert(mode=="speaker_probe_release_failure" && result==Result::cleanup_failed);
     }
+    if (result!=Result::amplifier_start_failed && mode!="speaker_probe_clock_and_release_failure" &&
+        mode!="speaker_probe_codec_ready")
+      assert(report.startup_stage==Stage::none);
     assert(!rx.enabled && rx.deletes==0 && tdm_inits==0 && gains==0);
     assert(!tx.enabled && output_latch==0xa3 && !bus.alive);
     assert(created<=1 && created==deleted && legacy_calls==0);

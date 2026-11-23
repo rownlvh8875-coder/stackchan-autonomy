@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
+#include "k151_speaker_startup_stage.hpp"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -62,7 +63,9 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
   // The caller owns the enabled I2S TX and must close through standby or reset
   // on failure, including revocation detected during the unmute transaction.
   template <typename Allowed, typename Clock, typename Pause>
-  [[nodiscard]] bool start_aw88298_low_volume(Allowed allowed, Clock clock, Pause pause) {
+  [[nodiscard]] K151SpeakerStartupStage start_aw88298_low_volume(Allowed allowed, Clock clock,
+                                                                Pause pause) {
+    using Stage = K151SpeakerStartupStage;
     constexpr int64_t kStartupLimitUs = 100'000;
     constexpr int64_t kStageSettleUs = 2'000;
     constexpr uint16_t kClockMask = 0x0031; // NOCLKS, CLKS, PLLS
@@ -74,9 +77,9 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     constexpr uint8_t kOperating = 0x40;
     constexpr uint8_t kHardMute = 0x10;
 
-    if (!allowed() || !muted_startup_verified()) return false;
+    if (!allowed() || !muted_startup_verified()) return Stage::muted_admission;
     const int64_t started = clock();
-    if (started < 0) return false;
+    if (started < 0) return Stage::clock_origin;
     int64_t sampled = started;
     const auto live = [&] {
       if (!allowed() || !healthy()) return false;
@@ -123,18 +126,21 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     };
 
     std::array<uint8_t, 2> value{};
-    if (!standby_registers_verified(read_live) ||
-        !transition(0x04, kPowerMask, 0x03, kConfiguring) || !await_stage(false) ||
-        !read_live(0x05, value) || !(value[1] & kHardMute) ||
-        !transition(0x04, kPowerMask, kConfiguring, kOperating) || !await_stage(true) ||
-        !read_live(0x0c, value) || value[0] < kMinAttenuation ||
-        value[0] > kMaxAttenuation) return false;
+    if (!standby_registers_verified(read_live)) return Stage::standby_readback;
+    if (!transition(0x04, kPowerMask, 0x03, kConfiguring)) return Stage::clock_enable;
+    if (!await_stage(false)) return Stage::wait_clock;
+    if (!read_live(0x05, value) || !(value[1] & kHardMute)) return Stage::mute_readback;
+    if (!transition(0x04, kPowerMask, kConfiguring, kOperating)) return Stage::amplifier_enable;
+    if (!await_stage(true)) return Stage::wait_switching;
+    if (!read_live(0x0c, value) || value[0] < kMinAttenuation || value[0] > kMaxAttenuation)
+      return Stage::attenuation;
     uint16_t status{};
     constexpr auto kStatusMask = kClockMask | kSwitching;
     constexpr auto kReady = kClockLocked | kSwitching;
-    return read_status(status) && (status & kStatusMask) == kReady &&
-           transition(0x05, kHardMute, kHardMute, 0) &&
-           read_status(status) && (status & kStatusMask) == kReady;
+    if (!read_status(status) || (status & kStatusMask) != kReady) return Stage::pre_unmute_status;
+    if (!transition(0x05, kHardMute, kHardMute, 0)) return Stage::unmute;
+    if (!read_status(status) || (status & kStatusMask) != kReady) return Stage::post_unmute_status;
+    return Stage::none;
   }
  private:
   static constexpr uint8_t kPowerVerified = 1, kMuteVerified = 2, kAttenuationVerified = 4;

@@ -25,25 +25,30 @@ def inspect_image(
         raise ValueError("Select a single trial image")
     if speaker:
         envelope, _ = inspect_envelope(app, elf_sha256, b"k151_speaker_probe")
-        required = (
-            b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0",
-            b"WAIT_SPEAKER_LOCAL_START\0",
-            b"K151_SPEAKER_V1",
-        )
+        protocols = {
+            "K151_SPEAKER_V1": b"WAIT_SPEAKER_LOCAL_START\0",
+            "K151_SPEAKER_V2": b"WAIT_SPEAKER_STARTUP_LOCAL_START\0",
+        }
+        observed = [protocol for protocol in protocols if protocol.encode() in app]
         forbidden = (
             check_resource_bench.PACK_PREFIX,
             b"LISTEN_NOW\0",
             b"QUESTION_ONLY_NOW\0",
             b"api.openai.com\0",
         )
-        if any(marker not in app for marker in required) or any(
-            marker in app for marker in forbidden
+        if (
+            len(observed) != 1
+            or protocols[observed[0]] not in app
+            or b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0" not in app
+            or any(marker in app for marker in forbidden)
+            or (observed[0] == "K151_SPEAKER_V2" and b'"startup_stage"' not in app)
         ):
             raise ValueError("Unexpected speaker diagnostic image")
         return {
             **envelope,
             **validate_slot(partition_csv, SLOT_OFFSET, envelope["erase_span_bytes"]),
             "kind": "SYNTHETIC_SPEAKER_PROBE_NOT_OPERATIONAL",
+            "expected_protocol": observed[0],
             "local_nonce_start_required": True,
             "combined_start_window_ms": 10000,
             "microphone_enabled": False,
