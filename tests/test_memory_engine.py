@@ -1,6 +1,8 @@
 import asyncio
 import sqlite3
 import threading
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +14,7 @@ from stackchan_autonomy.robot import FakeRobotAdapter
 from stackchan_autonomy.settings import Settings
 
 
+@pytest.mark.usefixtures("lease_timing_probe")
 async def test_file_memory_wait_allows_real_control_heartbeat_to_progress(monkeypatch, tmp_path):
     engine = AutonomyEngine(
         FakeRobotAdapter(),
@@ -41,7 +44,69 @@ async def test_file_memory_wait_allows_real_control_heartbeat_to_progress(monkey
         monkeypatch.setattr(engine.actions.lease, "renew", renewal_during_storage_wait)
         result = await engine.step(Event(kind=EventKind.VOICE_REQUEST))
         assert renewed.is_set(), "file-backed memory blocked the control heartbeat"
-        assert result.executed and not engine.actions.lease_lost
+        assert result.executed and not engine.actions.lease_lost, engine.actions.control_loss_reason
+    finally:
+        release.set()
+        await engine.aclose()
+
+
+async def test_late_delivery_of_successful_renewal_stops_waiting_memory_cycle(
+    monkeypatch, tmp_path, lease_timing_probe
+):
+    from stackchan_autonomy import action
+    from stackchan_autonomy.timing_diagnostics import _label
+
+    engine = AutonomyEngine(
+        FakeRobotAdapter(),
+        MockDecisionProvider(),
+        settings(tmp_path / "late-renewal.sqlite3", lease_ttl_s=2, operation_timeout_s=5),
+    )
+    waiting, renewed, release = threading.Event(), threading.Event(), threading.Event()
+    original_snapshot = engine.memory.snapshot
+    original_renew = engine.actions.lease.renew
+    original_call = engine.actions._storage.call
+    delivery_delay = 0.0
+
+    def slow_snapshot():
+        waiting.set()
+        release.wait(3)
+        return original_snapshot()
+
+    def mark_renewed(handle):
+        result = original_renew(handle)
+        if waiting.is_set() and result:
+            renewed.set()
+        return result
+
+    async def deliver_after_expiry(*args, **kwargs):
+        nonlocal delivery_delay
+        result = await original_call(*args, **kwargs)
+        if _label.get() == "lease_renew" and renewed.is_set():
+            # Only the action consumer observes the delay. SQLite has already committed.
+            delivery_delay = 3.0
+            release.set()
+        return result
+
+    try:
+        assert (await engine.step(Event(kind=EventKind.VOICE_REQUEST))).executed
+        prior_commands = list(engine.robot.history)
+        monkeypatch.setattr(engine.memory, "snapshot", slow_snapshot)
+        monkeypatch.setattr(engine.actions.lease, "renew", mark_renewed)
+        monkeypatch.setattr(engine.actions._storage, "call", deliver_after_expiry)
+        monkeypatch.setattr(
+            action, "time", SimpleNamespace(monotonic=lambda: time.monotonic() + delivery_delay)
+        )
+
+        result = await engine.step(Event(kind=EventKind.VOICE_REQUEST))
+        assert renewed.is_set() and result.code == "stopped"
+        assert engine.actions.lease_lost and engine.actions.control_loss_reason == "renew_timeout"
+        assert list(engine.robot.history) == prior_commands
+        trace = lease_timing_probe.snapshot()
+        assert any(
+            record["operation"] == "lease_renew" and record["stage"] == "post_delivery_deadline"
+            for record in trace["interruptions"]
+        ), trace["interruptions"]
+        assert trace["stages"]["sqlite_commit"]["count"] > 0
     finally:
         release.set()
         await engine.aclose()
