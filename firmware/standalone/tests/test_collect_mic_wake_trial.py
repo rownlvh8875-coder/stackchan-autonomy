@@ -1,8 +1,10 @@
 """No USB; simulated serial input exercises the one-START protocol."""
 
 import json
+import sys
 from collections import deque
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +15,38 @@ def receiver(monkeypatch):
     import collect_mic_wake_trial
 
     return collect_mic_wake_trial
+
+
+def test_speaker_prepare_cue_precedes_any_port_open(receiver, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(sys, "argv", ["collector", "--review-dir", str(tmp_path), "--speaker"])
+    monkeypatch.setattr(receiver, "verified_port", lambda *args, **kwargs: ("COM3", "a" * 64))
+
+    def open_simulated(*args):
+        assert capsys.readouterr().out.splitlines() == ["SPEAKER_PREPARE"]
+        raise OSError("synthetic failure before any device communication")
+
+    monkeypatch.setattr(receiver, "open_port", open_simulated)
+    assert receiver.main() == 1
+    assert not (tmp_path / "mic-receive-intent.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_exit"), [("dma_and_mute_observed", 0), ("cleanup_failed", 1)]
+)
+def test_speaker_exit_requires_successful_playback_and_mute(
+    receiver, monkeypatch, tmp_path, outcome, expected_exit
+):
+    monkeypatch.setattr(sys, "argv", ["collector", "--review-dir", str(tmp_path), "--speaker"])
+    monkeypatch.setattr(receiver, "verified_port", lambda *args, **kwargs: ("COM3", "a" * 64))
+    monkeypatch.setattr(receiver, "open_port", lambda *args: SimpleNamespace(close=lambda: None))
+    report = {
+        "speaker_probe": receiver.SPEAKER_PROTOCOL,
+        "result": outcome,
+        "operating_admission": False,
+    }
+    monkeypatch.setattr(receiver, "receive_once", lambda *args, **kwargs: report)
+    assert receiver.main() == expected_exit
+    assert json.loads((tmp_path / "speaker-result.json").read_bytes()) == report
 
 
 WAIT = {"mic_trial": "WAIT_LOCAL_START", "nonce": "1234ABCD", "wait_ms": 60000}

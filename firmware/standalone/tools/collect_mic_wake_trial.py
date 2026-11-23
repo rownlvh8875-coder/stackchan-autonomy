@@ -388,6 +388,8 @@ def main():
             else:
                 print("지금 짧은 질문을 한 번 말하고 잠시 기다려 주세요.", flush=True)
 
+        if args.speaker:
+            print("SPEAKER_PREPARE", flush=True)
         port = open_port(serial, port_name)
         try:
             report = receive_once(
@@ -416,7 +418,7 @@ def main():
     except (OSError, ValueError, KeyError, TypeError, AttributeError, KeyboardInterrupt):
         print("Diagnostic stopped or denied. Check the reviewed restore procedure.")
         return 1
-    return 0
+    return int(args.speaker and report["result"] != "dma_and_mute_observed")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Supervise the reviewed K151 panel trial and show independent local cues."""
+"""Supervise a reviewed K151 diagnostic and show independent local cues."""
 
 import argparse
 import json
@@ -19,9 +19,11 @@ CUES = {
     "installing": "이미지 검증을 기다려 주세요.",
     "restoring": "원본 펌웨어를 복구 중입니다. USB를 연결한 채로 두세요.",
     "finished": "진단 작업이 종료됐습니다.",
+    "SPEAKER_PREPARE": "로봇에서 짧은 삐 소리가 나는지 들어 주세요.",
     **STAGES,
 }
 COLLECTOR_CUES = {message: name for name, message in STAGES.items()}
+COLLECTOR_CUES["SPEAKER_PREPARE"] = "SPEAKER_PREPARE"
 
 
 def run_powershell(shell, script, args, publish):
@@ -115,7 +117,7 @@ def supervise(directory, shell):
 
 
 def show_cues(directory):
-    print("StackChan K151 화면·머리 터치·STOP 안내를 기다리는 중입니다.", flush=True)
+    print("StackChan K151 시험 안내를 기다리는 중입니다.", flush=True)
     deadline = time.monotonic() + 360
     displayed = None
     while time.monotonic() < deadline:

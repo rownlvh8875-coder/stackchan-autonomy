@@ -57,7 +57,11 @@ switch ($Phase) {
 $ErrorActionPreference='Stop'
 $review=$PSScriptRoot
 Set-Content -LiteralPath (Join-Path $review 'install-started.json') '{}'
-Write-Output '숫자가 보이면 머리 윗면에 손가락을 3초 가볍게 댄 뒤 떼세요.'
+if ($env:K151_PANEL_MOCK -eq 'speaker') {
+  Write-Output 'SPEAKER_PREPARE'
+} else {
+  Write-Output '숫자가 보이면 머리 윗면에 손가락을 3초 가볍게 댄 뒤 떼세요.'
+}
 Write-Output 'private simulated transport payload'
 if ($env:K151_PANEL_MOCK -eq 'interrupted') { exit 9 }
 if ($env:K151_PANEL_MOCK -eq 'restore_failed') {
@@ -77,16 +81,29 @@ while (-not (Test-Path -LiteralPath (Join-Path $review 'viewer-closed'))) {
     return tmp_path
 
 
-def test_closing_read_only_viewer_does_not_interrupt_worker_or_rollback(reviewed):
+@pytest.mark.parametrize(
+    ("mock", "cue", "marker"),
+    [
+        (
+            "panel",
+            "숫자가 보이면 머리 윗면에 손가락을 3초 가볍게 댄 뒤 떼세요.",
+            "PANEL_FRAME_READY",
+        ),
+        ("speaker", "로봇에서 짧은 삐 소리가 나는지 들어 주세요.", "SPEAKER_PREPARE"),
+    ],
+)
+def test_closing_read_only_viewer_does_not_interrupt_worker_or_rollback(
+    reviewed, mock, cue, marker
+):
     transcript = reviewed / "mock-viewer-output.txt"
-    cue = "숫자가 보이면 머리 윗면에 손가락을 3초 가볍게 댄 뒤 떼세요.".encode()
+    env = {**ENV, "K151_PANEL_MOCK": mock}
     with (
         transcript.open("wb") as view_out,
         subprocess.Popen(command(reviewed, "--view"), env=ENV, stdout=view_out) as viewer,
-        subprocess.Popen(command(reviewed, "--run"), env=ENV, stdout=subprocess.PIPE) as worker,
+        subprocess.Popen(command(reviewed, "--run"), env=env, stdout=subprocess.PIPE) as worker,
     ):
         try:
-            wait_for(lambda: cue in transcript.read_bytes())
+            wait_for(lambda: cue.encode() in transcript.read_bytes())
             assert viewer.poll() is None and worker.poll() is None
             assert (reviewed / "install-started.json").exists()
             viewer.terminate()
@@ -100,7 +117,7 @@ def test_closing_read_only_viewer_does_not_interrupt_worker_or_rollback(reviewed
                 if child.poll() is None:
                     child.terminate()
     events = (reviewed / "panel-operator-events.log").read_text(encoding="ascii").splitlines()
-    assert events == ["preflight", "installing", "PANEL_FRAME_READY", "finished"]
+    assert events == ["preflight", "installing", marker, "finished"]
     assert b"private simulated transport payload" not in out
     assert b"private simulated transport payload" not in transcript.read_bytes()
     assert (reviewed / "factory-boot-requested.json").is_file()
