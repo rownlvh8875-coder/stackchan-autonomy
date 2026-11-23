@@ -8,6 +8,7 @@
 #include <esp_ota_ops.h>
 
 #include <cassert>
+#include <cstdio>
 #include <cstring>
 #include <string_view>
 
@@ -27,6 +28,8 @@ std::atomic_bool stop{false};
 std::string_view scenario, input;
 bool bus_open{}, usb_open{}, lvgl{}, panel{}, head{}, irq{}, irq_cleanup_failed{};
 bool host_stop_sent{};
+bool waiting_for_host_start{};
+char host_line[32]{};
 unsigned frames{}, gaps{}, random_calls{};
 uint32_t ms = 1000, head_since{}, armed_since{};
 }
@@ -51,6 +54,11 @@ int usb_serial_jtag_read_bytes(void* byte, uint32_t length, uint32_t timeout) {
   if (scenario == "host_stop" && head && ms - head_since >= 200U && !host_stop_sent) {
     host_stop_sent = true;
     input = "STOP\n";
+  }
+  if (waiting_for_host_start && input.empty()) {
+    waiting_for_host_start = false;
+    if (!std::fgets(host_line, sizeof(host_line), stdin)) return -1;
+    input = host_line;
   }
   if (input.empty()) { ms += timeout; return 0; }
   *static_cast<char*>(byte) = input.front();
@@ -141,6 +149,11 @@ int main(int argc, char* argv[]) {
   input = "HELLO\nSTART C07ACAFE\n";
   if (scenario == "wrong_nonce") input = "HELLO\nSTART 00000000\n";
   if (scenario == "no_hello") input = "START C07ACAFE\n";
+  if (scenario == "interactive") {
+    assert(std::setvbuf(stdout, nullptr, _IOFBF, 4096) == 0);
+    input = "HELLO\n";
+    waiting_for_host_start = true;
+  }
   if (scenario == "wrong_slot") partition.address = 0x20000;
   if (scenario == "wrong_subtype") partition.subtype = 16;
   if (scenario == "already_on_usb") usb_open = true;

@@ -24,6 +24,10 @@ int64_t now_ms() {
   return now_us < 0 ? -1 : now_us / 1000;
 }
 void pause_ms(unsigned ms) { vTaskDelay(pdMS_TO_TICKS(ms) + 1); }
+void announce(const char* line) {
+  std::puts(line);
+  (void)std::fflush(stdout);
+}
 
 class LocalGate final {
  public:
@@ -50,9 +54,11 @@ class LocalGate final {
     const int count = usb_serial_jtag_read_bytes(&byte, 1, ticks);
     const auto now = now_ms();
     gate_.tick(now);
-    if (count == 1 && gate_.feed(byte, now))
+    if (count == 1 && gate_.feed(byte, now)) {
       std::printf("{\"probe\":\"WAIT_LOCAL_START\",\"nonce\":\"%08lX\"}\n",
                   static_cast<unsigned long>(challenge_));
+      (void)std::fflush(stdout);
+    }
     if (count < 0 || count > 1) {
       (void)gate_.feed('\0', now);
       return -1;
@@ -89,7 +95,7 @@ class K151PanelProbe final {
     lv_obj_center(label);
     const auto code = static_cast<unsigned long>(esp_random() % 100000000U);
     char page[64]{};
-    std::snprintf(page, sizeof(page), "DISPLAY TEST %08lu\nHold head for 3 sec and release", code);
+    std::snprintf(page, sizeof(page), "DISPLAY TEST %08lu\nTouch top for 3s, then lift", code);
     lv_label_set_text(label, page);
     if (!panel_.present_now()) return "PANEL_FRAME_FAILED";
     if (!gate.running()) return "HOST_STOP_OR_DEADLINE";
@@ -97,14 +103,14 @@ class K151PanelProbe final {
     // board's live PMIC, AW9523B and FT6336 checks in panel_.start.
     if (!head_.attach_for_setup(bus_, panel_.ready(), true)) return "HEAD_PREPARE_FAILED";
     if (!gate.running()) return "HOST_STOP_OR_DEADLINE";
-    std::puts("{\"probe\":\"PANEL_FRAME_READY\"}");
+    announce("{\"probe\":\"PANEL_FRAME_READY\"}");
 
     while (gate.running()) {
       const auto event = head_.poll_once(now_ms());
       if (event == TouchConsentEvent::invalidated) return "HEAD_READ_OR_TIMING_FAILED";
       if (event == TouchConsentEvent::owner_window_open) {
         if (!gate.running()) return "HOST_STOP_OR_DEADLINE";
-        std::puts("{\"probe\":\"HEAD_CONFIRMED\"}");
+        announce("{\"probe\":\"HEAD_CONFIRMED\"}");
         std::snprintf(page, sizeof(page), "DISPLAY TEST %08lu\nWait for PC, then tap screen", code);
         lv_label_set_text(label, page);
         if (!panel_.present_now()) return "STOP_PROMPT_FRAME_FAILED";
@@ -125,7 +131,7 @@ class K151PanelProbe final {
     while (now_ms() - began < 150 && gate.running() && !stop_.load()) pause_ms(10);
     if (!gate.running()) return "HOST_STOP_OR_DEADLINE";
     if (stop_.load()) return "EARLY_DISPLAY_IRQ";
-    std::puts("{\"probe\":\"WAIT_SCREEN_STOP\"}");
+    announce("{\"probe\":\"WAIT_SCREEN_STOP\"}");
     while (gate.running()) {
       if (stop_.load()) return "DISPLAY_STOP_LATCHED";
       pause_ms(10);
@@ -160,7 +166,7 @@ class K151PanelProbe final {
 
 extern "C" void app_main() {
   using namespace stackchan::standalone;
-  std::puts("K151_PANEL_HEAD_STOP_PROBE_NOT_OPERATIONAL");
+  announce("K151_PANEL_HEAD_STOP_PROBE_NOT_OPERATIONAL");
   esp_chip_info_t chip{};
   esp_chip_info(&chip);
   const auto* partition = esp_ota_get_running_partition();
@@ -168,26 +174,26 @@ extern "C" void app_main() {
       partition->subtype != ESP_PARTITION_SUBTYPE_APP_OTA_1 ||
       !k151::board_probe_location_allowed(partition->address, partition->size,
                                          chip.model == CHIP_ESP32S3, chip.revision)) {
-    std::puts("{\"result\":\"RUNNING_LOCATION_OR_CHIP_DENIED\"}");
+    announce("{\"result\":\"RUNNING_LOCATION_OR_CHIP_DENIED\"}");
     return;
   }
   usb_serial_jtag_driver_config_t config{};
   config.rx_buffer_size = 128;
   config.tx_buffer_size = 1024;
   if (usb_serial_jtag_is_driver_installed() || usb_serial_jtag_driver_install(&config) != ESP_OK) {
-    std::puts("{\"result\":\"USB_SETUP_FAILED\"}");
+    announce("{\"result\":\"USB_SETUP_FAILED\"}");
     return;
   }
   LocalGate gate(esp_random());
+  announce("{\"probe\":\"PANEL_USB_READY\",\"operating_admission\":false}");
   if (gate.wait_for_start()) {
     // Keep owned handles alive on a failed release until reset. There is no
     // second run and no automatic reset or flash access from this image.
     static K151PanelProbe probe;
     probe.run(gate);
   } else {
-    std::puts("{\"result\":\"NO_LOCAL_START\"}");
+    announce("{\"result\":\"NO_LOCAL_START\"}");
   }
-  std::puts("{\"probe\":\"HOLD_UNTIL_RESET\",\"operating_admission\":false}");
-  std::fflush(stdout);
+  announce("{\"probe\":\"HOLD_UNTIL_RESET\",\"operating_admission\":false}");
   (void)usb_serial_jtag_driver_uninstall();
 }

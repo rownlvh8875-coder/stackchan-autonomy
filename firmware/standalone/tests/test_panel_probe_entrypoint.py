@@ -1,5 +1,6 @@
 """Run the display-only target entrypoint against bounded, in-memory ports."""
 
+import asyncio
 import json
 import shutil
 import subprocess
@@ -98,3 +99,32 @@ def test_panel_diagnostic(panel_probe, case, expected):
         assert any(event.get("probe") == "WAIT_SCREEN_STOP" for event in events)
     assert all(not event.get("operating_admission", False) for event in events)
     assert "12345678" not in ran.stdout  # Optical code exists only in the LVGL call.
+
+
+async def test_panel_challenge_is_visible_before_host_sends_start(panel_probe):
+    probe = await asyncio.create_subprocess_exec(
+        str(panel_probe),
+        "interactive",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+    )
+    try:
+        ready = False
+        while True:
+            line = await asyncio.wait_for(probe.stdout.readline(), 3)
+            assert line
+            if not line.startswith(b"{"):
+                continue
+            record = json.loads(line)
+            if record["probe"] == "WAIT_LOCAL_START":
+                break
+            assert record == {"probe": "PANEL_USB_READY", "operating_admission": False}
+            ready = True
+        assert ready
+        output, _ = await asyncio.wait_for(probe.communicate(b"START C07ACAFE\n"), 3)
+        assert probe.returncode == 0
+        assert b'"result":"DISPLAY_STOP_LATCHED"' in output
+    finally:
+        if probe.returncode is None:
+            probe.kill()
+            await probe.wait()
