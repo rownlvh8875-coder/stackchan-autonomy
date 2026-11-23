@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("cryptography")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
+import scps_usb_cli as cli  # noqa: E402
 from scps_reference import OfflineDeviceEmulator  # noqa: E402
 from scps_usb_cli import run_pairing  # noqa: E402
 from scps_usb_wire import Frame, Op, ScpsWireError, decode, encode, read_one, write_one  # noqa: E402
@@ -105,7 +107,9 @@ def test_full_encrypted_pairing_and_no_secret_echo():
     screen = next(
         index for index, message in enumerate(messages) if "hold the K151 screen" in message
     )
-    head = next(index for index, message in enumerate(messages) if "hold the K151 head" in message)
+    head = next(
+        index for index, message in enumerate(messages) if "touch the top of the head" in message
+    )
     assert screen < head
 
 
@@ -149,3 +153,54 @@ def test_partial_write_fails_closed_no_retry():
 def test_reads_fragmented_frame():
     port = FakePort()
     assert read_one(port).op is Op.DEVICE_HELLO
+
+
+@pytest.mark.parametrize("open_fails", [False, True])
+def test_cli_cues_head_touch_only_after_opening_without_reset(monkeypatch, open_fails):
+    wire = FakePort()
+    hello = bytes(wire.rx)
+    wire.rx.clear()
+    events = []
+
+    class Serial:
+        def __init__(self, port, **settings):
+            self.port = port
+            self.dtr = self.rts = True
+            self.is_open = False
+            if self.port is not None:
+                self.open()
+
+        def open(self):
+            if open_fails:
+                raise OSError
+            self.is_open = True
+            events.append(("open", self.port, self.dtr, self.rts))
+
+        def __enter__(self):
+            if not self.is_open:
+                self.open()
+            return self
+
+        def __exit__(self, *exc):
+            self.is_open = False
+
+    def visible(message, *, flush=False):
+        if "머리 윗면" in message:
+            assert flush
+            if events and events[-1][0] == "open":
+                events.append(("touch",))
+                wire.rx.extend(hello)  # The device sends its hello only once.
+
+    def receive(port):
+        assert port.is_open
+        assert wire.rx, "the PC missed the device's only initial hello"
+        assert read_one(wire).op is Op.DEVICE_HELLO
+        return True
+
+    monkeypatch.setitem(
+        sys.modules, "serial", SimpleNamespace(Serial=Serial, SerialException=OSError)
+    )
+    monkeypatch.setattr(cli, "print", visible, raising=False)
+    monkeypatch.setattr(cli, "run_pairing", receive)
+    assert cli.main(["--port", "COM3", "--interactive"]) == int(open_fails)
+    assert events == ([] if open_fails else [("open", "COM3", False, False), ("touch",)])

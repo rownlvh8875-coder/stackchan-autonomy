@@ -205,8 +205,8 @@ K151SetupLvgl::ReviewResult K151SetupLvgl::poll_contact(
 bool K151SetupLvgl::show_final_touch_prompt() {
   sas_visible_ = false;
   lv_label_set_text(title_, "FINAL APPROVAL");
-  lv_label_set_text(first_, "Hold head for 3 sec");
-  lv_label_set_text(second_, "Release to approve");
+  lv_label_set_text(first_, "Touch top for 3 sec");
+  lv_label_set_text(second_, "Lift to approve");
   return panel_->present_now() && !stop_.load();
 }
 

@@ -49,7 +49,7 @@ def run_pairing(
         expect(port, Op.PENDING_TOUCH, 20)
 
         say("If all 8 digits match, hold the K151 screen for 1 second and release.")
-        say("At FINAL APPROVAL, hold the K151 head for 3 seconds and release.")
+        say("At FINAL APPROVAL, lightly touch the top of the head for 3 seconds, then lift.")
         expect(port, Op.COMPLETED, 120)
         say("Device reports one-time RAM setup complete. No credential file was saved.")
         return True
@@ -82,7 +82,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("pyserial is required")
         raise AssertionError("unreachable") from exc
     try:
-        with serial.Serial(args.port, baudrate=115200, timeout=0.25, write_timeout=2) as port:
+        port = serial.Serial(port=None, baudrate=115200, timeout=0.25, write_timeout=2)
+        port.port = args.port
+        port.dtr = port.rts = False
+        with port:
+            print(
+                "로봇에 SETUP PRESENCE가 보이면 머리 윗면에 손가락을 가볍게 "
+                "3초 대고 완전히 떼세요.",
+                flush=True,
+            )
             run_pairing(port)
     except (ScpsWireError, ValueError, OSError, serial.SerialException):
         # Do not print sensitive exception parameters or serial payloads.

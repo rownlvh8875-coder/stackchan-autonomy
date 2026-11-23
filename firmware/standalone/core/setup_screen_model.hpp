@@ -48,7 +48,7 @@ inline constexpr SetupScreenFrame setup_screen_frame(
         touch == TouchConsentPhase::confirm_press ||
         touch == TouchConsentPhase::confirm_release ||
         touch == TouchConsentPhase::confirmed)
-      return {SetupScreenKind::hold_to_confirm, "FINAL APPROVAL", "Hold head for 3 sec", "Release to approve"};
+      return {SetupScreenKind::hold_to_confirm, "FINAL APPROVAL", "Touch top for 3 sec", "Lift to approve"};
     return {SetupScreenKind::fault, "SETUP ERROR", "Touch state mismatch", "Cloud stays OFF"};
   }
   if (setup == OwnerSetupPhase::wifi_input || setup == OwnerSetupPhase::api_input) {
@@ -71,7 +71,7 @@ inline constexpr SetupScreenFrame setup_screen_frame(
     return {SetupScreenKind::trusted_entry_required, "TRUSTED INPUT", "Secure PC UI needed", "No input path active"};
   if (touch == TouchConsentPhase::hold)
     return {SetupScreenKind::locked, "SETUP LOCKED", "No credentials loaded", "Cloud disabled"};
-  return {SetupScreenKind::hold_to_enter, "SETUP PRESENCE", "Hold head for 3 sec", "Release when prompted"};
+  return {SetupScreenKind::hold_to_enter, "SETUP PRESENCE", "Wait for PC instruction", "Touch top for 3 sec, then lift"};
 }
 
 }  // namespace stackchan::standalone

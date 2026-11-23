@@ -50,7 +50,7 @@ def exercise_one_turn(
 
     confirmed = False
     try:
-        say("로봇 화면의 머리 터치 안내가 나오면 머리를 3초 눌렀다 떼세요.")
+        say("암호화 설정 도구를 여는 중입니다. 연결이 되면 다음 안내가 표시됩니다.")
         if pair() is True:
             say("지금 로봇의 USB 케이블을 분리하세요.")
             if _wait_for(lambda: not present(), 20, now, sleep):

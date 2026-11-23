@@ -64,6 +64,7 @@ def test_one_turn_requires_disconnect_then_owner_observation_then_reconnect():
     assert operator.prompt("다시 연결")[2] >= 2
     assert operator.seconds >= operator.reconnect_at
     assert len([event for event in operator.events if event[0] == "pair"]) == 1
+    assert not any(event[0] == "prompt" and "머리" in event[1] for event in operator.events)
 
 
 @pytest.mark.parametrize(

@@ -5,6 +5,10 @@ envelope from `core/scps_usb_wire.hpp`. `tools/scps_usb_cli.py` is a
 **manually activated** PC serial client; it does not discover, auto-connect
 or install firmware on devices.
 
+Wait for both the PC serial-ready instruction and `SETUP PRESENCE` on the
+K151. Lightly touch the top of the head for three seconds, then lift. This
+lets the port receive the one-time device hello.
+
 The PC must see the 86-byte device hello, send its 86-byte ephemeral hello,
 receive a payload-free `display_ready`, then the operator must READ and
 TYPE the full eight-digit SAS seen on the actual already-verified K151 LCD.
