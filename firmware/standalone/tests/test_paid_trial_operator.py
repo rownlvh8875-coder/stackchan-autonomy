@@ -1,6 +1,7 @@
 """Exercise the approved one-turn operator sequence without opening any ports."""
 
 import json
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -155,7 +156,7 @@ def test_missing_observation_or_attachment_cannot_report_a_successful_turn(setti
     assert operator.seconds <= 215
 
 
-@pytest.mark.parametrize("outcome", ["ready", "replacement", "occupied"])
+@pytest.mark.parametrize("outcome", ["ready", "replacement", "occupied", "ctrl_break"])
 def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
     review, monkeypatch, capsys, outcome
 ):
@@ -165,6 +166,21 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
     original = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="original")
     other = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="other")
     checks = []
+    break_signal = 21
+    handlers = {break_signal: signal.SIG_DFL}
+    delivered = []
+
+    def register_handler(which, handler):
+        previous = handlers[which]
+        handlers[which] = handler
+        return previous
+
+    console_signals = SimpleNamespace(
+        SIGBREAK=break_signal,
+        signal=register_handler,
+        default_int_handler=signal.default_int_handler,
+    )
+    monkeypatch.setattr(operator_tool, "signal", console_signals, raising=False)
 
     def ports():
         if not device.events:
@@ -186,6 +202,11 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
         operator.unplug_at, operator.reconnect_at = 2, 5
         device.events.append(("trial", 1))
         device.flash[0x9000] = b"trial changed the NVS"
+        if outcome == "ctrl_break":
+            handler = handlers[break_signal]
+            delivered.append(handler)
+            if callable(handler):
+                handler(break_signal, None)
         return SimpleNamespace(returncode=0)
 
     tty = SimpleNamespace(isatty=lambda: True)
@@ -212,6 +233,7 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
 
     status = operator_tool.main(["--execute", *trial_args(paths)])
     result = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert handlers[break_signal] is signal.SIG_DFL
     if outcome == "occupied":
         assert status == 2
         assert result["trial_failure"] == TrialStep.PREFLIGHT
@@ -225,8 +247,13 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
         assert device.connections == 1
         assert device.flash[0x9000] != paths.nvs.read_bytes()
     else:
-        assert status == 0
-        assert result["trial_failure"] is None and result["factory_boot_requested"]
+        if outcome == "ctrl_break":
+            assert delivered == [signal.default_int_handler]
+            assert status == 1
+            assert result["trial_failure"] == TrialStep.BOOT_AND_RUN_ONE_TURN
+        else:
+            assert status == 0 and result["trial_failure"] is None
+        assert result["factory_boot_requested"]
         assert device.flash[0x9000] == paths.nvs.read_bytes()
         assert checks == ["COM3", "COM3"]
         assert device.events[-2:] == [("reset", 2), ("close", 2)]

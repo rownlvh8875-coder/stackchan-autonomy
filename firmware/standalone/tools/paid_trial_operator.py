@@ -3,6 +3,7 @@
 import argparse
 import json
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -172,7 +173,14 @@ def main(argv: list[str] | None = None) -> int:
     paths = PaidTrialPaths(
         args.review_dir, args.app, args.factory_ota1, args.pretrial_nvs, args.board_reference
     )
-    result = run_operator_paid_trial(paths, args.port.upper(), _windows_port_available)
+    break_signal = getattr(signal, "SIGBREAK", None)
+    if break_signal is not None:
+        previous_handler = signal.signal(break_signal, signal.default_int_handler)
+    try:
+        result = run_operator_paid_trial(paths, args.port.upper(), _windows_port_available)
+    finally:
+        if break_signal is not None:
+            signal.signal(break_signal, previous_handler)
     print(
         json.dumps({**asdict(result), "factory_boot_requested": result.factory_boot_requested}),
         flush=True,
