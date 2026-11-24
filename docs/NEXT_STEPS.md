@@ -1,5 +1,26 @@
 # Next steps
 
+## 2026-11-24 Windows heartbeat 시험 진단
+
+`e8ae686` push의 Windows/Python 3.11 기본 시험에서
+`test_live_heartbeat_renews_ownership_until_close`가 제어권을 유지해야
+하는 시점에 두 번째 실행자가 제어권을 얻어 실패했다. 기본 시험은
+502개 통과, 1개 실패, 2개 건너뜀이었다. 이 작업의 가상 soak는 실행 전
+단계에서 멈췄다. [실패 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45331138825/job/138232372213)
+
+같은 Windows/Python 3.11 시험에서 SQLite 커밋 지연과 이벤트 루프
+지연을 각각 한 번 주입해 같은 실패를 재현했다. 두 경우 모두
+`renew_timeout`으로 정지했고, 계측으로 위치를 구분했다.
+
+| 주입 지연 | 중단 단계 | 실행기 큐 최대 | 저장소 직렬 대기 최대 | SQLite 커밋 최대 | 이벤트 루프 지연 최대 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 갱신 커밋 직전 1.3초 | `sqlite_commit` | 2.6ms | 0.1ms 미만 | 1.305초 | 12.7ms |
+| heartbeat의 대기 후 1.2초 | `pre_submission_deadline` | 1.7ms | 0.1ms 미만 | 4.5ms | 1.180초 |
+
+GitHub 실행에서 발생한 지연 위치는 미확인이다. 해당 시험이 실패할 때
+제어권 상실 사유와 기존 시간 계측을 남기도록 했다. 1.5초 lease와 모든
+검사 조건을 유지했다. 주입을 제거한 관련 Windows 회귀 32개가 통과했다.
+
 ## 2026-11-24 오프라인 후속 — 클럭 시작 구간의 앰프 VDD
 
 `K151_SPEAKER_V5`는 클럭 활성화 설정의 읽기 확인부터 첫 저전압 보호

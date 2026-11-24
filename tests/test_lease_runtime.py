@@ -385,14 +385,17 @@ async def test_two_executors_cannot_dispatch_same_resource_until_release():
         await second.aclose()
 
 
+@pytest.mark.usefixtures("lease_timing_probe")
 async def test_live_heartbeat_renews_ownership_until_close():
     settings = Settings(lease_ttl_s=1.5, command_interval_s=0)
     executor = ActionExecutor(FakeRobotAdapter(), settings)
     contender = ControlLease(settings.state_path, settings.control_resource, ttl_s=1.5)
     try:
         assert await executor.claim_control()
-        await asyncio.sleep(3.2)  # Longer than the initial lease, independent of disk speed.
-        assert contender.acquire() is None
+        await asyncio.sleep(3.2)  # Observe ownership beyond the initial lease lifetime.
+        assert contender.acquire() is None, (
+            f"heartbeat control loss: {executor.control_loss_reason}"
+        )
     finally:
         await executor.aclose()
     assert contender.acquire() is not None
