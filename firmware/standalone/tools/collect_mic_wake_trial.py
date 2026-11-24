@@ -20,15 +20,18 @@ SPEAKER_SCOPE = "ONE_SYNTHETIC_SPEAKER_PROBE_AND_OTA1_RESTORE"
 SPEAKER_PROTOCOL = "K151_SPEAKER_V1"
 SPEAKER_STARTUP_PROTOCOL = "K151_SPEAKER_V2"
 SPEAKER_CLOCK_PROTOCOL = "K151_SPEAKER_V3"
+SPEAKER_PROTECTION_PROTOCOL = "K151_SPEAKER_V4"
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
     SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
     SPEAKER_CLOCK_PROTOCOL: "WAIT_SPEAKER_CLOCK_LOCAL_START",
+    SPEAKER_PROTECTION_PROTOCOL: "WAIT_SPEAKER_PROTECTION_LOCAL_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
     SPEAKER_STARTUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V2",
     SPEAKER_CLOCK_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V3",
+    SPEAKER_PROTECTION_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V4",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -90,6 +93,14 @@ SPEAKER_CLOCK_WAIT_SAMPLES = {
     "internal_unstable",
     "stable",
 }
+SPEAKER_PROTECTION_FLAGS = {
+    "ovp2",
+    "undervoltage",
+    "boost_overcurrent",
+    "ovp",
+    "amplifier_overcurrent",
+    "overtemperature",
+}
 WIRE_LIMIT = 512
 QUESTION_BEFORE_CUE = {"not_run", "memory_denied", "prepare_failed", "open_failed", "quiet_timeout"}
 QUESTION_AFTER_CUE = {"no_endpoint", "endpoint"}
@@ -140,11 +151,17 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
     )
     result = record.get("result")
     expected_fields = {field, "result", "operating_admission"}
-    clock_report = speaker and speaker_protocol == SPEAKER_CLOCK_PROTOCOL
-    if speaker and speaker_protocol in (SPEAKER_STARTUP_PROTOCOL, SPEAKER_CLOCK_PROTOCOL):
+    protection_report = speaker and speaker_protocol == SPEAKER_PROTECTION_PROTOCOL
+    clock_report = speaker and speaker_protocol in (
+        SPEAKER_CLOCK_PROTOCOL,
+        SPEAKER_PROTECTION_PROTOCOL,
+    )
+    if clock_report or (speaker and speaker_protocol == SPEAKER_STARTUP_PROTOCOL):
         expected_fields.add("startup_stage")
     if clock_report:
         expected_fields.update(("clock_wait_exit", "clock_wait_last"))
+    if protection_report:
+        expected_fields.add("protection")
     if (
         set(record) != expected_fields
         or record.get(field) != protocol
@@ -177,6 +194,25 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
                 raise ValueError("Invalid speaker clock wait diagnostic")
         elif (reason, sample) != ("none", "none"):
             raise ValueError("Unexpected speaker clock wait diagnostic")
+    if protection_report:
+        flags = record["protection"]
+        if (
+            not isinstance(flags, dict)
+            or flags.keys() != SPEAKER_PROTECTION_FLAGS
+            or any(type(value) is not bool for value in flags.values())
+        ):
+            raise ValueError("Invalid speaker protection diagnostic")
+        active = any(flags.values())
+        if record["startup_stage"] == "wait_clock":
+            protection_stop = record["clock_wait_exit"] == "protection_active"
+            if active != protection_stop or (active and record["clock_wait_last"] == "unobserved"):
+                raise ValueError("Speaker protection disagrees with the clock wait result")
+        elif active and record["startup_stage"] not in {
+            "wait_switching",
+            "pre_unmute_status",
+            "post_unmute_status",
+        }:
+            raise ValueError("Unexpected speaker protection diagnostic")
     return record
 
 
@@ -251,9 +287,7 @@ def receive_once(
                 "WAIT_WAKE_ONLY_CONTROL",
                 "WAIT_QUESTION_ONLY_START",
                 "WAIT_SILENT_TX_LOCAL_START",
-                "WAIT_SPEAKER_LOCAL_START",
-                "WAIT_SPEAKER_STARTUP_LOCAL_START",
-                "WAIT_SPEAKER_CLOCK_LOCAL_START",
+                *SPEAKER_CHALLENGES.values(),
             ):
                 nonce = record.get("nonce")
                 if (

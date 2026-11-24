@@ -691,7 +691,6 @@ def test_real_aw88298_startup_stays_quiet(aw88298_startup_binary, mode):
         "start_no_clock",
         "start_reference_missing",
         "start_clock_unstable",
-        "start_clock_protection",
         "start_early_switching",
         "start_clock_read_failure",
         "start_no_switching",
@@ -709,5 +708,18 @@ def test_real_aw88298_startup_stays_quiet(aw88298_startup_binary, mode):
 def test_real_aw88298_guarded_low_volume_start(aw88298_startup_binary, mode):
     result = subprocess.run(
         [str(aw88298_startup_binary), mode], capture_output=True, text=True, timeout=10
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("protection", ["8000", "4000", "0800", "0400", "0008", "0002", "400a"])
+def test_real_aw88298_preserves_all_active_protection_bits_without_unmuting(
+    aw88298_startup_binary, protection
+):
+    result = subprocess.run(
+        [str(aw88298_startup_binary), "start_clock_protection", protection],
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     assert result.returncode == 0, result.stderr

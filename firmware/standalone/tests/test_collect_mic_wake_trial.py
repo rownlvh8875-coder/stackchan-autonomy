@@ -538,6 +538,66 @@ def test_speaker_clock_report_preserves_exit_and_last_accepted_sample(receiver):
             receiver.validate_output_report(invalid, speaker=True, speaker_protocol=protocol)
 
 
+def test_speaker_protection_report_preserves_only_named_flags_from_a_single_start(receiver):
+    protocol = "K151_SPEAKER_V4"
+    wait = SPEAKER_WAIT | {"mic_trial": "WAIT_SPEAKER_PROTECTION_LOCAL_START"}
+    flags = {
+        "ovp2": False,
+        "undervoltage": True,
+        "boost_overcurrent": False,
+        "ovp": False,
+        "amplifier_overcurrent": True,
+        "overtemperature": False,
+    }
+    report = SPEAKER_REPORT | {
+        "speaker_probe": protocol,
+        "result": "amplifier_start_failed",
+        "startup_stage": "wait_clock",
+        "clock_wait_exit": "protection_active",
+        "clock_wait_last": "stable",
+        "protection": flags,
+    }
+    port = FakeSerial([wait, report, HOLD])
+    assert (
+        receiver.receive_once(port, lambda: None, speaker=True, speaker_protocol=protocol) == report
+    )
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+
+    clock_clear = dict.fromkeys(flags, False)
+    for valid in (
+        report | {"result": "cleanup_failed"},
+        report
+        | {"startup_stage": "wait_switching", "clock_wait_exit": "none", "clock_wait_last": "none"},
+        report | {"clock_wait_exit": "startup_deadline", "protection": clock_clear},
+    ):
+        assert (
+            receiver.validate_output_report(valid, speaker=True, speaker_protocol=protocol) == valid
+        )
+
+    for invalid in (
+        report | {"protection": clock_clear},
+        report | {"protection": flags | {"raw_sysst": 0x4019}},
+        report | {"protection": flags | {"undervoltage": 1}},
+        report | {"protection": None},
+        report | {"clock_wait_exit": "status_read_failed"},
+        report | {"clock_wait_last": "unobserved"},
+        report
+        | {"startup_stage": "codec_open", "clock_wait_exit": "none", "clock_wait_last": "none"},
+        {key: value for key, value in report.items() if key != "protection"},
+    ):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(invalid, speaker=True, speaker_protocol=protocol)
+
+    for expected, challenge in (
+        (receiver.SPEAKER_CLOCK_PROTOCOL, wait),
+        (protocol, SPEAKER_WAIT | {"mic_trial": "WAIT_SPEAKER_CLOCK_LOCAL_START"}),
+    ):
+        port = FakeSerial([challenge])
+        with pytest.raises(ValueError):
+            receiver.receive_once(port, lambda: None, speaker=True, speaker_protocol=expected)
+        assert port.writes == [b"HELLO\n"]
+
+
 @pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )
@@ -584,7 +644,8 @@ def test_silent_tx_challenge_cannot_start_the_wrong_image(receiver, challenge, s
 
 
 @pytest.mark.parametrize(
-    "speaker_protocol", [None, "K151_SPEAKER_V1", "K151_SPEAKER_V2", "K151_SPEAKER_V3"]
+    "speaker_protocol",
+    [None, "K151_SPEAKER_V1", "K151_SPEAKER_V2", "K151_SPEAKER_V3", "K151_SPEAKER_V4"],
 )
 def test_output_trial_binds_approval_and_install_to_exact_review(
     receiver, tmp_path, speaker_protocol

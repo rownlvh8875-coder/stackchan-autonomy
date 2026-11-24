@@ -21,6 +21,7 @@ bool activating = false;
 bool allowed = true;
 bool unmuted = false;
 int64_t now_us = 0;
+uint16_t injected_clock_protection = 0;
 
 bool is_open(const audio_codec_ctrl_if_t* h) { return h == &i2c; }
 int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* output, int bytes) {
@@ -52,7 +53,8 @@ int write(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* inpu
         registers[0x01] = 0x0011;
       if (scenario == "start_reference_missing") registers[0x01] = 0x0020;
       if (scenario == "start_clock_unstable") registers[0x01] = 0x0001;
-      if (scenario == "start_clock_protection") registers[0x01] = 0x0019;
+      if (scenario == "start_clock_protection")
+        registers[0x01] = 0x2091 | injected_clock_protection; // Also ADPS and CLIPS.
       if (scenario == "start_early_switching") registers[0x01] = 0x0111;
     } else {
       assert((word & 0x43) == 0x40);
@@ -99,8 +101,13 @@ int info(const audio_codec_ctrl_if_t* h, audio_codec_ctrl_info_t* out) {
 extern "C" void esp_codec_dev_sleep(int) { assert(false && "AW9523 owns amp reset"); }
 
 int main(int argc, char** argv) {
-  assert(argc == 2);
+  assert(argc == 2 || argc == 3);
   scenario = argv[1];
+  if (scenario == "start_clock_protection") {
+    assert(argc == 3);
+    injected_clock_protection = static_cast<uint16_t>(std::strtoul(argv[2], nullptr, 16));
+    assert(injected_clock_protection);
+  }
   i2c.is_open = is_open;
   i2c.read_reg = read;
   i2c.write_reg = write;
@@ -169,8 +176,13 @@ int main(int argc, char** argv) {
         check_wait(Exit::poll_limit, Sample::reference_missing);
       if (scenario == "start_clock_unstable")
         check_wait(Exit::poll_limit, Sample::internal_unstable);
-      if (scenario == "start_clock_protection")
+      if (scenario == "start_clock_protection") {
         check_wait(Exit::protection_active, Sample::stable);
+        assert((registers[0x04] & 0x43) == 0x42 && (registers[0x05] & 0x10) != 0);
+        assert(writes == before + 1 && startup.protection_flags == injected_clock_protection);
+      } else {
+        assert(startup.protection_flags == (scenario == "start_fault" ? 0x0008 : 0));
+      }
       if (scenario == "start_early_switching") check_wait(Exit::early_switching, Sample::stable);
       if (scenario == "start_clock_read_failure")
         check_wait(Exit::status_read_failed, Sample::unobserved);

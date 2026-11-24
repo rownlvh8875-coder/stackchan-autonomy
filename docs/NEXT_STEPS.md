@@ -1,5 +1,19 @@
 # Next steps
 
+## 2026-11-24 오프라인 후속 — 앰프 보호 비트 V4
+
+`K151_SPEAKER_V4`는 기존 AW88298 `SYSST` 읽기에서 시작을 중단시킨
+보호 비트를 각각 기록한다. 동일 샘플에서 활성화된 두 개 이상의 비트도
+모두 보존한다. `protection`의 고정 필드는 `ovp2`, `undervoltage`,
+`boost_overcurrent`, `ovp`, `amplifier_overcurrent`, `overtemperature`다.
+`false`는 중단을 설명하는 보호 비트로 기록되지 않았다는 뜻이다.
+원시 레지스터 값은 보고서에 포함하지 않는다.
+
+기존 보호 마스크, 폴링 제한, 전체 실행 제한, 뮤트, STOP 및 정리 동작은
+유지했다. V4 전용 시작 신호와 검토 이미지 프로토콜을 대조한다. 실물
+시험은 이미지·복구 범위 검토와 별도 승인 이후 진행한다.
+[AW88298 데이터시트의 SYSST 비트 표](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=31)
+
 ## 2026-11-24 실물 후속 — V3에서 앰프 보호 상태 확인
 
 승인된 V3 진단 1회에서 AW88298의 마지막 유효 클럭 상태는 `stable`이었고,

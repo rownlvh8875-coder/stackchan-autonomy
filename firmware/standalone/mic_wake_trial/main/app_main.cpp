@@ -55,7 +55,7 @@ const char* tx_result_name(K151SilentTxResult result) {
 }
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_SPEAKER_CLOCK_LOCAL_START";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_PROTECTION_LOCAL_START";
 
 const char* speaker_result_name(K151SpeakerProbeResult result) {
   using Result = K151SpeakerProbeResult;
@@ -206,10 +206,19 @@ extern "C" void app_main() {
     const char* wait_exit = speaker_clock_wait_exit_name(report.startup.clock_wait_exit);
     const char* last = speaker_clock_wait_sample_name(report.startup.clock_wait_last);
     if (result && stage && wait_exit && last) {
-      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V3\",\"result\":\"%s\","
+      const auto active = [flags = report.startup.protection_flags](uint16_t bit) {
+        return (flags & bit) ? "true" : "false";
+      };
+      using namespace aw88298_protection;
+      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V4\",\"result\":\"%s\","
                   "\"startup_stage\":\"%s\",\"clock_wait_exit\":\"%s\","
-                  "\"clock_wait_last\":\"%s\",\"operating_admission\":false}\n",
-                  result, stage, wait_exit, last);
+                  "\"clock_wait_last\":\"%s\",\"protection\":{"
+                  "\"ovp2\":%s,\"undervoltage\":%s,\"boost_overcurrent\":%s,\"ovp\":%s,"
+                  "\"amplifier_overcurrent\":%s,\"overtemperature\":%s},"
+                  "\"operating_admission\":false}\n",
+                  result, stage, wait_exit, last, active(ovp2), active(undervoltage),
+                  active(boost_overcurrent), active(ovp), active(amplifier_overcurrent),
+                  active(overtemperature));
     }
 #else
     // This app has one I2S caller, using the port's exclusive RX allocation.
