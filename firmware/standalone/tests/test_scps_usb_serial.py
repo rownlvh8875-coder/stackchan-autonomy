@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import getpass
+import io
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -111,6 +113,37 @@ def test_full_encrypted_pairing_and_no_secret_echo():
         index for index, message in enumerate(messages) if "touch the top of the head" in message
     )
     assert screen < head
+
+
+@pytest.mark.parametrize("unavailable_at", ["Wi-Fi password", "OpenAI API key"])
+def test_unavailable_hidden_input_aborts_before_echoing_or_sending_secrets(
+    monkeypatch, unavailable_at
+):
+    port = FakePort()
+    terminal = io.StringIO()
+    fallback_reads = []
+
+    def read_with_echo(prompt, *_args, **_kwargs):
+        fallback_reads.append(prompt)
+        terminal.write("synthetic-echoed-secret")
+        return "synthetic-echoed-secret"
+
+    def hidden_input(prompt):
+        if prompt.startswith(unavailable_at):
+            return getpass.fallback_getpass(prompt, stream=terminal)
+        return "synthetic-hidden-value"
+
+    monkeypatch.setattr(getpass, "_raw_input", read_with_echo)
+    with pytest.raises(ScpsWireError, match="secure console input unavailable"):
+        run_pairing(
+            port,
+            text_input=lambda prompt: port.sas if "8 digits" in prompt else "SyntheticNetwork",
+            hidden_input=hidden_input,
+            say=lambda _: None,
+        )
+    assert fallback_reads == [] and terminal.getvalue() == ""
+    assert port.credentials is None
+    assert [frame.op for frame in port.writes] == [Op.PC_HELLO, Op.STOP]
 
 
 def test_wrong_sas_never_sends_credentials():

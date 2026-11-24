@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import warnings
 from collections.abc import Callable
 from typing import Protocol
 
@@ -41,8 +42,14 @@ def run_pairing(
         if len(observed) != 8 or not observed.isdecimal() or observed != pc.sas:
             raise ScpsWireError("pairing codes do not match; canceled")
         ssid = text_input("Wi-Fi SSID (visible): ").encode("utf-8")
-        password = hidden_input("Wi-Fi password (hidden): ")
-        api_key = hidden_input("OpenAI API key (hidden): ")
+        with warnings.catch_warnings():
+            # getpass warns before it falls back to reading with echo enabled.
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            try:
+                password = hidden_input("Wi-Fi password (hidden): ")
+                api_key = hidden_input("OpenAI API key (hidden): ")
+            except getpass.GetPassWarning:
+                raise ScpsWireError("secure console input unavailable") from None
         # The device requires its own on-screen comparison and final head hold.
         sealed = pc.seal(ssid, password, api_key, observed, reviewed_locally=True)
         write_one(port, Frame(Op.SEALED, sealed))
