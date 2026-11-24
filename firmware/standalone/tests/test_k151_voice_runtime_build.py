@@ -10,12 +10,10 @@ BASE = Path(__file__).resolve().parents[1]
 APP = BASE / "esp_app/main"
 
 
-@pytest.fixture(scope="module")
-def runtime_binary(tmp_path_factory):
+def _build_runtime(folder, cjson=None):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("C++20 compiler required")
-    folder = tmp_path_factory.mktemp("k151-voice-runtime")
     (folder / "freertos").mkdir()
     (folder / "psa").mkdir()
     (folder / "psa/crypto.h").write_text("#pragma once\nusing psa_key_id_t = unsigned;\n")
@@ -59,6 +57,21 @@ def runtime_binary(tmp_path_factory):
         APP,
     ):
         args += ["-I", str(directory)]
+    realtime_sources = []
+    if cjson is not None:
+        include, library = cjson
+        args += [
+            "-DSTACKCHAN_TEST_REALTIME_WIRE",
+            "-I",
+            str(include),
+            "-I",
+            str(BASE / "tests/realtime_transport_doubles"),
+        ]
+        realtime_sources = [
+            str(APP / "k151_voice_decode.cpp"),
+            str(APP / "k151_realtime_speech.cpp"),
+            library,
+        ]
     result = subprocess.run(
         args
         + [
@@ -71,15 +84,35 @@ def runtime_binary(tmp_path_factory):
             str(APP / "k151_display_stop.cpp"),
             str(APP / "k151_owner_setup.cpp"),
             str(APP / "nvs_port.cpp"),
-            "-o",
-            str(binary),
-        ],
+        ]
+        + realtime_sources
+        + ["-o", str(binary)],
         capture_output=True,
         text=True,
         timeout=90,
     )
     assert result.returncode == 0, result.stderr
     return binary
+
+
+@pytest.fixture(scope="module")
+def runtime_binary(tmp_path_factory):
+    return _build_runtime(tmp_path_factory.mktemp("k151-voice-runtime"))
+
+
+@pytest.fixture(scope="module")
+def realtime_runtime_binary(tmp_path_factory):
+    header = Path("/usr/include/cjson/cJSON.h")
+    if not header.is_file():
+        pytest.skip("system libcjson-dev headers unavailable")
+    return _build_runtime(
+        tmp_path_factory.mktemp("k151-realtime-runtime"), (header.parent, "-lcjson")
+    )
+
+
+def _run_runtime(binary, scenario):
+    run = subprocess.run([str(binary), scenario], capture_output=True, text=True, timeout=10)
+    assert run.returncode == 0, run.stderr
 
 
 @pytest.mark.parametrize(
@@ -160,7 +193,11 @@ def runtime_binary(tmp_path_factory):
     ],
 )
 def test_runtime_owner_lifecycle(runtime_binary, scenario):
-    run = subprocess.run(
-        [str(runtime_binary), scenario], capture_output=True, text=True, timeout=10
-    )
-    assert run.returncode == 0, run.stderr
+    _run_runtime(runtime_binary, scenario)
+
+
+@pytest.mark.parametrize(
+    "scenario", ["bootstrap_conversation_continuous", "bootstrap_conversation_tts_failure"]
+)
+def test_runtime_realtime_wire(realtime_runtime_binary, scenario):
+    _run_runtime(realtime_runtime_binary, scenario)

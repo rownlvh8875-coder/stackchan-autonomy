@@ -21,6 +21,11 @@
 #include <thread>
 #include <utility>
 
+#ifdef STACKCHAN_TEST_REALTIME_WIRE
+#include <esp_crt_bundle.h>
+#include <esp_transport_ws.h>
+#endif
+
 using namespace stackchan::standalone;
 
 struct i2c_master_bus_t {};
@@ -28,6 +33,9 @@ struct i2c_master_dev_t {
   uint16_t address;
 };
 struct esp_timer {};
+#ifdef STACKCHAN_TEST_REALTIME_WIRE
+struct esp_transport {};
+#endif
 
 namespace {
 std::string_view scenario;
@@ -40,6 +48,12 @@ int model_starts = 0, model_stops = 0, mic_opens = 0, capture_reads = 0;
 int calls = 0, plays = 0;
 bool codec_running = false, mic_open = false, amp_open = false, model_loaded = false;
 bool pending_pcm = false;
+#ifdef STACKCHAN_TEST_REALTIME_WIRE
+esp_transport tls_socket, ws_socket;
+bool speech_connected = false, speech_requested = false;
+std::string_view speech_event;
+size_t speech_events_read = 0;
+#endif
 i2c_master_bus_t menu_bus;
 bool board_bus_registered = true;
 i2c_master_dev_t stop_expander{0x58}, stop_panel{0x38};
@@ -451,10 +465,18 @@ bool K151CodecPort::capture_mono_24k(std::span<int16_t> pcm) {
 bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& given_consent) {
   assert((conversation_case() || &given_consent == &consent) &&
          given_consent && !stop_source() && capture_idle() && calls == 3 * (plays + 1));
+#ifdef STACKCHAN_TEST_REALTIME_WIRE
+  assert(!speech_connected && speech_requested);
+#endif
   return amp_open = true;
 }
 bool K151CodecPort::play_mono_24k(std::span<const int16_t> pcm) {
-  assert(amp_open && !mic_open && pcm.size() == 240 && pcm.front() == 10);
+  assert(amp_open && !mic_open);
+#ifdef STACKCHAN_TEST_REALTIME_WIRE
+  assert(pcm.size() == 1 && pcm.front() == (plays == 0 ? 10 : 20));
+#else
+  assert(pcm.size() == 240 && pcm.front() == 10);
+#endif
   ++plays;
   return pending_pcm = true;
 }
@@ -547,7 +569,19 @@ bool K151HttpsVoicePort::post_once(const Request& req, std::string_view,
     assert(req.pcm24k.size() == 4 * QuestionCapture::kFrame);
     for (int16_t sample : req.pcm24k) assert(sample == (plays == 0 ? 2000 : 2400));
   }
+#ifdef STACKCHAN_TEST_REALTIME_WIRE
+  assert(realtime_conversation() && call_in_turn < 2 && !setup_usb);
+  constexpr std::string_view transcript = R"({"text":"test question"})";
+  constexpr std::string_view answer =
+      R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"test reply"}]}]})";
+  assert(call_in_turn == 0 || req.text == "test question");
+  assert(req.model == (call_in_turn == 0 ? "gpt-transcribe" : "gpt-6-luna"));
+  const auto wire = call_in_turn == 0 ? transcript : answer;
+  out.body.assign(wire.begin(), wire.end());
+  ++calls;
+#else
   out.body.assign(1, static_cast<uint8_t>(++calls));
+#endif
   out.received_ms = static_cast<uint64_t>(now_us / 1'000);
   if (calls == failed_conversation_call()) return false;
   if (scenario == "revoke_during_stt") consent = false;
@@ -555,6 +589,7 @@ bool K151HttpsVoicePort::post_once(const Request& req, std::string_view,
   if (scenario == kStopDuringRequest[call_in_turn]) display_press();
   return true;
 }
+#ifndef STACKCHAN_TEST_REALTIME_WIRE
 bool K151VoiceDecoder::transcription(std::span<const uint8_t>, std::string& out) {
   out = "test question"; return true;
 }
@@ -578,7 +613,105 @@ bool K151RealtimeSpeechPort::synthesize_once(const VoiceApiRequest& request, std
   completed_ms = static_cast<uint64_t>(now_us / 1'000);
   return true;
 }
+#endif
 }
+
+#ifdef STACKCHAN_TEST_REALTIME_WIRE
+extern "C" esp_err_t esp_crt_bundle_attach(void*) { return ESP_OK; }
+extern "C" esp_transport_handle_t esp_transport_ssl_init() { return &tls_socket; }
+extern "C" esp_transport_handle_t esp_transport_ws_init(esp_transport_handle_t parent) {
+  assert(parent == &tls_socket && !speech_connected);
+  return &ws_socket;
+}
+extern "C" void esp_transport_ssl_crt_bundle_attach(esp_transport_handle_t parent,
+                                                    esp_err_t (*attach)(void*)) {
+  assert(parent == &tls_socket && attach == esp_crt_bundle_attach);
+}
+extern "C" esp_err_t esp_transport_ws_set_config(esp_transport_handle_t ws,
+                                                 const esp_transport_ws_config_t* config) {
+  assert(ws == &ws_socket && config->propagate_control_frames);
+  assert(std::string_view(config->auth) == "Bearer mock-only-credential");
+  assert(std::string_view(config->ws_path) == "/v1/realtime?model=gpt-realtime-2.1-mini");
+  return ESP_OK;
+}
+extern "C" int esp_transport_connect(esp_transport_handle_t ws, const char* host, int port,
+                                     int timeout) {
+  assert(ws == &ws_socket && std::string_view(host) == "api.openai.com" && port == 443);
+  assert(timeout == 1500 && !setup_usb && !mic_open && !amp_open && !speech_connected);
+  assert(calls == 3 * plays + 2);
+  ++calls;
+  speech_connected = true;
+  speech_requested = false;
+  speech_events_read = 0;
+  return 0;
+}
+extern "C" int esp_transport_ws_get_upgrade_request_status(esp_transport_handle_t ws) {
+  assert(ws == &ws_socket && speech_connected);
+  return 101;
+}
+extern "C" esp_err_t esp_transport_ws_set_auth(esp_transport_handle_t ws, const char* auth) {
+  assert(ws == &ws_socket && speech_connected && !auth);
+  return ESP_OK;
+}
+extern "C" int esp_transport_read(esp_transport_handle_t ws, char* out, int size, int timeout) {
+  constexpr std::array<std::string_view, 6> events{
+      R"({"type":"session.created","session":{"type":"realtime","audio":{"output":{"format":{"type":"audio/pcm","rate":24000}}}}})",
+      R"({"type":"conversation.created","conversation":{"id":"conv_a"}})",
+      R"({"type":"response.created","response":{"id":"resp_a","status":"in_progress","metadata":{"stackchan":"speech"}}})",
+      R"({"type":"response.output_audio.delta","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0,"delta":"CgA="})",
+      R"({"type":"response.output_audio.done","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0})",
+      R"({"type":"response.done","response":{"id":"resp_a","status":"completed"}})",
+  };
+  assert(ws == &ws_socket && speech_connected && timeout == 250);
+  assert(speech_events_read < events.size());
+  assert(speech_requested == (speech_events_read != 0));
+  speech_event = events[speech_events_read++];
+  if (speech_events_read == 4 && plays == 1)
+    speech_event = R"({"type":"response.output_audio.delta","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0,"delta":"FAA="})";
+  if (speech_events_read == events.size() && calls == failed_conversation_call())
+    speech_event = R"({"type":"response.done","response":{"id":"resp_a","status":"incomplete"}})";
+  assert(speech_event.size() <= static_cast<size_t>(size));
+  std::memcpy(out, speech_event.data(), speech_event.size());
+  now_us += 1'000;
+  return static_cast<int>(speech_event.size());
+}
+extern "C" int esp_transport_poll_read(esp_transport_handle_t, int) {
+  assert(false && "no control frame in this exchange");
+  return -1;
+}
+extern "C" ws_transport_opcodes_t esp_transport_ws_get_read_opcode(esp_transport_handle_t ws) {
+  assert(ws == &ws_socket && speech_connected);
+  return WS_TRANSPORT_OPCODES_TEXT;
+}
+extern "C" int esp_transport_ws_get_read_payload_len(esp_transport_handle_t ws) {
+  assert(ws == &ws_socket && speech_connected);
+  return static_cast<int>(speech_event.size());
+}
+extern "C" bool esp_transport_ws_get_fin_flag(esp_transport_handle_t ws) {
+  assert(ws == &ws_socket && speech_connected);
+  return true;
+}
+extern "C" int esp_transport_ws_send_raw(esp_transport_handle_t ws, ws_transport_opcodes_t opcode,
+                                         const char* data, int size, int timeout) {
+  assert(ws == &ws_socket && speech_connected && !speech_requested && speech_events_read == 1);
+  assert(opcode == (WS_TRANSPORT_OPCODES_FIN | WS_TRANSPORT_OPCODES_TEXT) && timeout == 1500);
+  const std::string_view request(data, size);
+  assert(request.find(R"("type":"response.create")") != request.npos);
+  assert(request.find(R"("text":"test reply")") != request.npos);
+  assert(request.find("test question") == request.npos);
+  speech_requested = true;
+  return size;
+}
+extern "C" int esp_transport_close(esp_transport_handle_t ws) {
+  assert(ws == &ws_socket && speech_connected);
+  speech_connected = false;
+  return 0;
+}
+extern "C" esp_err_t esp_transport_destroy(esp_transport_handle_t port) {
+  assert((port == &ws_socket || port == &tls_socket) && !speech_connected);
+  return ESP_OK;
+}
+#endif
 
 void exercise_conversation() {
   using Phase = K151ConversationOwner::Phase;
@@ -586,7 +719,8 @@ void exercise_conversation() {
   board_bus_registered = false;
   const bool realtime = realtime_conversation();
   const bool continuous = continuous_conversation();
-  const VoiceModelConfig models{"stt", "gpt", realtime ? "gpt-realtime-2.1-mini" : "tts",
+  const VoiceModelConfig models{realtime ? "gpt-transcribe" : "stt", realtime ? "gpt-6-luna" : "gpt",
+                                realtime ? "gpt-realtime-2.1-mini" : "tts",
                                 realtime ? "marin" : "voice"};
   const auto request = [&](bool paid, bool budget) {
     const auto mode = continuous ? K151VoiceMode::continuous : K151VoiceMode::one_paid_turn;
@@ -642,6 +776,9 @@ void exercise_conversation() {
                             K151VoiceStatus::synthesizing};
     assert(voice_status.back() == stages[failed_call - 1]);
     assert(calls == failed_call && !plays && !mic_open && !amp_open);
+#ifdef STACKCHAN_TEST_REALTIME_WIRE
+    assert(!speech_connected && speech_requested);
+#endif
     assert(board_bus_registered && lvgl_on && !stop_timer_active && network_stops == 1);
     now_us += 2'999'000;
     assert(conversation.poll().phase == Phase::showing_trial_result && board_bus_registered);
