@@ -49,8 +49,17 @@ def exercise_one_turn(
     say: Callable[[str], None],
     now: Callable[[], float],
     sleep: Callable[[float], None],
+    *,
+    restore_present: Callable[[], bool] | None = None,
 ) -> bool:
     def observe_turn():
+        deadline = now() + 120
+        # Input buffered during setup or disconnect is not an observation.
+        while now() < deadline and not present():
+            if read_key() is None:
+                break
+        else:
+            return False
         say(
             "로봇 화면의 한 턴 범위를 확인한 뒤 화면을 1초 눌렀다 떼세요. "
             "Say Hi StackChan이 나오면 호출어를 한 번 말하고, "
@@ -59,7 +68,6 @@ def exercise_one_turn(
         say(
             "USB를 분리한 동안 로봇 답변과 Standby verified. Trial ended.를 확인하면 Y, 실패하면 N을 누르세요."
         )
-        deadline = now() + 120
         while now() < deadline and not present():
             key = read_key()
             if key in ("y", "Y"):
@@ -80,7 +88,9 @@ def exercise_one_turn(
         say("한 턴 시험이 중단됐습니다.")
     finally:
         say("출고 펌웨어 복구를 위해 로봇을 같은 USB 포트에 다시 연결하세요.")
-        reconnected = _wait_for(present, 60, now, sleep)
+        reconnected = _wait_for(
+            restore_present if restore_present is not None else present, 60, now, sleep
+        )
     return confirmed and reconnected
 
 
@@ -154,6 +164,7 @@ def run_operator_paid_trial(
             lambda message: print(message, flush=True),
             time.monotonic,
             time.sleep,
+            restore_present=lambda: present(port),
         ),
     )
 

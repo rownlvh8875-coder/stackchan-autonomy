@@ -133,6 +133,16 @@ def test_one_turn_requires_disconnect_then_owner_observation_then_reconnect():
     assert not any(event[0] == "prompt" and "머리" in event[1] for event in operator.events)
 
 
+def test_buffered_confirmation_from_before_the_observation_cannot_pass():
+    operator = SimulatedOperator(answer=None)
+    buffered = iter(("Y",))
+    operator.key = lambda: next(buffered, None)
+
+    assert operator.run() is False
+    assert operator.prompt("Hi StackChan")[2] == operator.unplug_at
+    assert operator.prompt("다시 연결")[2] == operator.reconnect_at
+
+
 @pytest.mark.parametrize(
     "settings",
     [
@@ -156,7 +166,9 @@ def test_missing_observation_or_attachment_cannot_report_a_successful_turn(setti
     assert operator.seconds <= 215
 
 
-@pytest.mark.parametrize("outcome", ["ready", "replacement", "occupied", "ctrl_break"])
+@pytest.mark.parametrize(
+    "outcome", ["ready", "renumbered", "wrong_port", "replacement", "occupied", "ctrl_break"]
+)
 def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
     review, monkeypatch, capsys, outcome
 ):
@@ -164,6 +176,7 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
     device = Tool(paths)
     operator = SimulatedOperator()
     original = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="original")
+    changed_port = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM4", serial_number="original")
     other = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="other")
     checks = []
     break_signal = 21
@@ -190,6 +203,8 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
         if ("trial", 1) not in device.events or operator.seconds < operator.unplug_at:
             return [original]
         if operator.seconds >= operator.reconnect_at:
+            if outcome == "wrong_port" or (outcome == "renumbered" and operator.seconds < 8):
+                return [changed_port]
             return [other if outcome == "replacement" else original]
         return []
 
@@ -240,7 +255,7 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
         assert not result["install_attempted"]
         assert device.events == []
         assert checks == ["COM3"]
-    elif outcome == "replacement":
+    elif outcome in ("replacement", "wrong_port"):
         assert status == 3
         assert result["recovery_failure"] == TrialStep.REBIND_FOR_RESTORE
         assert not result["factory_boot_requested"]
@@ -253,6 +268,8 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
             assert result["trial_failure"] == TrialStep.BOOT_AND_RUN_ONE_TURN
         else:
             assert status == 0 and result["trial_failure"] is None
+            if outcome == "renumbered":
+                assert operator.seconds >= 8
         assert result["factory_boot_requested"]
         assert device.flash[0x9000] == paths.nvs.read_bytes()
         assert checks == ["COM3", "COM3"]
