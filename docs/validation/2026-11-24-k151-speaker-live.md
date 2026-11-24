@@ -196,3 +196,46 @@ I²S 송신 시작을 AW88298 리셋 해제와 기존 50ms 대기 뒤로 옮긴
 NVS, assets 및 eFuse에는 쓰지 않았다. 마이크 사용, 음성 수집, 외부
 전송 및 유료 API 호출은 없었다. 오프라인 스피커·수집기 시험 36개가
 통과했다.
+
+## V6 대기 상태 저전압과 출고 복구
+
+`I2SEN` 활성화와 `PWDN` 해제를 분리한 합성음 진단을 별도 승인
+범위에서 1회 실행했다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `4f695588aa8c6382da33fdd96ef285f888f5284d`, SHA256 `e4f5ee2f6a553b809471c7ce68ea0e56277bc3327651cf5b8cdb9cd0c1654894` |
+| 쓰기 전 확인 | 원본 A/B와 복구 파일의 길이·해시, 동일 보드, 16MB 플래시, 보안 상태, 파티션 표·OTA 선택 데이터 및 기존 OTA1 대조 통과 |
+| 진단 쓰기 | `ota_1 [0x510000,0x552930)` 272,688바이트, 영향 섹터 `[0x510000,0x553000)`. 독립 검증 통과 |
+| 기기 결과 | `K151_SPEAKER_V6 / amplifier_start_failed / wait_clock`, `clock_wait_last=stable`, `clock_wait_exit=protection_active`. `undervoltage`만 활성화됐고 합성 PCM 전송 전에 정지했다. |
+| 대기 상태 | `standby_uvls=true`. AW88298의 `I2SEN` 설정과 `PWDN` 해제 전의 읽기이며, ESP32의 I²S 송신 클럭은 이미 시작한 상태였다. |
+| 전환 이후 | `PWDN` 해제 읽기 확인 558µs 뒤 `UVLS` 관측. 그로부터 570µs 뒤 `startup_vdd=sampled`, `startup_vdd_mv=4476`. |
+| 출고 복구 | `ota_1 [0x510000,0xA00000)` 5,177,344바이트. 독립 플래시 해시와 원본 파티션 표·OTA 선택 데이터 일치 확인 |
+| 재부팅 | 출고 부팅 요청과 USB Serial/JTAG의 COM3 재연결 확인. 출고 화면은 현장 확인 전. |
+
+Codex Desktop 업데이트로 원본 쓰기 완료 후 독립 검증이 중단됐다.
+완료된 원본 쓰기 로그를 확인하고, 동일 보드와 보안 상태를 확인한 뒤
+원본 해시 검증과 메타데이터 읽기부터 이어서 수행했다. 원본은 한 번
+썼으며 이후 출고 재부팅을 요청했다. 파티션 표, OTA 선택 데이터,
+NVS, assets 및 eFuse에는 쓰지 않았다. 마이크 사용, 음성 수집이나
+유료 API 호출은 없었다.
+
+이 시험에서 저전압 표시는 준비 단계에서 한 번, `PWDN` 해제 이후에
+다시 읽혔다. 두 읽기 사이의 비트 상태와 전압 파형은 미측정이다.
+데이터시트의 `UVLS` 기준은 2.8V이며, 4.476V는 다른 시점에 읽은
+내부 ADC 표본이다. 저전압 표시의 원인과 실제 스피커 재생은 미확인이다.
+[AW88298 상태 비트](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=31)
+
+### V6 소스의 오프라인 검증과 CI
+
+Windows standalone 회귀는 1,476개 통과, 8개 건너뜀을 기록했고
+ESP32-S3용 V6 컴파일·링크 및 이미지 검사가 통과했다. GitHub의
+`4f69558`은 8/9다. PR CI 네 조합과 타깃 빌드는 통과했다.
+Push Windows/Python 3.12의 기본 시험은 502개 통과, 2개 건너뜀,
+1개 실패였다. `test_subprocess_lease_acquisition_has_exactly_one_winner`
+자식 프로세스가 `StateUnavailable`로 종료됐다. 해당 작업의 가상
+soak는 시작하지 않았다. 로컬 Windows/Python 3.12에서 같은 시험을
+한 번 실행해 통과했고, GitHub 실패 시의 저장소 단계는 확인되지 않았다.
+[PR CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45362286359)
+· [타깃 빌드](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45362286456)
+· [실패 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45362270298/job/138335024294)
