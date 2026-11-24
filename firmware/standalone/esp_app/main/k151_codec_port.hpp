@@ -94,6 +94,9 @@ class K151CodecPort final {
   bool quiesce_channels();
   bool prepare_output_codec();
   bool prepare_input_codec();
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  std::optional<uint16_t> read_amp_observation(uint8_t reg);
+#endif
   bool close_microphone(bool* driver_closed = nullptr); // Does not initiate nested cleanup.
   const std::atomic_bool* owner_ = nullptr;
   const std::atomic_bool* stop_ = nullptr;

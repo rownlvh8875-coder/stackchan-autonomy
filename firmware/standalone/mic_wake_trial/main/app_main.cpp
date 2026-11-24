@@ -55,7 +55,7 @@ const char* tx_result_name(K151SilentTxResult result) {
 }
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_SPEAKER_RESET_UVLS_LOCAL_START";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_VDD_FOLLOWUP_LOCAL_START";
 
 const char* speaker_result_name(K151SpeakerProbeResult result) {
   using Result = K151SpeakerProbeResult;
@@ -214,13 +214,12 @@ extern "C" void app_main() {
       const auto bool_or_null = [](std::optional<bool> value) {
         return value ? (*value ? "true" : "false") : "null";
       };
-      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V7\",\"result\":\"%s\","
+      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V8\",\"result\":\"%s\","
                   "\"startup_stage\":\"%s\",\"clock_wait_exit\":\"%s\","
                   "\"clock_wait_last\":\"%s\",\"protection\":{"
                   "\"ovp2\":%s,\"undervoltage\":%s,\"boost_overcurrent\":%s,\"ovp\":%s,"
                   "\"amplifier_overcurrent\":%s,\"overtemperature\":%s},"
-                  "\"standby_uvls\":%s,\"uvls_after_clock_us\":%ld,\"vdd_after_uvls_us\":%ld,"
-                  "\"startup_vdd\":\"%s\",\"startup_vdd_mv\":%u,"
+                  "\"standby_uvls\":%s,\"vdd\":[%ld,%ld,\"%s\",%u,%s,%ld],"
                   "\"reset_uvls\":[%s,%s,%s],"
                   "\"operating_admission\":false}\n",
                   result, stage, wait_exit, last, active(ovp2), active(undervoltage),
@@ -228,7 +227,8 @@ extern "C" void app_main() {
                   active(overtemperature), bool_or_null(report.startup.standby_uvls),
                   static_cast<long>(report.startup.uvls_after_clock_us),
                   static_cast<long>(report.startup.vdd_after_uvls_us),
-                  vdd, unsigned(report.startup.vdd.mv), bool_or_null(report.reset.before_tx),
+                  vdd, unsigned(report.startup.vdd.mv), bool_or_null(report.startup.uvls_after_vdd),
+                  static_cast<long>(report.startup.uvls_after_vdd_us), bool_or_null(report.reset.before_tx),
                   bool_or_null(report.reset.before_codec_init), bool_or_null(report.reset.after_codec_init));
     }
 #else

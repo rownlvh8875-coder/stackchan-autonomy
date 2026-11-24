@@ -44,6 +44,8 @@ struct K151SpeakerStartupDiagnostic {
   int32_t vdd_after_uvls_us = -1;
   k151::VoltageReading vdd{};
   std::optional<bool> standby_uvls{};
+  std::optional<bool> uvls_after_vdd{};
+  int32_t uvls_after_vdd_us = -1;
 };
 
 struct K151SpeakerResetObservations {

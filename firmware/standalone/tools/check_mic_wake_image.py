@@ -33,10 +33,12 @@ def inspect_image(
             "K151_SPEAKER_V5": b"WAIT_SPEAKER_VDD_LOCAL_START\0",
             "K151_SPEAKER_V6": b"WAIT_SPEAKER_STANDBY_UVLS_LOCAL_START\0",
             "K151_SPEAKER_V7": b"WAIT_SPEAKER_RESET_UVLS_LOCAL_START\0",
+            "K151_SPEAKER_V8": b"WAIT_SPEAKER_VDD_FOLLOWUP_LOCAL_START\0",
         }
-        standby_protocols = {"K151_SPEAKER_V6", "K151_SPEAKER_V7"}
-        vdd_protocols = standby_protocols | {"K151_SPEAKER_V5"}
-        protection_protocols = vdd_protocols | {"K151_SPEAKER_V4"}
+        reset_protocols = {"K151_SPEAKER_V7", "K151_SPEAKER_V8"}
+        standby_protocols = reset_protocols | {"K151_SPEAKER_V6"}
+        legacy_vdd_protocols = {"K151_SPEAKER_V5", "K151_SPEAKER_V6", "K151_SPEAKER_V7"}
+        protection_protocols = standby_protocols | {"K151_SPEAKER_V4", "K151_SPEAKER_V5"}
         clock_protocols = protection_protocols | {"K151_SPEAKER_V3"}
         observed = [protocol for protocol in protocols if protocol.encode() in app]
         forbidden = (
@@ -57,7 +59,7 @@ def inspect_image(
             )
             or (observed[0] in protection_protocols and b'"protection"' not in app)
             or (
-                observed[0] in vdd_protocols
+                observed[0] in legacy_vdd_protocols
                 and not all(
                     field in app
                     for field in (
@@ -69,7 +71,8 @@ def inspect_image(
                 )
             )
             or (observed[0] in standby_protocols and b'"standby_uvls"' not in app)
-            or (observed[0] == "K151_SPEAKER_V7" and b'"reset_uvls"' not in app)
+            or (observed[0] in reset_protocols and b'"reset_uvls"' not in app)
+            or (observed[0] == "K151_SPEAKER_V8" and b'"vdd"' not in app)
         ):
             raise ValueError("Unexpected speaker diagnostic image")
         return {

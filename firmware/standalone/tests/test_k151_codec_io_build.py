@@ -151,6 +151,8 @@ def speaker_probe_binary(tmp_path_factory):
         "stop_on_pre_tx_status",
         "uvls_not_seen",
         "uvls_read_failed",
+        "uvls_followup_clear",
+        "uvls_followup_read_failed",
         "clock_and_release_failure",
         "paired",
         "release_failure",
@@ -749,9 +751,14 @@ def test_real_aw88298_preserves_all_active_protection_bits_without_unmuting(
         "uvls_stop_during_read",
         "uvls_clock_deadline",
         "uvls_clock_regression",
+        "uvls_followup_no_budget",
+        "uvls_followup_deadline",
+        "uvls_followup_regression",
+        "uvls_followup_stop",
+        "uvls_followup_invalid_vdd",
     ],
 )
-def test_aw88298_collects_at_most_one_admitted_vdd_sample(aw88298_startup_binary, mode):
+def test_aw88298_bounds_vdd_and_followup_without_amplification(aw88298_startup_binary, mode):
     run = subprocess.run(
         [str(aw88298_startup_binary), mode], capture_output=True, text=True, timeout=10
     )

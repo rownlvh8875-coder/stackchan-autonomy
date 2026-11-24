@@ -67,9 +67,10 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
 
   // The caller owns the enabled I2S TX and must close through standby or reset
   // on failure, including revocation detected during the unmute transaction.
-  template <typename Allowed, typename Clock, typename Pause, typename VoltageRead = std::nullptr_t>
+  template <typename Allowed, typename Clock, typename Pause, typename VoltageRead = std::nullptr_t,
+            typename StatusRead = std::nullptr_t>
   [[nodiscard]] K151SpeakerStartupDiagnostic start_aw88298_low_volume(Allowed allowed, Clock clock,
-      Pause pause, VoltageRead read_voltage = nullptr) {
+      Pause pause, VoltageRead read_voltage = nullptr, StatusRead read_followup = nullptr) {
     using Stage = K151SpeakerStartupStage;
     using Exit = K151ClockWaitExit;
     using Sample = K151ClockWaitSample;
@@ -195,6 +196,20 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
               failure.vdd = reading;
               if (reading.state != k151::PowerSample::not_seen)
                 failure.vdd_after_uvls_us = static_cast<int32_t>(sampled - fault_observed);
+              if constexpr (!std::is_same_v<StatusRead, std::nullptr_t>) {
+                constexpr int64_t kStatusReadReserveUs = 10'000;
+                const auto vdd_observed = sampled;
+                // Record a second SYSST sample without updating the first fault.
+                // The observer cannot enable the amplifier or clear SYSINT.
+                if (reading.state == k151::PowerSample::sampled && live() &&
+                    sampled - started <= kStartupLimitUs - kStatusReadReserveUs) {
+                  const auto followup = read_followup();
+                  if (live() && followup) {
+                    failure.uvls_after_vdd = *followup;
+                    failure.uvls_after_vdd_us = static_cast<int32_t>(sampled - vdd_observed);
+                  }
+                }
+              }
             }
           }
         }

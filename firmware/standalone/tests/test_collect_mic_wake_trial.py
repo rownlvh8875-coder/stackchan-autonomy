@@ -717,6 +717,59 @@ def test_speaker_vdd_requires_accepted_uvls_and_rejects_raw_data(
                 )
 
 
+@pytest.mark.parametrize("followup", [(True, 570), (False, 570), (None, -1)])
+def test_speaker_vdd_followup_preserves_the_first_protection(receiver, followup):
+    protocol = "K151_SPEAKER_V8"
+    wait = SPEAKER_WAIT | {"mic_trial": receiver.SPEAKER_CHALLENGES[protocol]}
+    protection = dict.fromkeys(receiver.SPEAKER_PROTECTION_FLAGS, False)
+    protection["undervoltage"] = True
+    report = SPEAKER_REPORT | {
+        "speaker_probe": protocol,
+        "result": "amplifier_start_failed",
+        "startup_stage": "wait_clock",
+        "clock_wait_exit": "protection_active",
+        "clock_wait_last": "internal_unstable",
+        "protection": protection,
+        "standby_uvls": True,
+        "reset_uvls": [True, True, True],
+        "vdd": [60_000, 10_000, "sampled", 4370, *followup],
+    }
+    wire = json.dumps(report, separators=(",", ":")).encode("ascii") + b"\n"
+    assert len(wire) < receiver.WIRE_LIMIT
+    port = FakeSerial([wait, wire, HOLD])
+    assert (
+        receiver.receive_once(port, lambda: None, speaker=True, speaker_protocol=protocol) == report
+    )
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+    for invalid in (
+        [60_000, 10_000, "sampled", 4370],
+        [60_000, 10_000, "sampled", 4370, None, 0],
+        [60_000, 10_000, "sampled", 4370, 0, 570],
+        [60_000, 10_000, "sampled", 4370, False, True],
+        [60_000, 10_000, "sampled", 4370, False, 30_000],
+        [60_000, 10_000, "read_failed", 0, False, 570],
+        [60_000, -1, "skipped", 0, True, 570],
+    ):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | {"vdd": invalid}, speaker=True, speaker_protocol=protocol
+            )
+    no_fault = report | {
+        "result": "dma_and_mute_observed",
+        "startup_stage": "none",
+        "clock_wait_exit": "none",
+        "clock_wait_last": "none",
+        "protection": protection | {"undervoltage": False},
+        "standby_uvls": None,
+        "reset_uvls": [None, None, None],
+        "vdd": [-1, -1, "not_requested", 0, None, -1],
+    }
+    assert (
+        receiver.validate_output_report(no_fault, speaker=True, speaker_protocol=protocol)
+        == no_fault
+    )
+
+
 @pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )
@@ -773,6 +826,7 @@ def test_silent_tx_challenge_cannot_start_the_wrong_image(receiver, challenge, s
         "K151_SPEAKER_V5",
         "K151_SPEAKER_V6",
         "K151_SPEAKER_V7",
+        "K151_SPEAKER_V8",
     ],
 )
 def test_output_trial_binds_approval_and_install_to_exact_review(

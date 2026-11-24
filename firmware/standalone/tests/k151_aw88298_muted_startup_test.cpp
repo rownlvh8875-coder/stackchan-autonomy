@@ -160,8 +160,11 @@ int main(int argc, char** argv) {
       using Stage = K151SpeakerStartupStage;
       using Power = k151::PowerSample;
       int reads = 0;
+      int followup_reads = 0;
       registers[0x00] = 0x1852;
       const bool standby_uvls = scenario == "uvls_already_in_standby";
+      const bool vdd_observed = standby_uvls || scenario == "uvls_observed" ||
+                                scenario.starts_with("uvls_followup_");
       registers[0x01] = standby_uvls ? 0x4000 : 0;
       activating = true;
       const auto result = guarded.start_aw88298_low_volume(
@@ -171,8 +174,20 @@ int main(int argc, char** argv) {
             if (scenario == "uvls_stop_during_read") allowed = false;
             if (scenario == "uvls_clock_deadline") now_us = 100'000;
             if (scenario == "uvls_clock_regression") --now_us;
-            if (scenario == "uvls_observed" || standby_uvls) now_us += 700;
+            if (vdd_observed) now_us += 700;
+            if (scenario == "uvls_followup_no_budget") now_us = 90'001;
+            if (scenario == "uvls_followup_invalid_vdd")
+              return k151::VoltageReading{Power::reset_value};
             return k151::VoltageReading{Power::sampled, 2497};
+          }, [&]() -> std::optional<bool> {
+            ++followup_reads;
+            assert(reads == 1 && allowed && !unmuted);
+            assert((registers[0x04] & 0x43) == 0x42 && (registers[0x05] & 0x10));
+            if (scenario == "uvls_followup_stop") allowed = false;
+            if (scenario == "uvls_followup_deadline") now_us = 100'000;
+            else if (scenario == "uvls_followup_regression") --now_us;
+            else now_us += 600;
+            return true;
           });
       assert(!unmuted && result.stage == Stage::wait_clock);
       assert(result.clock_wait_exit == K151ClockWaitExit::protection_active);
@@ -182,12 +197,22 @@ int main(int argc, char** argv) {
       const bool forbidden = scenario == "uvls_no_budget" || scenario == "uvls_other_protection" ||
                              scenario == "uvls_switching";
       assert(reads == (forbidden ? 0 : 1));
-      if (scenario == "uvls_observed" || standby_uvls) {
-        assert(result.vdd.state == Power::sampled && result.vdd.mv == 2497);
-        assert(result.vdd_after_uvls_us == 700);
+      if (vdd_observed) {
+        const bool invalid = scenario == "uvls_followup_invalid_vdd";
+        assert(result.vdd.state == (invalid ? Power::reset_value : Power::sampled));
+        assert(result.vdd.mv == (invalid ? 0 : 2497));
+        assert(result.vdd_after_uvls_us == (scenario == "uvls_followup_no_budget" ? 88'801 : 700));
       } else {
         assert(result.vdd.state == Power::skipped && result.vdd.mv == 0);
         assert(result.vdd_after_uvls_us == -1);
+      }
+      const bool followup_attempted = vdd_observed && scenario != "uvls_followup_no_budget" &&
+                                     scenario != "uvls_followup_invalid_vdd";
+      assert(followup_reads == (followup_attempted ? 1 : 0));
+      if (standby_uvls || scenario == "uvls_observed") {
+        assert(result.uvls_after_vdd == true && result.uvls_after_vdd_us == 600);
+      } else {
+        assert(!result.uvls_after_vdd && result.uvls_after_vdd_us == -1);
       }
       activating = false;
       standby_request = true;

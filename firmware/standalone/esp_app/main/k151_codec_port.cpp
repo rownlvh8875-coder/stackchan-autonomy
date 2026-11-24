@@ -159,6 +159,16 @@ bool K151CodecPort::read_board_register(uint8_t reg, uint8_t& value) {
                                      kBoardReadTimeoutMs) == ESP_OK;
 }
 
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+std::optional<uint16_t> K151CodecPort::read_amp_observation(uint8_t reg) {
+  constexpr int kObservationReadTimeoutMs = 10;
+  std::array<uint8_t, 2> word{};
+  if (!amp_observer_ || i2c_master_transmit_receive(amp_observer_, &reg, 1, word.data(),
+      word.size(), kObservationReadTimeoutMs) != ESP_OK) return std::nullopt;
+  return (static_cast<uint16_t>(word[0]) << 8) | word[1];
+}
+#endif
+
 bool K151CodecPort::set_amplifier_reset(bool held) {
   // Holding reset remains available after STOP on the validated duplex pin.
   const auto allowed = [&] { return (held && reset_controlled_) || input_allowed(); };
@@ -324,14 +334,9 @@ bool K151CodecPort::prepare_output_codec() {
   // The later standby checks validate the chip identity and retain the existing
   // protection decision. SYSINT is clear-on-read and is never sampled here.
   if (amp_observer_ && input_allowed()) {
-    constexpr int kStatusReadTimeoutMs = 10;
-    constexpr uint8_t kStatusRegister = 0x01;
-    std::array<uint8_t, 2> word{};
-    if (i2c_master_transmit_receive(amp_observer_, &kStatusRegister, 1, word.data(),
-                                    word.size(), kStatusReadTimeoutMs) == ESP_OK && input_allowed()) {
-      const uint16_t status = (static_cast<uint16_t>(word[0]) << 8) | word[1];
-      speaker_reset_observations_.before_tx = (status & aw88298_protection::undervoltage) != 0;
-    }
+    const auto status = read_amp_observation(0x01); // SYSST
+    if (status && input_allowed())
+      speaker_reset_observations_.before_tx = (*status & aw88298_protection::undervoltage) != 0;
   }
 #endif
   if (!input_allowed() || i2s_channel_enable(tx_) != ESP_OK || !input_allowed()) return false;
@@ -521,16 +526,16 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
   const auto read_voltage = [&]() -> k151::VoltageReading {
     if (!amp_observer_) return {k151::PowerSample::not_seen};
-    constexpr int kVddReadTimeoutMs = 10;
-    constexpr uint8_t kVddRegister = 0x12;
-    std::array<uint8_t, 2> word{};
-    if (i2c_master_transmit_receive(amp_observer_, &kVddRegister, 1, word.data(),
-                                    word.size(), kVddReadTimeoutMs) != ESP_OK)
-      return {k151::PowerSample::read_failed};
-    return k151::decode_aw88298_vdd((unsigned(word[0]) << 8) | word[1]);
+    const auto vdd = read_amp_observation(0x12); // VDD
+    return vdd ? k151::decode_aw88298_vdd(*vdd) : k151::VoltageReading{k151::PowerSample::read_failed};
+  };
+  const auto read_followup = [&]() -> std::optional<bool> {
+    const auto status = read_amp_observation(0x01); // SYSST
+    if (!status) return std::nullopt;
+    return (*status & aw88298_protection::undervoltage) != 0;
   };
   speaker_startup_ = out_control_.start_aw88298_low_volume(
-      allowed, esp_timer_get_time, [] { vTaskDelay(1); }, read_voltage);
+      allowed, esp_timer_get_time, [] { vTaskDelay(1); }, read_voltage, read_followup);
 #else
   speaker_startup_ =
       out_control_.start_aw88298_low_volume(allowed, esp_timer_get_time, [] { vTaskDelay(1); });

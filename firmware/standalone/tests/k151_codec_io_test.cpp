@@ -34,6 +34,7 @@ i2c_master_dev_t menu_sensor{0x68};
 i2c_master_dev_t amp_monitor{0x36};
 int amp_monitor_reads=0;
 int amp_pre_tx_reads=0;
+int amp_post_vdd_reads=0;
 int reset_writes=0, reset_waits=0, expander_removes=0;
 uint8_t output_latch=0xa7;
 bool reset_read_back=false;
@@ -376,7 +377,7 @@ extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
                                                  uint8_t* value,size_t bytes,int ms) {
   if (dev==&amp_monitor) {
     assert(bus.alive && dev->open && n==1 && bytes==2 && ms==10);
-    if (*reg==0x01) {
+    if (*reg==0x01 && !tx.enabled) {
       assert(!tx.enabled && !rx.enabled && (output_latch & 0x04) && reset_waits==2);
       ++amp_pre_tx_reads;
       value[0]=mode=="speaker_probe_uvls_before_tx" ? 0x40 : 0;
@@ -384,10 +385,19 @@ extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
       if (mode=="speaker_probe_stop_on_pre_tx_status") local_stop=true;
       return mode=="speaker_probe_uvls_pre_tx_read_failed" ? ESP_FAIL : ESP_OK;
     }
-    assert(*reg==0x12);
     assert((amp_registers[0x04][1] & 0x43) == 0x42 && (amp_registers[0x05][1] & 0x10));
+    if (*reg==0x01) {
+      assert(amp_monitor_reads==1 && tx.enabled && !rx.enabled && !local_stop);
+      ++amp_post_vdd_reads;
+      value[0]=mode=="speaker_probe_uvls_followup_clear" ? 0 : 0x40;
+      value[1]=0x11;
+      speaker_clock_us+=600;
+      return mode=="speaker_probe_uvls_followup_read_failed" ? ESP_FAIL : ESP_OK;
+    }
+    assert(*reg==0x12);
     ++amp_monitor_reads;
-    value[0]=0x01; value[1]=0xa8;
+    const bool normal_vdd=mode=="speaker_probe_uvls_followup_clear";
+    value[0]=normal_vdd ? 0x02 : 0x01; value[1]=normal_vdd ? 0xe6 : 0xa8;
     return mode=="speaker_probe_uvls_read_failed" ? ESP_FAIL : ESP_OK;
   }
   if (dev==&menu_sensor) {
@@ -778,8 +788,16 @@ int main(int argc,char** argv) {
       assert(report.startup.clock_wait_exit==K151ClockWaitExit::protection_active);
       assert(report.startup.clock_wait_last==K151ClockWaitSample::stable);
       assert(report.startup.uvls_after_clock_us==0 && report.startup.vdd.state==expected);
-      assert(report.startup.vdd.mv==(expected==Power::sampled ? 2497 : 0));
+      const bool followup_clear=mode=="speaker_probe_uvls_followup_clear";
+      assert(report.startup.vdd.mv==(expected==Power::sampled ? (followup_clear ? 4370 : 2497) : 0));
       assert(amp_monitor_reads==(expected==Power::not_seen ? 0 : 1));
+      assert(amp_post_vdd_reads==(expected==Power::sampled ? 1 : 0));
+      if (expected==Power::sampled && mode!="speaker_probe_uvls_followup_read_failed") {
+        assert(report.startup.uvls_after_vdd==!followup_clear);
+        assert(report.startup.uvls_after_vdd_us==600);
+      } else {
+        assert(!report.startup.uvls_after_vdd && report.startup.uvls_after_vdd_us==-1);
+      }
       if (mode=="speaker_probe_uvls_not_seen" || mode=="speaker_probe_uvls_pre_tx_read_failed")
         assert(!report.reset.before_tx.has_value());
       else
