@@ -74,3 +74,31 @@ OTA 선택 데이터와 eFuse에 쓰지 않았다.
 조건을 만족했다는 뜻이다. 그 읽기에 보호 비트도 설정돼 기존 안전
 절차가 시작을 중단했다. 활성 보호 비트의 종류와 BCK·WCK의 전기적
 상태는 미확인이다. 실제 재생과 재생 중 물리 STOP 검증이 남아 있다.
+
+## V4 저전압 표시와 출고 복구
+
+승인된 V4 진단을 1회 실행했다. 오프라인 Windows standalone 회귀는
+1,395개 통과, 6개 건너뜀을 기록했다. 검토한 ESP32-S3 이미지의 컴파일,
+링크와 이미지 검증을 완료했다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `1970494417e0e273773eb9638b743bce2afe634f`, SHA256 `45c1081de3308fecff63f356f4c18bfd0edb1219c298817c1046900cf5861373` |
+| 쓰기 전 확인 | 원본 A/B와 복구 파일의 길이·해시, 같은 보드, 보안 상태, 파티션 표·OTA 선택 데이터·기존 OTA1 대조 통과 |
+| 진단 쓰기 | `ota_1 [0x510000,0x552450)` 271,440바이트, 영향 섹터 `[0x510000,0x553000)`. 독립 검증 통과 |
+| 기기 결과 | `K151_SPEAKER_V4 / amplifier_start_failed / wait_clock`, `clock_wait_exit=protection_active`, `clock_wait_last=stable`, `undervoltage=true`. 나머지 보호 비트 5개는 `false`. 합성 PCM을 보내기 전에 정지하고 HOLD에 도달 |
+| 출고 복구 | `ota_1 [0x510000,0xA00000)` 5,177,344바이트. 독립 해시 및 파티션 표·OTA 선택 데이터 일치 |
+| 재부팅 | 출고 펌웨어 부팅 요청 및 USB Serial/JTAG의 COM3 복귀 확인. 화면은 현장에서 확인하지 않았다. |
+
+감독 세션은 `preflight_exit=0`, `trial_runner_exit=1`,
+`factory_restore_verified=true`를 기록했다. 파티션 표, OTA 선택 데이터,
+NVS, assets 및 eFuse는 쓰기 범위에서 제외했다. 마이크 사용, 음성 수집,
+외부 전송과 API 호출은 없었다.
+
+`undervoltage`는 AW88298 `SYSST.UVLS`의 상태다. 데이터시트는 이 비트의
+기준을 VDD 2.8V로 명시한다. 이번 시험은 앰프의 상태만 읽었으므로 실제
+전압, 발생 시점의 전원 경로 상태와 원인은 미확인이다. M5Stack이 K151에
+공개한 호스트 회로도에서 앰프 VDD는 `AXP_PS`에 연결돼 있다. 다음
+오프라인 조사에서는 출고 코드와 진단 코드의 전원 초기화 순서를 대조한다.
+[AW88298 데이터시트의 SYSST 표](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=31)
+[M5Stack StackChan 호스트 회로도](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf#page=4)
