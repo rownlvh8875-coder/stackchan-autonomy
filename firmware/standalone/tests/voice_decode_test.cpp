@@ -100,6 +100,43 @@ static void realtime_speech() {
  assert(odd.accept(bytes(R"({"type":"response.output_audio.delta","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0,"delta":"AA=="})")));
  assert(!odd.accept(bytes(audio_done)) && odd.take_pcm().empty());
 }
+
+static void realtime_audio_format() {
+ using Speech = K151RealtimeSpeechExchange;
+ constexpr auto pcm_session = R"({"type":"session.created","session":{"type":"realtime","audio":{"output":{"format":{"type":"audio/pcm","rate":24000}}}}})";
+ const std::string response_prefix = R"({"type":"response.created","response":{"id":"resp_a","status":"in_progress","metadata":{"stackchan":"speech"})";
+ const auto begin = [](Speech& speech, const std::string& session) {
+  assert(speech.accept(bytes(session)) && speech.begin_response());
+ };
+
+ for (const auto session : {
+     R"({"type":"session.created","session":{"type":"realtime"}})",
+     R"({"type":"session.created","session":{"type":"realtime","audio":{"output":{"format":{"type":"audio/pcmu"}}}}})",
+     R"({"type":"session.created","session":{"type":"realtime","audio":{"output":{"format":{"type":"audio/pcm","rate":24000,"rate":16000}}}}})"}) {
+  Speech speech;
+  begin(speech, session);
+  assert(!speech.accept(bytes(response_prefix + "}}")) && speech.take_pcm().empty());
+ }
+
+ for (const auto audio : {
+     R"(,"audio":[])",
+     R"(,"audio":{},"audio":{})",
+     R"(,"audio":{"output":{"format":{"type":"audio/pcmu"}}})",
+     R"(,"audio":{"output":{"format":{"type":"audio/pcm","rate":16000}}})"}) {
+  Speech speech;
+  begin(speech, pcm_session);
+  assert(!speech.accept(bytes(response_prefix + audio + "}}")) && speech.take_pcm().empty());
+ }
+
+ Speech terminal_conflict;
+ begin(terminal_conflict, pcm_session);
+ assert(terminal_conflict.accept(bytes(response_prefix + R"(,"audio":{"output":{"voice":"marin"}}}})")));
+ assert(terminal_conflict.accept(bytes(R"({"type":"response.output_audio.delta","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0,"delta":"AID/fw=="})")));
+ assert(terminal_conflict.accept(bytes(R"({"type":"response.output_audio.done","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0})")));
+ assert(!terminal_conflict.accept(bytes(R"({"type":"response.done","response":{"id":"resp_a","status":"completed","audio":{"output":{"format":{"type":"audio/pcma"}}}}})")));
+ assert(terminal_conflict.take_pcm().empty());
+}
+
 int main(){
  std::string answer;
  assert(K151VoiceDecoder::transcription(bytes(R"({"text":"안녕하세요"})"),answer));
@@ -121,6 +158,7 @@ int main(){
  const std::array<uint8_t,3> odd{1,2,3};
  assert(!K151VoiceDecoder::speech_pcm(odd,pcm)&&pcm.empty());
  realtime_speech();
+ realtime_audio_format();
  test_realtime_transport();
  std::cout<<"cJSON response decoding PASS\n";
 }

@@ -68,6 +68,20 @@ bool number_is(const cJSON* value, int expected) {
  return cJSON_IsNumber(value) && value->valuedouble == expected;
 }
 
+enum class OutputFormat { absent, pcm24k, invalid };
+
+OutputFormat output_format(const cJSON* object) {
+ for (const auto* key : {"audio", "output", "format"}) {
+  const cJSON* child = nullptr;
+  if (!member(object, key, child)) return OutputFormat::invalid;
+  if (!child) return OutputFormat::absent;
+  object = child;
+ }
+ if (has_string(object, "type", "audio/pcm") && number_is(get(object, "rate"), 24000))
+  return OutputFormat::pcm24k;
+ return OutputFormat::invalid;
+}
+
 bool bounded_structure(std::span<const uint8_t> json) {
  // Limit the recursion of the vendor parser before parsing a network message.
  unsigned depth = 0;
@@ -227,8 +241,10 @@ bool K151RealtimeSpeechExchange::accept(std::span<const uint8_t> message) {
  const auto type = string_value(get(root.get(), "type"));
  if (type == "rate_limits.updated") return true;
  if (state_ == State::connecting) {
-  if (type != "session.created" || !has_string(get(root.get(), "session"), "type", "realtime"))
+  const auto* session = get(root.get(), "session");
+  if (type != "session.created" || !has_string(session, "type", "realtime"))
    return fail();
+  session_pcm24k_ = output_format(session) == OutputFormat::pcm24k;
   state_ = State::ready;
   return true;
  }
@@ -249,10 +265,13 @@ bool K151RealtimeSpeechExchange::accept(std::span<const uint8_t> message) {
  if (type == "response.created" && state_ == State::waiting_response) {
   const auto* response = get(root.get(), "response");
   const auto id = string_value(get(response, "id"));
-  const auto* format = get(get(get(response, "audio"), "output"), "format");
+  const auto format = output_format(response);
+  // When the response omits its format, both the request and the session
+  // must specify 24 kHz PCM.
+  const bool pcm24k = format == OutputFormat::pcm24k ||
+                     (format == OutputFormat::absent && session_pcm24k_);
   if (!httpwire::identifier(id) || !has_string(response, "status", "in_progress") ||
-      !has_string(get(response, "metadata"), "stackchan", "speech") ||
-      !has_string(format, "type", "audio/pcm") || !number_is(get(format, "rate"), 24000))
+      !has_string(get(response, "metadata"), "stackchan", "speech") || !pcm24k)
    return fail();
   response_id_ = id;
   state_ = State::audio;
@@ -261,7 +280,8 @@ bool K151RealtimeSpeechExchange::accept(std::span<const uint8_t> message) {
  if (type == "response.done" && state_ == State::audio_done) {
   const auto* response = get(root.get(), "response");
   if (!has_string(response, "id", response_id_) || !has_string(response, "status", "completed") ||
-      !optional_null(response, "status_details")) return fail();
+      !optional_null(response, "status_details") || output_format(response) == OutputFormat::invalid)
+   return fail();
   state_ = State::complete;
   return true;
  }

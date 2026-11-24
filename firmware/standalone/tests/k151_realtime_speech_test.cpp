@@ -14,11 +14,11 @@ struct esp_transport {};
 
 namespace {
 constexpr std::string_view kSession =
-    R"({"type":"session.created","session":{"type":"realtime"}})";
+    R"({"type":"session.created","session":{"type":"realtime","audio":{"output":{"format":{"type":"audio/pcm","rate":24000}}}}})";
 constexpr std::string_view kConversation =
     R"({"event_id":"event_a","type":"conversation.created","conversation":{"id":"conv_a","object":"realtime.conversation"}})";
 constexpr std::string_view kCreated =
-    R"({"type":"response.created","response":{"id":"resp_a","status":"in_progress","metadata":{"stackchan":"speech"},"audio":{"output":{"format":{"type":"audio/pcm","rate":24000}}}}})";
+    R"({"type":"response.created","response":{"id":"resp_a","status":"in_progress","metadata":{"stackchan":"speech"}}})";
 constexpr std::string_view kDelta =
     R"({"type":"response.output_audio.delta","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0,"delta":"AID/fw=="})";
 constexpr std::string_view kAudioDone =

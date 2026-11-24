@@ -498,6 +498,13 @@ Realtime 경로가 있고 연결 요청 덤프 문자열이 없음을 검사한�
 어긋나거나 중복되거나 잘못된 이벤트는 계속 합성을 중단했다.
 [OpenAI Realtime 서버 이벤트 명세](https://developers.openai.com/api/reference/resources/realtime/server-events#conversation-created)
 
+응답 생성 이벤트가 오디오 형식을 생략하면, 요청과 세션 생성 이벤트에서
+모두 확인된 24kHz PCM 설정으로 처리한다. 생성 또는 완료 이벤트에
+다른 형식이나 모호한 형식이 들어오면 재생 전에 중단한다. 오프라인
+시험에서 형식 생략으로 인한 실패를 재현하고, 수정 후 정상 완료만 PCM을
+반환하는 것을 확인했다.
+[OpenAI 응답 생성 명세](https://developers.openai.com/api/reference/resources/realtime/server-events#response-created)
+
 ## 2026-11-23 오프라인 후속 — 독립 대화 한 턴과 대기 복귀
 
 보드 설정, 로컬 화면 승인, WakeNet과 대화 실행기를 하나의 고정
