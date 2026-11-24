@@ -176,6 +176,8 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
         (mode == "duplex_board_switch_active" && phase == "init" ? 0x01 : 0x00);
     bytes[1] = reg == 0x00 && mode != "duplex_board_wrong_amp" ? 0x52 : 0x00;
     if (exercise_playback() && reg == 0x01) {
+      if (mode=="speaker_probe_standby_status_read_failure" && speaker_unmuted && !tx.enabled)
+        return ESP_CODEC_DEV_DRV_ERR;
       const auto power = amp_registers[0x04][1] & 0x43;
       bytes[0] = power == 0x40 ||
                  (speaker_unmuted && mode == "speaker_probe_mute_failure") ? 1 : 0;
@@ -792,7 +794,11 @@ int main(int argc,char** argv) {
     } else if (mode=="speaker_probe_mute_failure") {
       assert(result==Result::mute_confirmation_failed && speaker_eof==7);
       assert(report.progress==K151SpeakerPlaybackProgress::dma_complete);
-      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_readback);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_switching);
+    } else if (mode=="speaker_probe_standby_status_read_failure") {
+      assert(result==Result::cleanup_failed && speaker_eof==7);
+      assert(report.progress==K151SpeakerPlaybackProgress::dma_complete);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_status_read);
     } else if (mode=="speaker_probe_write_and_release_failure") {
       assert(result==Result::cleanup_failed && report.startup.stage==Stage::none);
       assert(report.progress==K151SpeakerPlaybackProgress::none);

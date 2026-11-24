@@ -551,12 +551,13 @@ bool K151CodecPort::speaker_off() {
   const int rc = esp_codec_dev_close(out_dev_);
   const bool closed = rc == 0 && data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT);
   if (closed) output_open_ = false;
-  if (standby_requested && closed && out_control_.aw88298_standby_verified())
+  auto standby_failure = Cleanup::none;
+  if (standby_requested && closed && out_control_.aw88298_standby_verified(nullptr, &standby_failure))
     return true;
 
   if (!standby_requested) note_speaker_cleanup_failure(Cleanup::standby_request);
   else if (!closed) note_speaker_cleanup_failure(Cleanup::output_disable);
-  else note_speaker_cleanup_failure(Cleanup::standby_readback);
+  else note_speaker_cleanup_failure(standby_failure);
   fault_ = true;
   // Reset is a fallback on uncertainty, never a successful completed turn.
   if (!reset_controlled_ || !set_amplifier_reset(true)) cleanup_unverified_ = true;

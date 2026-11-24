@@ -42,12 +42,19 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     return profile_ == Profile::aw88298_muted_startup &&
            verified_ == (kPowerVerified | kMuteVerified | kAttenuationVerified) && healthy();
   }
-  bool aw88298_standby_verified(std::optional<bool>* uvls = nullptr) {
-    if (profile_ != Profile::aw88298_muted_startup || !healthy()) return false;
+  bool aw88298_standby_verified(std::optional<bool>* uvls = nullptr,
+                               K151SpeakerCleanupStage* failure = nullptr) {
+    using Cleanup = K151SpeakerCleanupStage;
+    if (profile_ != Profile::aw88298_muted_startup || !healthy()) {
+      if (failure) *failure = Cleanup::standby_control_unavailable;
+      return false;
+    }
     uint16_t status{};
-    const bool verified = standby_registers_verified([&](int reg, std::array<uint8_t, 2>& value) {
+    const auto check = standby_register_check([&](int reg, std::array<uint8_t, 2>& value) {
       return read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK;
     }, uvls ? &status : nullptr);
+    if (failure) *failure = check;
+    const bool verified = check == Cleanup::none;
     if (uvls && verified) *uvls = (status & aw88298_protection::undervoltage) != 0;
     return verified;
   }
@@ -182,7 +189,8 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
 
     std::array<uint8_t, 2> value{};
     uint16_t standby_status{};
-    if (!standby_registers_verified(read_live, &standby_status)) return {Stage::standby_readback};
+    if (standby_register_check(read_live, &standby_status) != K151SpeakerCleanupStage::none)
+      return {Stage::standby_readback};
     // AW88298 Table 2 configures the I2S data path in standby, then clears PWDN.
     if (!transition(0x04, kPowerMask, 0x03, kStandbyI2s)) return {Stage::i2s_enable};
     if (!transition(0x04, kPowerMask, kStandbyI2s, kConfiguring)) return {Stage::clock_enable};
@@ -259,16 +267,20 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
   static constexpr uint8_t kMinAttenuation = 0x60, kMaxAttenuation = 0xc0;
 
   template <typename Read>
-  static bool standby_registers_verified(Read read_word, uint16_t* status = nullptr) {
+  static K151SpeakerCleanupStage standby_register_check(Read read_word, uint16_t* status) {
+    using Cleanup = K151SpeakerCleanupStage;
     std::array<uint8_t, 2> value{};
     // ID, SYSCTRL, SYSCTRL2 and SYSST. SYSINT is clear-on-read and is not used.
-    if (!read_word(0x00, value) || value[0] != 0x18 || value[1] != 0x52 ||
-        !read_word(0x04, value) || (value[1] & 0x43) != 0x03 ||
-        !read_word(0x05, value) || (value[1] & 0x10) == 0 ||
-        !read_word(0x01, value) || (value[0] & 0x01) != 0)
-      return false;
+    if (!read_word(0x00, value)) return Cleanup::standby_id_read;
+    if (value[0] != 0x18 || value[1] != 0x52) return Cleanup::standby_id_mismatch;
+    if (!read_word(0x04, value)) return Cleanup::standby_power_read;
+    if ((value[1] & 0x43) != 0x03) return Cleanup::standby_power_mismatch;
+    if (!read_word(0x05, value)) return Cleanup::standby_mute_read;
+    if ((value[1] & 0x10) == 0) return Cleanup::standby_mute_mismatch;
+    if (!read_word(0x01, value)) return Cleanup::standby_status_read;
+    if ((value[0] & 0x01) != 0) return Cleanup::standby_switching;
     if (status) *status = (static_cast<uint16_t>(value[0]) << 8) | value[1];
-    return true;
+    return Cleanup::none;
   }
 
   int write_aw88298(int reg, int len, void* data, int size, bool standby_request = false) {

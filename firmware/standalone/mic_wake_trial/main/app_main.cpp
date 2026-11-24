@@ -55,7 +55,7 @@ const char* tx_result_name(K151SilentTxResult result) {
 }
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_SPEAKER_CLEANUP_LOCAL_START";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START";
 
 const char* speaker_result_name(K151SpeakerProbeResult result) {
   using Result = K151SpeakerProbeResult;
@@ -214,7 +214,7 @@ extern "C" void app_main() {
       const auto bool_or_null = [](std::optional<bool> value) {
         return value ? (*value ? "true" : "false") : "null";
       };
-      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V10\",\"result\":\"%s\","
+      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V11\",\"result\":\"%s\","
                   "\"startup_stage\":\"%s\",\"clock_wait_exit\":\"%s\","
                   "\"clock_wait_last\":\"%s\",\"protection\":{"
                   "\"ovp2\":%s,\"undervoltage\":%s,\"boost_overcurrent\":%s,\"ovp\":%s,"

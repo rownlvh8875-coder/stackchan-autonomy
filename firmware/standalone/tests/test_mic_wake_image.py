@@ -129,7 +129,7 @@ def test_silent_tx_image_is_distinct_and_has_no_voice_trial(model_fixture):
 
 @pytest.mark.parametrize(
     "protocol",
-    [f"K151_SPEAKER_V{version}" for version in range(1, 11)],
+    [f"K151_SPEAKER_V{version}" for version in range(1, 12)],
 )
 def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, protocol):
     from check_mic_wake_image import inspect_image
@@ -177,6 +177,11 @@ def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, prot
             b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
             b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0"end"\0'
         ),
+        "K151_SPEAKER_V11": (
+            b'WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0"end"\0'
+        ),
     }[protocol]
     markers = b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0" + challenge + protocol.encode() + b"\0"
     project = b"k151_speaker_probe"
@@ -199,13 +204,14 @@ def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, prot
         "K151_SPEAKER_V5",
     ):
         required_fields.append(b'"standby_uvls"\0')
-    if protocol in ("K151_SPEAKER_V7", "K151_SPEAKER_V8", "K151_SPEAKER_V9"):
+    version = int(protocol.removeprefix("K151_SPEAKER_V"))
+    if version >= 7:
         required_fields.append(b'"reset_uvls"\0')
-    if protocol in ("K151_SPEAKER_V8", "K151_SPEAKER_V9"):
+    if version >= 8:
         required_fields.append(b'"vdd"\0')
-    if protocol in ("K151_SPEAKER_V9", "K151_SPEAKER_V10"):
+    if version >= 9:
         required_fields.append(b'"settling_uvls"\0')
-    if protocol == "K151_SPEAKER_V10":
+    if version >= 10:
         required_fields.append(b'"end"\0')
         with pytest.raises(ValueError):
             inspect_image(

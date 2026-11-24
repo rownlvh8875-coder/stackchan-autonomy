@@ -27,6 +27,7 @@ SPEAKER_RESET_UVLS_PROTOCOL = "K151_SPEAKER_V7"
 SPEAKER_VDD_FOLLOWUP_PROTOCOL = "K151_SPEAKER_V8"
 SPEAKER_SETTLING_PROTOCOL = "K151_SPEAKER_V9"
 SPEAKER_CLEANUP_PROTOCOL = "K151_SPEAKER_V10"
+SPEAKER_STANDBY_CHECK_PROTOCOL = "K151_SPEAKER_V11"
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
     SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
@@ -38,6 +39,7 @@ SPEAKER_CHALLENGES = {
     SPEAKER_VDD_FOLLOWUP_PROTOCOL: "WAIT_SPEAKER_VDD_FOLLOWUP_LOCAL_START",
     SPEAKER_SETTLING_PROTOCOL: "WAIT_SPEAKER_SETTLING_LOCAL_START",
     SPEAKER_CLEANUP_PROTOCOL: "WAIT_SPEAKER_CLEANUP_LOCAL_START",
+    SPEAKER_STANDBY_CHECK_PROTOCOL: "WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
@@ -50,6 +52,7 @@ SPEAKER_REVIEW_KINDS = {
     SPEAKER_VDD_FOLLOWUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V8",
     SPEAKER_SETTLING_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V9",
     SPEAKER_CLEANUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V10",
+    SPEAKER_STANDBY_CHECK_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V11",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -179,7 +182,8 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
     )
     result = record.get("result")
     expected_fields = {field, "result", "operating_admission"}
-    cleanup_report = speaker and speaker_protocol == SPEAKER_CLEANUP_PROTOCOL
+    detailed_standby = speaker and speaker_protocol == SPEAKER_STANDBY_CHECK_PROTOCOL
+    cleanup_report = detailed_standby or (speaker and speaker_protocol == SPEAKER_CLEANUP_PROTOCOL)
     settling_report = cleanup_report or (speaker and speaker_protocol == SPEAKER_SETTLING_PROTOCOL)
     followup_report = settling_report or (
         speaker and speaker_protocol == SPEAKER_VDD_FOLLOWUP_PROTOCOL
@@ -219,12 +223,14 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
         raise ValueError("Invalid output diagnostic result")
     if cleanup_report:
         end = record["end"]
+        last_stage = 20 if detailed_standby else 11
         if (
             not isinstance(end, list)
             or len(end) != 2
             or any(type(value) is not int for value in end)
             or not 0 <= end[0] <= 2
-            or not 0 <= end[1] <= 11
+            or not 0 <= end[1] <= last_stage
+            or (detailed_standby and end[1] == 3)
         ):
             raise ValueError("Invalid speaker end checkpoint")
         progress, failure = end

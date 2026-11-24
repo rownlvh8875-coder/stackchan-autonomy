@@ -11,6 +11,9 @@ enum class K151SpeakerCleanupStage : uint8_t {
   none, standby_request, output_disable, standby_readback, amplifier_reset,
   codec_release, codec_control, interface_release, i2s_disable, i2s_release,
   i2c_release, previous_fault,
+  standby_control_unavailable, standby_id_read, standby_id_mismatch,
+  standby_power_read, standby_power_mismatch, standby_mute_read, standby_mute_mismatch,
+  standby_status_read, standby_switching,
 };
 
 // First failed checkpoint, with no register values or audio in the report.

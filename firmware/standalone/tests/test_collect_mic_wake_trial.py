@@ -840,16 +840,18 @@ def test_speaker_settling_records_power_readiness_separately_from_protection(
 
 
 @pytest.mark.parametrize(
-    ("outcome", "end"),
+    ("version", "outcome", "end"),
     [
-        ("cleanup_failed", [2, 9]),
-        ("mute_confirmation_failed", [1, 3]),
-        ("transfer_failed", [0, 0]),
-        ("dma_and_mute_observed", [2, 0]),
+        (10, "cleanup_failed", [2, 9]),
+        (10, "mute_confirmation_failed", [1, 3]),
+        (10, "transfer_failed", [0, 0]),
+        (10, "dma_and_mute_observed", [2, 0]),
+        (11, "cleanup_failed", [1, 19]),
+        (11, "mute_confirmation_failed", [1, 20]),
     ],
 )
-def test_speaker_cleanup_preserves_playback_progress(receiver, outcome, end):
-    protocol = "K151_SPEAKER_V10"
+def test_speaker_cleanup_preserves_playback_progress(receiver, version, outcome, end):
+    protocol = f"K151_SPEAKER_V{version}"
     report = SPEAKER_REPORT | {
         "speaker_probe": protocol,
         "result": outcome,
@@ -865,14 +867,20 @@ def test_speaker_cleanup_preserves_playback_progress(receiver, outcome, end):
     }
     wire = json.dumps(report, separators=(",", ":")).encode("ascii") + b"\n"
     assert len(wire) < receiver.WIRE_LIMIT
-    wait = SPEAKER_WAIT | {"mic_trial": "WAIT_SPEAKER_CLEANUP_LOCAL_START"}
+    challenge = (
+        "WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START"
+        if version == 11
+        else "WAIT_SPEAKER_CLEANUP_LOCAL_START"
+    )
+    wait = SPEAKER_WAIT | {"mic_trial": challenge}
     assert (
         receiver.receive_once(
             FakeSerial([wait, wire, HOLD]), lambda: None, speaker=True, speaker_protocol=protocol
         )
         == report
     )
-    for invalid in ([3, 0], [True, 0], [2, 99], [0]):
+    foreign = [1, 3] if version == 11 else [2, 20]
+    for invalid in ([3, 0], [True, 0], [2, 99], [0], foreign):
         with pytest.raises(ValueError):
             receiver.validate_output_report(
                 report | {"end": invalid}, speaker=True, speaker_protocol=protocol

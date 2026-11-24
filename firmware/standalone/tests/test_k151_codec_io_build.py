@@ -164,6 +164,7 @@ def test_conversation_audio_capture_playback_and_return(conversation_audio_binar
         "write_failure",
         "dma_failure",
         "mute_failure",
+        "standby_status_read_failure",
         "codec_open",
         "codec_ready",
         "tx_state",
