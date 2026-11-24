@@ -244,7 +244,7 @@ bool K151CodecPort::prepare_i2s() {
     return false;
   }
   if constexpr (speaker_probe_build()) {
-    return input_allowed() && i2s_channel_enable(tx_) == ESP_OK;
+    return input_allowed();
   }
 
   i2s_tdm_config_t rx_cfg = {};
@@ -268,10 +268,7 @@ bool K151CodecPort::prepare_i2s() {
   rx_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
   rx_cfg.gpio_cfg.din = static_cast<gpio_num_t>(k151::kI2sDin);
 
-  if (!input_allowed() ||
-      i2s_channel_init_tdm_mode(rx_, &rx_cfg) != ESP_OK) return false;
-  // TX is the I2S master for amp bring-up. Leave RX disabled until capture.
-  return microphone_only() || (input_allowed() && i2s_channel_enable(tx_) == ESP_OK);
+  return input_allowed() && i2s_channel_init_tdm_mode(rx_, &rx_cfg) == ESP_OK;
 }
 
 bool K151CodecPort::prepare_i2s_tx() {
@@ -312,13 +309,14 @@ bool K151CodecPort::prepare_codecs() {
 }
 
 bool K151CodecPort::prepare_output_codec() {
-  // Datasheet defaults after reset are standby and HMUTE. Hold reset through
-  // I2S bring-up, then use the board's 10 ms low and 50 ms settle intervals.
+  // Configure I2S while RSTN is low. AW88298 requires RSTN high for >1 ms
+  // before valid I2S clocks and I2C configuration. Use the existing reset
+  // intervals and then start the TX clock with the amplifier in standby.
   if (!input_allowed()) return false;
   vTaskDelay(pdMS_TO_TICKS(10) + 1);
   if (!input_allowed() || !set_amplifier_reset(false)) return false;
   vTaskDelay(pdMS_TO_TICKS(50) + 1);
-  if (!input_allowed()) return false;
+  if (!input_allowed() || i2s_channel_enable(tx_) != ESP_OK || !input_allowed()) return false;
 
   audio_codec_i2c_cfg_t i2c_cfg = {};
   i2c_cfg.port = static_cast<i2c_port_t>(kI2cPort);

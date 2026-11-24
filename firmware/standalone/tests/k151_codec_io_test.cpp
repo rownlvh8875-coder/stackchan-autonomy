@@ -466,10 +466,10 @@ void vTaskDelay(unsigned ticks) {
     return;
   }
   if (reset_waits == 0) {
-    assert(ticks == 11 && output_latch == 0xa3 && tx.enabled && !rx.enabled);
+    assert(ticks == 11 && output_latch == 0xa3 && !tx.enabled && !rx.enabled);
     if (mode == "duplex_board_stop_in_reset") local_stop = true;
   } else {
-    assert(reset_waits == 1 && ticks == 51 && output_latch == 0xa7 && tx.enabled && !rx.enabled);
+    assert(reset_waits == 1 && ticks == 51 && output_latch == 0xa7 && !tx.enabled && !rx.enabled);
     if (mode == "duplex_board_stop_after_release") local_stop = true;
   }
   ++reset_waits;
@@ -487,6 +487,10 @@ extern "C" esp_err_t i2s_channel_init_tdm_mode(i2s_chan_handle_t h,const i2s_tdm
 }
 extern "C" esp_err_t i2s_channel_enable(i2s_chan_handle_t h){
   assert(!mic_only() || h==&rx);
+  if (h == &tx && channels_created) {
+    assert(reset_waits == 2 && (output_latch & 0x04) && !local_stop);
+    if (mode == "duplex_board_tx_enable_failure") return ESP_FAIL;
+  }
   assert(h->alive);if(h->enabled)return ESP_ERR_INVALID_STATE;h->enabled=true;return 0;
 }
 extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
@@ -637,7 +641,7 @@ extern "C" const audio_codec_ctrl_if_t* audio_codec_new_i2c_ctrl(audio_codec_i2c
   const bool out=cfg->addr==AW88298_CODEC_DEFAULT_ADDR;
   assert(out || cfg->addr==ES7210_CODEC_DEFAULT_ADDR);
   assert(!out || !mic_only());
-  if (out) assert(reset_waits == 2 && output_latch == 0xa7);
+  if (out) assert(reset_waits == 2 && output_latch == 0xa7 && tx.enabled && !rx.enabled);
   auto* c=&controls[out?0:1];
   assert(!c->is_open);
   ++controls_created;

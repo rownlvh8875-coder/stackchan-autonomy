@@ -212,6 +212,7 @@ def test_speaker_probe_runs_without_rx_and_uses_real_codec_guard(speaker_probe_b
         "duplex_board_wrong_mode",
         "duplex_board_stop_in_reset",
         "duplex_board_stop_after_release",
+        "duplex_board_tx_enable_failure",
         "duplex_board_wrong_amp",
         "duplex_board_unmuted",
         "duplex_board_switch_active",
