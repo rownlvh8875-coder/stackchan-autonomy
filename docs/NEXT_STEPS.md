@@ -1,5 +1,34 @@
 # Next steps
 
+## 2026-11-24 Windows 가상 soak의 갱신 지연
+
+`dc65da3` PR의 Windows/Python 3.12에서 기본 시험 503개가 통과하고
+2개가 건너뛰어졌다. 가상 soak는 cycle 835에서 `renew_timeout`으로
+안전 정지했다. 중단 시 갱신은 `sqlite_commit` 단계였고 해당 작업의
+누적 경과 시간은 6.642초였다.
+[실패 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45354901399/job/138310179901)
+
+전체 실행의 각 최댓값은 SQLite 커밋 5.404초, 저장소 직렬 대기
+1.697초, 실행기 대기 3.1ms, 이벤트 루프 지연 247ms였다. 각 최댓값은
+서로 다른 작업에서 발생할 수 있다. 물리 디스크 I/O와 실행 환경 지연의
+비중은 확인되지 않았다. 이번 변경은 아래 공유 예산 시험 계측에
+한정하며, lease 기한과 정지 조건은 유지한다.
+
+## 2026-11-24 Windows 공유 예산 시험 진단
+
+`eb5466f` push의 Windows/Python 3.11에서 공유 예산 시험의 자식
+프로세스 하나가 `StateUnavailable`로 종료됐다. 종료 코드 검사가 먼저
+실패해 이 실행에서는 예약 건수 검사가 실행되지 않았다.
+[실패 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45352841268/job/138303295246)
+
+로컬 Windows/Python 3.11에서 임시 DB에 쓰기 잠금을 유지한 채 같은
+예약 코드를 자식 프로세스에서 한 번 실행했다. `sqlite_begin`에서 약
+0.367초가 걸린 뒤 같은 예외가 발생했고, 영구 예약 건수는 0이었다.
+GitHub 실행에서 어떤 SQLite 단계가 실패했는지는 미확인이다. 다음
+실패부터 자식 프로세스가 단계별 시간만 출력한다. 예약 건수 검사,
+저장소 제한 및 실패 시 거부 동작을 유지했다. 로컬 Windows의 관련
+회귀는 49개 통과, `fork` 전용 1개 건너뜀을 기록했다.
+
 ## 2026-11-24 Windows heartbeat 시험 진단
 
 `e8ae686` push의 Windows/Python 3.11 기본 시험에서

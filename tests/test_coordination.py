@@ -180,10 +180,22 @@ def test_budget_namespaces_are_explicitly_separate(monkeypatch):
 def test_subprocess_budget_race_cannot_overspend_shared_limit():
     settings = Settings(requests_per_minute=2, requests_per_hour=2, requests_per_day=2)
     script = """
+import json
+import sys
 from stackchan_autonomy.budget import SQLiteRequestBudget
 from stackchan_autonomy.settings import Settings
-print(int(SQLiteRequestBudget(Settings(requests_per_minute=2, requests_per_hour=2,
-                                      requests_per_day=2)).reserve(100)), flush=True)
+from stackchan_autonomy.state_store import StateUnavailable
+from stackchan_autonomy.timing_diagnostics import TimingProbe
+
+probe = TimingProbe()
+try:
+    with probe.collect():
+        reserved = SQLiteRequestBudget(Settings(requests_per_minute=2, requests_per_hour=2,
+                                                 requests_per_day=2)).reserve(100)
+except StateUnavailable:
+    print("BUDGET_TIMING_DIAGNOSTICS " + json.dumps(probe.snapshot()), file=sys.stderr, flush=True)
+    raise
+print(int(reserved), flush=True)
 """
     processes = [
         subprocess.Popen(
