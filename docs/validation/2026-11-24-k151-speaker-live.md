@@ -170,3 +170,29 @@ NVS, assets 및 eFuse에는 쓰지 않았다. 마이크 사용, 음성 수집, �
 사이의 파형은 미측정이므로 순간 전압 강하나 시작 시퀀스의 영향을
 구분할 수 없다. 출력 보호와 운영 승인 조건을 유지한다.
 [AW88298의 저전압 상태 비트](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=31) · [VDD ADC 설명](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=23)
+
+## 리셋 순서 수정 이미지의 실물 결과와 출고 복구
+
+I²S 송신 시작을 AW88298 리셋 해제와 기존 50ms 대기 뒤로 옮긴
+이미지를 별도 승인 범위에서 1회 실행했다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `dc65da37dd0e7efc07a4391532c7ae18b5464c23`, SHA256 `f397e6ed2c243e862d7b85d146d2453f77454e07a2b353745185ffe2e550dfec` |
+| 쓰기 전 확인 | 원본 A/B와 복구 파일의 길이·해시, 동일 보드, 16MB 플래시, 보안 상태, 파티션 표·OTA 선택 데이터·기존 OTA1 대조 통과 |
+| 진단 쓰기 | `ota_1 [0x510000,0x5528B0)` 272,560바이트, 영향 섹터 `[0x510000,0x553000)`. 독립 검증 통과 |
+| 기기 결과 | `amplifier_start_failed / wait_clock`. `clock_wait_last=stable`, `clock_wait_exit=protection_active`, `undervoltage=true`. 나머지 보호 비트는 꺼져 있었고, 합성 PCM 전송 전에 정지했다. |
+| 저전압 표시와 VDD | 클럭 활성화 설정 읽기 확인 562µs 뒤 `SYSST.UVLS` 관측. 그 관측 568µs 뒤 `startup_vdd=sampled`, `startup_vdd_mv=4382`. |
+| 출고 복구 | `ota_1 [0x510000,0xA00000)` 5,177,344바이트. 독립 해시 및 파티션 표·OTA 선택 데이터 일치 확인 |
+| 재부팅 | 출고 부팅 요청과 USB Serial/JTAG의 COM3 재연결 확인. 출고 화면은 현장 확인 전. |
+
+이전 V5는 556µs에 저전압 표시를 읽었고, 572µs 뒤 4.370V를 얻었다.
+수정 이미지에서도 같은 단계에서 같은 보호 비트가 관측됐다. 두 시험
+모두 VDD 표본은 저전압 표시를 읽은 뒤 얻었다. 표시 당시의 전압이나
+두 읽기 사이의 파형은 미측정이다. 실제 재생과 독립 대화가 남아 있다.
+
+감독 세션은 `preflight_exit=0`, `trial_runner_exit=1`,
+`factory_restore_verified=true`를 기록했다. 파티션 표, OTA 선택 데이터,
+NVS, assets 및 eFuse에는 쓰지 않았다. 마이크 사용, 음성 수집, 외부
+전송 및 유료 API 호출은 없었다. 오프라인 스피커·수집기 시험 36개가
+통과했다.
