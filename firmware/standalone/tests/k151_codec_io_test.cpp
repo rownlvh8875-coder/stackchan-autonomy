@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <esp_heap_caps.h>
+#include <esp_rom_sys.h>
 #include <freertos/task.h>
 #include <limits>
 #include <memory>
@@ -60,6 +61,8 @@ bool speaker_probe() { return mode.starts_with("speaker_probe_"); }
 bool conversation_audio() { return mode.starts_with("conversation_audio_"); }
 bool exercise_playback() { return speaker_probe() || conversation_audio(); }
 int64_t speaker_clock_us=1000;
+int switching_samples_before_tx_stop=0;
+bool tx_disable_reported_early=false;
 bool speaker_unmuted=false;
 int speaker_peak=0, speaker_eof=0, playback_writes=0, duplex_reads=0;
 i2s_isr_callback_t speaker_callback=nullptr;
@@ -181,6 +184,29 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
       const auto power = amp_registers[0x04][1] & 0x43;
       bytes[0] = power == 0x40 ||
                  (speaker_unmuted && mode == "speaker_probe_mute_failure") ? 1 : 0;
+      if (power==0x03 && speaker_unmuted && mode=="speaker_probe_switching_after_tx_stop")
+        bytes[0] = tx.enabled ? 0 : 1;
+      if (power==0x03 && speaker_unmuted && tx.enabled &&
+          mode=="speaker_probe_standby_read_delivered_late") {
+        ++switching_samples_before_tx_stop;
+        speaker_clock_us+=10'000;
+        bytes[0]=0;
+      }
+      if (power==0x03 && speaker_unmuted && tx.enabled &&
+          mode=="speaker_probe_standby_switch_read_failure") {
+        ++switching_samples_before_tx_stop;
+        return ESP_CODEC_DEV_DRV_ERR;
+      }
+      if (power==0x03 && speaker_unmuted && mode=="speaker_probe_stop_write") assert(!tx.enabled);
+      if (power == 0x03 && speaker_unmuted &&
+          (mode=="speaker_probe_switch_settles" || mode=="speaker_probe_mute_failure" ||
+           mode=="speaker_probe_stop_waiting_standby" || mode=="speaker_probe_standby_clock_fault")) {
+        assert(amp_registers[0x05][1] & 0x10);  // Only look for switch-off after hard mute.
+        if (tx.enabled) ++switching_samples_before_tx_stop;
+        if (mode=="speaker_probe_stop_waiting_standby") local_stop=true;
+        if (mode=="speaker_probe_standby_clock_fault") --speaker_clock_us;
+        bytes[0] = mode=="speaker_probe_switch_settles" && switching_samples_before_tx_stop>=3 ? 0 : 1;
+      }
       const bool clock_missing = mode == "speaker_probe_clock_failure" ||
                                  mode == "speaker_probe_clock_and_release_failure";
       bytes[1] = tx.enabled && (power & 1) == 0 && !clock_missing ? 0x11 : 0;
@@ -492,10 +518,19 @@ extern "C" esp_err_t i2s_channel_register_event_callback(i2s_chan_handle_t h,
   if (mode == "tx_callback_failed") return ESP_FAIL;
   return ESP_OK;
 }
+extern "C" void esp_rom_delay_us(uint32_t us) {
+  assert(us==1000 && tx.enabled && !rx.enabled);
+  assert((amp_registers[0x04][1] & 0x43)==0x03 && (amp_registers[0x05][1] & 0x10));
+  speaker_clock_us+=us;
+}
 void vTaskDelay(unsigned ticks) {
   assert(!mic_only());
   if (exercise_playback() && reset_waits==2) {
     assert(ticks==1 && tx.enabled && !rx.enabled);
+    if (speaker_unmuted && (amp_registers[0x04][1] & 0x43) == 0x03) {
+      speaker_clock_us+=10'000;  // Speaker probe uses 100 Hz FreeRTOS ticks.
+      return;
+    }
     speaker_clock_us += playback_writes==25 ? 10'000 : 1000;
     if (mode=="speaker_probe_stop_during_settling") local_stop=true;
     if (playback_writes==25 && mode!="speaker_probe_dma_failure") {
@@ -534,6 +569,11 @@ extern "C" esp_err_t i2s_channel_enable(i2s_chan_handle_t h){
 }
 extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
   assert(h->alive);++h->disables;
+  if (mode=="speaker_probe_tx_stays_enabled_after_close" && h==&tx && speaker_unmuted &&
+      !tx_disable_reported_early) {
+    tx_disable_reported_early=true;
+    return ESP_OK;
+  }
   if(h==&rx && fail_rx_disable)return ESP_FAIL;
   const bool fail_rx=h==&rx && (mode=="release_rx" || mode=="release_both" ||
                                mode=="release_rx_info");
@@ -770,10 +810,12 @@ int main(int argc,char** argv) {
     }
     assert(amp_pre_tx_reads==(mode=="speaker_probe_uvls_not_seen" || mode=="speaker_probe_paired"
                                   ? 0 : 1));
-    if (mode=="speaker_probe_ok" || mode=="speaker_probe_settling_uvls") {
+    if (mode=="speaker_probe_ok" || mode=="speaker_probe_settling_uvls" ||
+        mode=="speaker_probe_switch_settles") {
       assert(result==Result::observed && speaker_peak==4096 && calls==25 && speaker_eof==7);
       assert(report.progress==K151SpeakerPlaybackProgress::mute_verified);
       assert(report.cleanup_stage==K151SpeakerCleanupStage::none);
+      if (mode=="speaker_probe_switch_settles") assert(switching_samples_before_tx_stop==3);
       if (mode=="speaker_probe_settling_uvls") {
         assert(report.startup.settling_uvls_us==570 && report.startup.clock_ready_after_uvls_us==2570);
         assert(amp_monitor_reads==0 && amp_post_vdd_reads==0);
@@ -794,11 +836,34 @@ int main(int argc,char** argv) {
     } else if (mode=="speaker_probe_mute_failure") {
       assert(result==Result::mute_confirmation_failed && speaker_eof==7);
       assert(report.progress==K151SpeakerPlaybackProgress::dma_complete);
-      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_switching);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_switch_timeout);
+      assert(switching_samples_before_tx_stop > 1 && switching_samples_before_tx_stop <= 8);
+    } else if (mode=="speaker_probe_stop_waiting_standby" ||
+               mode=="speaker_probe_standby_clock_fault") {
+      assert(result!=Result::observed && switching_samples_before_tx_stop==1 && !tx.enabled);
+      if (mode=="speaker_probe_standby_clock_fault")
+        assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_clock_fault);
+      else
+        assert(local_stop && result==Result::stopped &&
+               report.progress==K151SpeakerPlaybackProgress::dma_complete &&
+               report.cleanup_stage==K151SpeakerCleanupStage::standby_interrupted);
     } else if (mode=="speaker_probe_standby_status_read_failure") {
       assert(result==Result::cleanup_failed && speaker_eof==7);
       assert(report.progress==K151SpeakerPlaybackProgress::dma_complete);
       assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_status_read);
+    } else if (mode=="speaker_probe_standby_switch_read_failure") {
+      assert(result==Result::cleanup_failed && switching_samples_before_tx_stop==1 && !tx.enabled);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_switch_status_read);
+    } else if (mode=="speaker_probe_switching_after_tx_stop") {
+      assert(result==Result::mute_confirmation_failed && !tx.enabled);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_switching);
+    } else if (mode=="speaker_probe_tx_stays_enabled_after_close") {
+      assert(result==Result::mute_confirmation_failed && tx_disable_reported_early && !tx.enabled);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::output_disable);
+    } else if (mode=="speaker_probe_standby_read_delivered_late") {
+      assert(result==Result::mute_confirmation_failed && !tx.enabled);
+      assert(switching_samples_before_tx_stop==1);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_switch_timeout);
     } else if (mode=="speaker_probe_write_and_release_failure") {
       assert(result==Result::cleanup_failed && report.startup.stage==Stage::none);
       assert(report.progress==K151SpeakerPlaybackProgress::none);

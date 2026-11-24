@@ -22,6 +22,7 @@
 #include <driver/i2c_master.h>
 #include <esp_attr.h>
 #include <esp_log.h>
+#include <esp_rom_sys.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -41,6 +42,9 @@ constexpr int kLowVolume = 10;
 constexpr int kInputGain = 30;
 constexpr int kI2cPort = 1;
 constexpr int kBoardReadTimeoutMs = 30;
+constexpr int64_t kStandbySwitchLimitUs = 10'000;
+constexpr unsigned kStandbySwitchPollLimit = 8;
+constexpr uint32_t kStandbySwitchPollPauseUs = 1'000;
 constexpr uint8_t kAmpResetBit = 1 << 2; // AW9523 P0_2 -> AW88298 RSTN.
 constexpr uint8_t kP0Output = 0x02;
 
@@ -543,21 +547,59 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
   return speaker_startup_.stage == Stage::none ? true : fail();
 }
 
-bool K151CodecPort::speaker_off() {
+K151SpeakerCleanupStage K151CodecPort::wait_for_standby_switch_off(const std::atomic_bool& consent) {
   using Cleanup = K151SpeakerCleanupStage;
-  output_data_ = OutputData::empty;
+  const auto started = esp_timer_get_time();
+  if (started < 0) return Cleanup::standby_clock_fault;
+  auto previous = started;
+  const auto check = [&] {
+    i2s_chan_info_t info{};
+    if (!input_allowed() || !consent.load() || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT) ||
+        i2s_channel_get_info(tx_, &info) != ESP_OK || !info.is_enabled)
+      return Cleanup::standby_interrupted;
+    const auto now = esp_timer_get_time();
+    if (now < previous) return Cleanup::standby_clock_fault;
+    previous = now;
+    return now - started < kStandbySwitchLimitUs ? Cleanup::none : Cleanup::standby_switch_timeout;
+  };
+  // HMUTE and the power-down bits are already verified. Poll only SWS with TX
+  // still clocked. An I2C read failure is terminal, as is late delivery.
+  for (unsigned poll = 0; poll < kStandbySwitchPollLimit; ++poll) {
+    if (const auto stage = check(); stage != Cleanup::none) return stage;
+    const auto switching = out_control_.aw88298_switching();
+    if (!switching) return Cleanup::standby_switch_status_read;
+    if (const auto stage = check(); stage != Cleanup::none) return stage;
+    if (!*switching) return Cleanup::none;
+    // The 100 Hz probe tick could consume the entire 10 ms budget at once.
+    if (poll + 1 < kStandbySwitchPollLimit) esp_rom_delay_us(kStandbySwitchPollPauseUs);
+  }
+  return Cleanup::standby_switch_timeout;
+}
+
+bool K151CodecPort::speaker_off(const std::atomic_bool* consent) {
+  using Cleanup = K151SpeakerCleanupStage;
+  const bool normal_end = std::exchange(output_data_, OutputData::empty) == OutputData::drain_confirmed;
   if (!output_open_) return !out_control_.faulted();
   const bool standby_requested = out_control_.request_aw88298_standby();
+  const auto before_close = standby_requested && normal_end
+      ? (consent ? wait_for_standby_switch_off(*consent) : Cleanup::standby_interrupted)
+      : Cleanup::none;
+  // Close even on a failed check or STOP. The normal playback path must prove
+  // switch-off before stopping I2S and still pass the original standby readback.
   const int rc = esp_codec_dev_close(out_dev_);
-  const bool closed = rc == 0 && data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT);
-  if (closed) output_open_ = false;
+  const bool codec_closed = rc == 0 && data_port_.disabled(ESP_CODEC_DEV_TYPE_OUT);
+  if (codec_closed) output_open_ = false;
+  const bool closed = codec_closed && (!normal_end || channel_is_idle(tx_));
   auto standby_failure = Cleanup::none;
-  if (standby_requested && closed && out_control_.aw88298_standby_verified(nullptr, &standby_failure))
-    return true;
+  const bool verified = standby_requested && before_close == Cleanup::none && closed &&
+      out_control_.aw88298_standby_verified(nullptr, &standby_failure);
+  const bool still_allowed = !normal_end || (consent && input_allowed() && consent->load());
+  if (verified && still_allowed) return true;
 
   if (!standby_requested) note_speaker_cleanup_failure(Cleanup::standby_request);
+  else if (before_close != Cleanup::none) note_speaker_cleanup_failure(before_close);
   else if (!closed) note_speaker_cleanup_failure(Cleanup::output_disable);
-  else note_speaker_cleanup_failure(standby_failure);
+  else note_speaker_cleanup_failure(verified ? Cleanup::standby_interrupted : standby_failure);
   fault_ = true;
   // Reset is a fallback on uncertainty, never a successful completed turn.
   if (!reset_controlled_ || !set_amplifier_reset(true)) cleanup_unverified_ = true;
@@ -624,8 +666,10 @@ bool K151CodecPort::wait_for_tx_tail(const std::atomic_bool& owner,
 bool K151CodecPort::drain_output_before_mute() {
   // AudioGuard separately requires speaker_off() to verify amplifier standby.
   const auto data = std::exchange(output_data_, OutputData::empty);
-  return data == OutputData::dma_complete && output_open_ && !input_open_ &&
-         prepared() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT);
+  const bool drained = data == OutputData::dma_complete && output_open_ && !input_open_ &&
+      prepared() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT);
+  if (drained) output_data_ = OutputData::drain_confirmed;
+  return drained;
 }
 
 bool K151CodecPort::quiet() {

@@ -487,7 +487,7 @@ bool K151CodecPort::wait_for_tx_tail(const std::atomic_bool&, const std::atomic_
 bool K151CodecPort::drain_output_before_mute() {
   return std::exchange(pending_pcm, false) && amp_open;
 }
-bool K151CodecPort::speaker_off() { amp_open = false; return true; }
+bool K151CodecPort::speaker_off(const std::atomic_bool*) { amp_open = false; return true; }
 bool K151CodecPort::shutdown() {
   assert(!mic_open && !amp_open);
   if (codec_running) {

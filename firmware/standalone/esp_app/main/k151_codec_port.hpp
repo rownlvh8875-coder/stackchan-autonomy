@@ -45,7 +45,7 @@ class K151CodecPort final {
   static bool playback_enabled_by_build();
   bool playback_available() const;
   bool speaker_on_low_volume(const std::atomic_bool& consent);
-  bool speaker_off();
+  bool speaker_off(const std::atomic_bool* consent = nullptr);
   bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms PCM; not wall-clock latency.
   bool wait_for_tx_tail(const std::atomic_bool& owner, const std::atomic_bool& consent,
                         const std::atomic_bool& stop);
@@ -76,13 +76,14 @@ class K151CodecPort final {
     return false;
 #endif
   }
-  enum class OutputData { empty, queued, dma_complete };
+  enum class OutputData { empty, queued, dma_complete, drain_confirmed };
   bool microphone_only() const { return receive_only_; }
   bool input_allowed() const {
     // A cold port rejects on prepared() without latching a new I/O fault.
     return owner_ ? owner_->load() && !stop_->load() : !attempted_;
   }
   bool fail();
+  K151SpeakerCleanupStage wait_for_standby_switch_off(const std::atomic_bool& consent);
   void note_speaker_cleanup_failure(K151SpeakerCleanupStage stage) {
     if constexpr (speaker_probe_build()) {
       if (speaker_cleanup_stage_ == K151SpeakerCleanupStage::none) speaker_cleanup_stage_ = stage;

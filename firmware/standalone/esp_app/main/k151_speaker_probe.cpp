@@ -56,8 +56,10 @@ K151SpeakerProbeReport run_k151_speaker_probe(const std::atomic_bool& owner,
       if (cleanup == Cleanup::none) cleanup = Cleanup::previous_fault;
       return {Result::cleanup_failed, startup, reset, progress, cleanup};
     }
-    return allowed() ? K151SpeakerProbeReport{result, startup, reset, progress, cleanup}
-                     : K151SpeakerProbeReport{Result::stopped};
+    if (allowed()) return {result, startup, reset, progress, cleanup};
+    if (cleanup == Cleanup::standby_interrupted)
+      return {Result::stopped, {}, {}, progress, cleanup};
+    return {Result::stopped};
   };
   if (!audio.initialize(allowed(), evidence.verified())) return finish(Result::codec_prepare_failed);
   if (!allowed()) return finish(Result::stopped);

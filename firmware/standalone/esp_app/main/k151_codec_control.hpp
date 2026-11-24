@@ -72,6 +72,13 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     return mute && power;
   }
 
+  std::optional<bool> aw88298_switching() {
+    if (profile_ != Profile::aw88298_muted_startup || !healthy()) return std::nullopt;
+    std::array<uint8_t, 2> value{};
+    if (read(this, 0x01, 1, value.data(), value.size()) != ESP_CODEC_DEV_OK) return std::nullopt;
+    return (value[0] & 0x01) != 0;
+  }
+
   // The caller owns the enabled I2S TX and must close through standby or reset
   // on failure, including revocation detected during the unmute transaction.
   template <typename Allowed, typename Clock, typename Pause, typename VoltageRead = std::nullptr_t,

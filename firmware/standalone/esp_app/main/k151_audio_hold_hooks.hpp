@@ -13,7 +13,7 @@ inline AudioHooks k151_audio_hooks(K151CodecPort& codec, const std::atomic_bool&
                                   i2c_master_bus_handle_t borrowed_bus = nullptr) {
   return AudioHooks{
       [&codec]() { return codec.microphone_off(); },
-      [&codec]() { return codec.speaker_off(); },
+      [&codec, &consent]() { return codec.speaker_off(&consent); },
       [&codec, &owner, &stop, evidence, borrowed_bus]() {
         return codec.prepare(owner, stop, evidence, borrowed_bus);
       },

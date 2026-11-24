@@ -356,3 +356,27 @@ I²C 읽기 오류, 앞선 코덱 제어 오류, 레지스터 값 불일치 가�
 확정할 수 없다. V11은 기존 확인에서 처음 실패한 검사만 보고하며
 타이밍 조건과 실패 시 리셋 동작을 유지한다.
 [AW88298 데이터시트 17쪽](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=17)
+
+## V11 DMA 완료와 종료 시 스위칭 표시
+
+승인한 V11 저음량 합성음 진단을 한 번 실행했다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `4c315c7c78d5d38da9b68d85109279f8f81ebb26`, SHA256 `869d9994993a38e41003423a3d3a0d34d59cc3d344886d484dd79ec476205b5c` |
+| 임시 쓰기 | `ota_1 [0x510000,0x552F90)`, 274,320바이트. 영향 섹터 끝 `0x553000`. 사전 대조와 임시 앱 독립 검증 통과. |
+| 시작 및 전송 | `startup_stage=none`, `settling_uvls=[556,7889]`. DMA 완료를 보고했다. 실제로 들린 소리는 관찰하지 않았다. |
+| 종료 | `cleanup_failed`, `end=[1,20]`. 출력 비활성화 뒤 칩 ID와 전력·음소거 레지스터 검사를 통과했다. 첫 실패는 읽기에 성공한 `SYSST`의 `SWS=1`이었다. |
+| 복구 | 원본 OTA1 5,177,344바이트의 독립 해시와 파티션 표·OTA 선택 데이터 일치 확인. 출고 재부팅 요청과 COM3 재연결 확인. |
+
+감독 실행기는 `preflight_exit=0`, `trial_runner_exit=1`,
+`factory_restore_verified=true`를 기록했다. 마이크와 유료 API를
+사용하지 않았고, 쓰기 범위는 OTA1이었다.
+
+V11은 I²S 클럭을 끄기 전 `SWS`를 검사하지 않았다. 모의 시험에서
+클럭이 유지되는 동안만 스위칭 표시가 가라앉는 경우를 주입했더니
+기존 순서는 거부했다. V12는 DMA를 확인한 정상 종료에서 하드 음소거와
+전력 차단을 읽어 확인하고, 클럭을 유지한 채 `SWS=0`을 먼저 확인한다.
+그 뒤 I²S를 중단하고 기존의 최종 대기 상태 검사도 적용한다. 이 순서의
+실물 결과는 별도 승인 뒤 검증해야 한다.
+[AW88298 전원 차단 순서](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=17)

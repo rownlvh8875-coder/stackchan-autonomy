@@ -848,6 +848,10 @@ def test_speaker_settling_records_power_readiness_separately_from_protection(
         (10, "dma_and_mute_observed", [2, 0]),
         (11, "cleanup_failed", [1, 19]),
         (11, "mute_confirmation_failed", [1, 20]),
+        (12, "cleanup_failed", [1, 21]),
+        (12, "mute_confirmation_failed", [1, 22]),
+        (12, "cleanup_failed", [1, 24]),
+        (12, "stopped", [1, 21]),
     ],
 )
 def test_speaker_cleanup_preserves_playback_progress(receiver, version, outcome, end):
@@ -862,16 +866,16 @@ def test_speaker_cleanup_preserves_playback_progress(receiver, version, outcome,
         "standby_uvls": None,
         "reset_uvls": [None, None, None],
         "vdd": [-1, -1, "not_requested", 0, None, -1],
-        "settling_uvls": [558, 7847],
+        "settling_uvls": [-1, -1] if outcome == "stopped" else [558, 7847],
         "end": end,
     }
     wire = json.dumps(report, separators=(",", ":")).encode("ascii") + b"\n"
     assert len(wire) < receiver.WIRE_LIMIT
-    challenge = (
-        "WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START"
-        if version == 11
-        else "WAIT_SPEAKER_CLEANUP_LOCAL_START"
-    )
+    challenge = {
+        10: "WAIT_SPEAKER_CLEANUP_LOCAL_START",
+        11: "WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START",
+        12: "WAIT_SPEAKER_MUTE_SETTLE_LOCAL_START",
+    }[version]
     wait = SPEAKER_WAIT | {"mic_trial": challenge}
     assert (
         receiver.receive_once(
@@ -879,7 +883,7 @@ def test_speaker_cleanup_preserves_playback_progress(receiver, version, outcome,
         )
         == report
     )
-    foreign = [1, 3] if version == 11 else [2, 20]
+    foreign = [2, 20] if version == 10 else [1, 3]
     for invalid in ([3, 0], [True, 0], [2, 99], [0], foreign):
         with pytest.raises(ValueError):
             receiver.validate_output_report(

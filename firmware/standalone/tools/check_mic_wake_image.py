@@ -37,8 +37,9 @@ def inspect_image(
             "K151_SPEAKER_V9": b"WAIT_SPEAKER_SETTLING_LOCAL_START\0",
             "K151_SPEAKER_V10": b"WAIT_SPEAKER_CLEANUP_LOCAL_START\0",
             "K151_SPEAKER_V11": b"WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START\0",
+            "K151_SPEAKER_V12": b"WAIT_SPEAKER_MUTE_SETTLE_LOCAL_START\0",
         }
-        cleanup_protocols = {"K151_SPEAKER_V10", "K151_SPEAKER_V11"}
+        cleanup_protocols = {"K151_SPEAKER_V10", "K151_SPEAKER_V11", "K151_SPEAKER_V12"}
         settling_protocols = cleanup_protocols | {"K151_SPEAKER_V9"}
         compact_vdd_protocols = settling_protocols | {"K151_SPEAKER_V8"}
         reset_protocols = compact_vdd_protocols | {"K151_SPEAKER_V7"}
