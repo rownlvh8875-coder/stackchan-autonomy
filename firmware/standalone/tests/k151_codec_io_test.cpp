@@ -8,6 +8,9 @@
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
 #include "k151_speaker_probe.hpp"
 #endif
+#ifdef STACKCHAN_K151_CONVERSATION_IMAGE
+#include "k151_pcm_speaker_sink.hpp"
+#endif
 #include "native_wake_input.hpp"
 #include <algorithm>
 #include <cassert>
@@ -54,9 +57,11 @@ bool exercise_release_faults=false;
 bool mic_only() { return mode.starts_with("mic_only_"); }
 bool duplex_runtime() { return mode.starts_with("duplex_runtime_"); }
 bool speaker_probe() { return mode.starts_with("speaker_probe_"); }
+bool conversation_audio() { return mode.starts_with("conversation_audio_"); }
+bool exercise_playback() { return speaker_probe() || conversation_audio(); }
 int64_t speaker_clock_us=1000;
 bool speaker_unmuted=false;
-int speaker_peak=0, speaker_eof=0;
+int speaker_peak=0, speaker_eof=0, playback_writes=0, duplex_reads=0;
 i2s_isr_callback_t speaker_callback=nullptr;
 void* speaker_callback_data=nullptr;
 std::array<int,6> speaker_dma_ids{};
@@ -170,7 +175,7 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
     bytes[0] = reg == 0x00 ? 0x18 :
         (mode == "duplex_board_switch_active" && phase == "init" ? 0x01 : 0x00);
     bytes[1] = reg == 0x00 && mode != "duplex_board_wrong_amp" ? 0x52 : 0x00;
-    if (speaker_probe() && reg == 0x01) {
+    if (exercise_playback() && reg == 0x01) {
       const auto power = amp_registers[0x04][1] & 0x43;
       bytes[0] = power == 0x40 ||
                  (speaker_unmuted && mode == "speaker_probe_mute_failure") ? 1 : 0;
@@ -178,10 +183,11 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
                                  mode == "speaker_probe_clock_and_release_failure";
       bytes[1] = tx.enabled && (power & 1) == 0 && !clock_missing ? 0x11 : 0;
       if (mode.starts_with("speaker_probe_uvls_") && power == 0x42) bytes[0] |= 0x40;
-      if ((mode=="speaker_probe_settling_uvls" || mode=="speaker_probe_stop_during_settling") &&
+      if ((mode=="speaker_probe_settling_uvls" || mode=="speaker_probe_stop_during_settling" ||
+           mode=="conversation_audio_transient_uvls" || mode=="conversation_audio_persistent_uvls") &&
           power==0x42) {
         if (speaker_clock_us==1000) speaker_clock_us=1570;
-        if (speaker_clock_us<2709) bytes[0] |= 0x40;
+        if (speaker_clock_us<2709 || mode=="conversation_audio_persistent_uvls") bytes[0] |= 0x40;
       }
       if (power == 0x03 &&
           ((phase.empty() && mode=="speaker_probe_uvls_before_codec_init") ||
@@ -194,7 +200,7 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
     auto& stored = amp_registers[reg];
     if (write) {
       if (reg == 0x04 && (bytes[1] & 0x43) != 0x03) {
-        assert(speaker_probe() && tx.enabled && !rx.enabled && !local_stop);
+        assert(exercise_playback() && tx.enabled && !rx.enabled && !local_stop);
         assert((amp_registers[0x05][1] & 0x10) != 0);
         const auto power = bytes[1] & 0x43;
         assert((power == 0x43 && (stored[1] & 0x43) == 0x03) ||
@@ -202,7 +208,7 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
                (power == 0x40 && (stored[1] & 0x43) == 0x42));
       }
       if (reg == 0x05 && !(bytes[1] & 0x10)) {
-        assert(speaker_probe() && tx.enabled && !rx.enabled && !local_stop);
+        assert(exercise_playback() && tx.enabled && !rx.enabled && !local_stop);
         assert((amp_registers[0x04][1] & 0x43) == 0x40 && amp_registers[0x0c][0] == 0x60);
         speaker_unmuted = true;
       }
@@ -251,7 +257,7 @@ int sdk_format(const audio_codec_data_if_t* h,esp_codec_dev_type_t type,esp_code
   // SDK format callback disables the selected channel before reconfiguration.
   (void)i2s_channel_disable(type==ESP_CODEC_DEV_TYPE_IN?&rx:&tx);
   // esp_codec_dev 1.6.2 can enable the paired TX to supply RX master clocks.
-  if (duplex_runtime() && type == ESP_CODEC_DEV_TYPE_IN && !tx.enabled)
+  if ((duplex_runtime() || conversation_audio()) && type == ESP_CODEC_DEV_TYPE_IN && !tx.enabled)
     assert(i2s_channel_enable(&tx) == ESP_OK);
   return mode=="format_fail"?ESP_FAIL:ESP_OK;
 }
@@ -267,7 +273,7 @@ void zero(std::span<const int16_t> pcm) { for(auto sample:pcm)assert(sample==0);
 }
 extern "C" int64_t esp_timer_get_time() {
   ++timer_calls;
-  if (speaker_probe()) return speaker_clock_us;
+  if (exercise_playback()) return speaker_clock_us;
   if(mic_wake_trial()) {
     if(mode=="mic_only_trial_invalid_start" && timer_calls==1)return -1;
     if(regress_next_trial_clock) {
@@ -476,7 +482,7 @@ extern "C" esp_err_t i2s_channel_register_event_callback(i2s_chan_handle_t h,
     const i2s_event_callbacks_t* callbacks, void* data) {
   assert(!mic_only() && h == &tx && h->alive && !h->enabled);
   assert(callbacks && callbacks->on_sent && data);
-  if (speaker_probe()) {
+  if (exercise_playback()) {
     speaker_callback=callbacks->on_sent;
     speaker_callback_data=data;
   }
@@ -486,11 +492,11 @@ extern "C" esp_err_t i2s_channel_register_event_callback(i2s_chan_handle_t h,
 }
 void vTaskDelay(unsigned ticks) {
   assert(!mic_only());
-  if (speaker_probe() && reset_waits==2) {
+  if (exercise_playback() && reset_waits==2) {
     assert(ticks==1 && tx.enabled && !rx.enabled);
-    speaker_clock_us += calls==25 ? 10'000 : 1000;
+    speaker_clock_us += playback_writes==25 ? 10'000 : 1000;
     if (mode=="speaker_probe_stop_during_settling") local_stop=true;
-    if (calls==25 && mode!="speaker_probe_dma_failure") {
+    if (playback_writes==25 && mode!="speaker_probe_dma_failure") {
       i2s_event_data_t eof{&speaker_dma_ids[speaker_eof++ % speaker_dma_ids.size()], 480};
       assert(!speaker_callback(&tx,&eof,speaker_callback_data));
     }
@@ -557,15 +563,16 @@ extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* i
   const bool invalid_speaker_pair = mode=="speaker_probe_paired" || inject_speaker_tx_pair;
   inject_speaker_tx_pair = false;
   info->pair_chan=mode=="mic_only_peer"?&tx:invalid_speaker_pair?&rx:nullptr;
-  if (speaker_probe()) info->total_dma_buf_size=6*480;
+  if (conversation_audio()) info->pair_chan=h==&tx ? &rx : &tx;
+  if (exercise_playback()) info->total_dma_buf_size=6*480;
   return 0;
 }
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
   assert(h==&rx && n<=960 && ms==20);++calls;
   assert(!speaker_probe());
-  if (duplex_runtime()) {
+  if (duplex_runtime() || conversation_audio()) {
     assert(rx.enabled && tx.enabled && n==960);
-    const bool priming = calls % 2 != 0;
+    const bool priming = ++duplex_reads % 2 != 0;
     auto* samples = static_cast<int16_t*>(p);
     std::fill_n(samples, n / sizeof(*samples), priming ? 22222 : 284);
     *bytes = priming && mode == "duplex_runtime_short_prime" ? n - 4 : n;
@@ -652,12 +659,13 @@ extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_
 extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void* data,size_t n,size_t* bytes,uint32_t ms){
   assert(!mic_only());
   assert(h==&tx && ms==20 && n<=480);++calls;*bytes=mode=="write_short"?n-2:n;
-  if (speaker_probe()) {
+  if (exercise_playback()) {
+    ++playback_writes;
     assert(n==480 && tx.enabled && !rx.enabled && speaker_unmuted);
     const auto* pcm=static_cast<const int16_t*>(data);
     for (size_t i=0;i<n/2;++i) speaker_peak=std::max(speaker_peak, std::abs(int(pcm[i])));
-    if (calls==1) assert(pcm[0]==0);
-    if (calls==25) assert(pcm[239]==0);
+    if (playback_writes==1) assert(pcm[0]==0);
+    if (playback_writes==25) assert(pcm[239]==0);
     speaker_clock_us+=10'000;
     if (mode=="speaker_probe_stop_write") local_stop=true;
     if (mode=="speaker_probe_write_failure") *bytes-=2;
@@ -733,6 +741,13 @@ extern "C" int audio_codec_delete_data_if(const audio_codec_data_if_t* h){assert
 #ifdef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
 std::string run_mic_trial_with_embedded_model_double(
     std::string_view, std::atomic_bool&, std::atomic_bool&);
+#endif
+#ifdef STACKCHAN_K151_CONVERSATION_IMAGE
+namespace stackchan::standalone {
+bool k151_conversation_boot_armed() {
+  return conversation_audio() && mode != "conversation_audio_unarmed";
+}
+} // namespace stackchan::standalone
 #endif
 int main(int argc,char** argv) {
   assert(argc==2 || (argc==3 && std::string_view(argv[2])=="--report"));mode=argv[1];
@@ -1130,6 +1145,57 @@ int main(int argc,char** argv) {
     return 0;
   }
   K151CodecPort port;std::array<int16_t,240> pcm;pcm.fill(123);
+#ifdef STACKCHAN_K151_CONVERSATION_IMAGE
+  if (conversation_audio()) {
+    using Stage = K151SpeakerStartupStage;
+    std::atomic_bool consent{true};
+    AudioGuard audio{k151_audio_hooks(port, local_owner, local_stop, consent, {true, true})};
+    assert(audio.initialize(true, true));
+    assert(audio.capture_begin() && rx.enabled && tx.enabled);
+    assert(port.capture_mono_24k(pcm));
+    for (const auto sample : pcm) assert(sample == 284);
+    assert(audio.capture_end() && !rx.enabled && !tx.enabled);
+
+    const bool should_play = mode == "conversation_audio_transient_uvls";
+    assert(audio.playback_begin() == should_play);
+    const auto startup = port.speaker_startup();
+    if (!should_play) {
+      assert(audio.state() == AudioState::fault && !tx.enabled && !rx.enabled);
+      assert(playback_writes == 0 && !speaker_unmuted);
+      if (mode == "conversation_audio_persistent_uvls") {
+        assert(startup.stage == Stage::wait_clock &&
+               startup.clock_wait_exit == K151ClockWaitExit::protection_active);
+        assert(startup.settling_uvls_us == 570 && startup.clock_ready_after_uvls_us == -1);
+        assert(!port.shutdown()); // The original protection fault remains latched.
+      } else {
+        assert(startup.stage == Stage::admission);
+        assert(port.shutdown());
+      }
+      assert(!rx.alive && !tx.alive && !bus.alive && (output_latch & 0x04) == 0);
+      return 0;
+    }
+
+    assert(startup.stage == Stage::none && startup.settling_uvls_us == 570);
+    assert(startup.clock_ready_after_uvls_us >= 2000 && !rx.enabled && tx.enabled);
+    std::array<int16_t, 6000> reply{};
+    reply.fill(2048);
+    reply.front() = reply.back() = 0;
+    K151PcmSpeakerSink sink{port, local_stop, consent, local_owner};
+    assert(sink.play_pcm24k(reply, static_cast<uint64_t>(speaker_clock_us / 1000)).complete);
+    assert(playback_writes == 25 && speaker_peak == 2048 && speaker_eof == 7);
+    assert(audio.playback_end() && audio.state() == AudioState::idle);
+    assert((amp_registers[0x04][1] & 0x43) == 0x03 && (amp_registers[0x05][1] & 0x10));
+    assert(!rx.enabled && !tx.enabled);
+
+    assert(audio.capture_begin() && rx.enabled && tx.enabled);
+    assert(port.capture_mono_24k(pcm));
+    for (const auto sample : pcm) assert(sample == 284);
+    assert(duplex_reads == 4 && channels_created == 1 && bus_created == 1);
+    assert(audio.capture_end() && !rx.enabled && !tx.enabled);
+    assert(port.shutdown() && !rx.alive && !tx.alive && !bus.alive);
+    return 0;
+  }
+#endif
   if(mic_only()) {
     const K151MicOnlyEvidence verified{true,true};
     if(mode.starts_with("mic_only_board_") && mode!="mic_only_board_already_held") {

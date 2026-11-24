@@ -103,11 +103,26 @@ def runtime_binary(tmp_path_factory):
 @pytest.fixture(scope="module")
 def realtime_runtime_binary(tmp_path_factory):
     header = Path("/usr/include/cjson/cJSON.h")
-    if not header.is_file():
-        pytest.skip("system libcjson-dev headers unavailable")
-    return _build_runtime(
-        tmp_path_factory.mktemp("k151-realtime-runtime"), (header.parent, "-lcjson")
+    folder = tmp_path_factory.mktemp("k151-realtime-runtime")
+    if header.is_file():
+        return _build_runtime(folder, (header.parent, "-lcjson"))
+
+    # Windows can reuse the already-provisioned component from the ESP-IDF build.
+    source = APP.parent / "managed_components/espressif__cjson/cJSON"
+    if not (source / "cJSON.h").is_file() or not (source / "cJSON.c").is_file():
+        pytest.skip("cJSON headers and local ESP-IDF cJSON source unavailable")
+    compiler = shutil.which("g++")
+    if not compiler:
+        pytest.skip("C++20 compiler required")
+    library = folder / "cJSON.o"
+    compile_cjson = subprocess.run(
+        [compiler, "-x", "c", "-std=c11", "-O2", "-c", str(source / "cJSON.c"), "-o", str(library)],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
+    assert compile_cjson.returncode == 0, compile_cjson.stderr
+    return _build_runtime(folder, (source, str(library)))
 
 
 def _run_runtime(binary, scenario):

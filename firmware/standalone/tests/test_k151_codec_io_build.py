@@ -68,7 +68,9 @@ def embedded_trial_binary(tmp_path_factory):
     return _build_port(compiler, binary, BASE / "esp_app/main", embedded_trial=True)
 
 
-def _build_port(compiler, binary, app, *, embedded_trial=False, speaker_probe=False):
+def _build_port(
+    compiler, binary, app, *, embedded_trial=False, speaker_probe=False, conversation=False
+):
     sources = [
         BASE / "tests/k151_codec_io_test.cpp",
         app / "k151_codec_port.cpp",
@@ -91,6 +93,8 @@ def _build_port(compiler, binary, app, *, embedded_trial=False, speaker_probe=Fa
     if speaker_probe:
         command += ["-DSTACKCHAN_K151_SPEAKER_PROBE=1"]
         sources += [app / "k151_speaker_probe.cpp"]
+    if conversation:
+        command += ["-DSTACKCHAN_K151_CONVERSATION_IMAGE=1"]
     for directory in [
         BASE / "tests/codec_io_doubles",
         BASE / "tests/idf_partition_doubles",
@@ -126,6 +130,26 @@ def speaker_probe_binary(tmp_path_factory):
         pytest.skip("C++20 compiler required")
     binary = tmp_path_factory.mktemp("speaker-probe") / "speaker"
     return _build_port(compiler, binary, BASE / "esp_app/main", speaker_probe=True)
+
+
+@pytest.fixture(scope="module")
+def conversation_audio_binary(tmp_path_factory):
+    compiler = shutil.which("g++")
+    if not compiler:
+        pytest.skip("C++20 compiler required")
+    binary = tmp_path_factory.mktemp("conversation-audio") / "conversation"
+    return _build_port(compiler, binary, BASE / "esp_app/main", conversation=True)
+
+
+@pytest.mark.parametrize("case", ["transient_uvls", "persistent_uvls", "unarmed"])
+def test_conversation_audio_capture_playback_and_return(conversation_audio_binary, case):
+    result = subprocess.run(
+        [str(conversation_audio_binary), f"conversation_audio_{case}"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(
