@@ -10,7 +10,7 @@ namespace stackchan::standalone {
 enum class K151SpeakerStartupStage : uint8_t {
   none, audio_guard, admission, codec_open, codec_ready, i2s_tx_state, volume,
   muted_admission, clock_origin, standby_readback, i2s_enable, clock_enable, wait_clock,
-  mute_readback, amplifier_enable, wait_switching, attenuation, pre_unmute_status,
+  mute_readback, pre_amplifier_status, amplifier_enable, wait_switching, attenuation, pre_unmute_status,
   unmute, post_unmute_status,
 };
 
@@ -46,6 +46,8 @@ struct K151SpeakerStartupDiagnostic {
   std::optional<bool> standby_uvls{};
   std::optional<bool> uvls_after_vdd{};
   int32_t uvls_after_vdd_us = -1;
+  int32_t settling_uvls_us = -1;
+  int32_t clock_ready_after_uvls_us = -1;
 };
 
 struct K151SpeakerResetObservations {

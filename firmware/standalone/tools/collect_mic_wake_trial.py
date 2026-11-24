@@ -25,6 +25,7 @@ SPEAKER_VDD_PROTOCOL = "K151_SPEAKER_V5"
 SPEAKER_STANDBY_UVLS_PROTOCOL = "K151_SPEAKER_V6"
 SPEAKER_RESET_UVLS_PROTOCOL = "K151_SPEAKER_V7"
 SPEAKER_VDD_FOLLOWUP_PROTOCOL = "K151_SPEAKER_V8"
+SPEAKER_SETTLING_PROTOCOL = "K151_SPEAKER_V9"
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
     SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
@@ -34,6 +35,7 @@ SPEAKER_CHALLENGES = {
     SPEAKER_STANDBY_UVLS_PROTOCOL: "WAIT_SPEAKER_STANDBY_UVLS_LOCAL_START",
     SPEAKER_RESET_UVLS_PROTOCOL: "WAIT_SPEAKER_RESET_UVLS_LOCAL_START",
     SPEAKER_VDD_FOLLOWUP_PROTOCOL: "WAIT_SPEAKER_VDD_FOLLOWUP_LOCAL_START",
+    SPEAKER_SETTLING_PROTOCOL: "WAIT_SPEAKER_SETTLING_LOCAL_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
@@ -44,6 +46,7 @@ SPEAKER_REVIEW_KINDS = {
     SPEAKER_STANDBY_UVLS_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V6",
     SPEAKER_RESET_UVLS_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V7",
     SPEAKER_VDD_FOLLOWUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V8",
+    SPEAKER_SETTLING_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V9",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -105,6 +108,16 @@ SPEAKER_CLOCK_WAIT_SAMPLES = {
     "internal_unstable",
     "stable",
 }
+SPEAKER_SETTLING_PENDING_STAGES = {"wait_clock", "mute_readback", "pre_amplifier_status"}
+SPEAKER_SETTLING_READY_STAGES = {
+    "none",
+    "amplifier_enable",
+    "wait_switching",
+    "attenuation",
+    "pre_unmute_status",
+    "unmute",
+    "post_unmute_status",
+}
 SPEAKER_PROTECTION_FLAGS = {
     "ovp2",
     "undervoltage",
@@ -163,7 +176,10 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
     )
     result = record.get("result")
     expected_fields = {field, "result", "operating_admission"}
-    followup_report = speaker and speaker_protocol == SPEAKER_VDD_FOLLOWUP_PROTOCOL
+    settling_report = speaker and speaker_protocol == SPEAKER_SETTLING_PROTOCOL
+    followup_report = settling_report or (
+        speaker and speaker_protocol == SPEAKER_VDD_FOLLOWUP_PROTOCOL
+    )
     reset_report = followup_report or (speaker and speaker_protocol == SPEAKER_RESET_UVLS_PROTOCOL)
     standby_report = reset_report or (speaker and speaker_protocol == SPEAKER_STANDBY_UVLS_PROTOCOL)
     vdd_report = standby_report or (speaker and speaker_protocol == SPEAKER_VDD_PROTOCOL)
@@ -185,6 +201,8 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
         expected_fields.add("standby_uvls")
     if reset_report:
         expected_fields.add("reset_uvls")
+    if settling_report:
+        expected_fields.add("settling_uvls")
     if (
         set(record) != expected_fields
         or record.get(field) != protocol
@@ -205,6 +223,8 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
             allowed = {"none"}
         if standby_report and result in ("amplifier_start_failed", "cleanup_failed"):
             allowed = allowed | {"i2s_enable"}
+            if settling_report:
+                allowed.add("pre_amplifier_status")
         if stage not in allowed:
             raise ValueError("Invalid speaker startup checkpoint")
     if clock_report:
@@ -233,6 +253,7 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
             if active != protection_stop or (active and record["clock_wait_last"] == "unobserved"):
                 raise ValueError("Speaker protection disagrees with the clock wait result")
         elif active and record["startup_stage"] not in {
+            "pre_amplifier_status",
             "wait_switching",
             "pre_unmute_status",
             "post_unmute_status",
@@ -251,17 +272,6 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
             state, str
         ):
             raise ValueError("Invalid speaker VDD observation")
-        if followup_report and (
-            type(followup_delay) is not int
-            or (
-                followup_delay != -1
-                if followup_uvls is None
-                else type(followup_uvls) is not bool
-                or state != "sampled"
-                or not 0 <= followup_delay < 100_000 - elapsed - delay
-            )
-        ):
-            raise ValueError("Invalid speaker VDD follow-up observation")
         uvls = record["startup_stage"] == "wait_clock" and record["protection"]["undervoltage"]
         if standby_report:
             standby_uvls = record["standby_uvls"]
@@ -298,6 +308,39 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
             )
         ):
             raise ValueError("Invalid speaker VDD observation")
+        if followup_report and (
+            type(followup_delay) is not int
+            or (
+                followup_delay != -1
+                if followup_uvls is None
+                else type(followup_uvls) is not bool
+                or state != "sampled"
+                or not 0 <= followup_delay < 100_000 - elapsed - delay
+            )
+        ):
+            raise ValueError("Invalid speaker VDD follow-up observation")
+    if settling_report:
+        settling = record["settling_uvls"]
+        if (
+            not isinstance(settling, list)
+            or len(settling) != 2
+            or any(type(value) is not int for value in settling)
+        ):
+            raise ValueError("Invalid speaker settling observation")
+        first, ready = settling
+        stage = record["startup_stage"]
+        if first == -1:
+            valid = ready == -1
+        elif 0 <= first < 2000:
+            valid = (ready == -1 and stage in SPEAKER_SETTLING_PENDING_STAGES) or (
+                2000 <= ready < 100_000 and stage in SPEAKER_SETTLING_READY_STAGES
+            )
+        else:
+            valid = False
+        if not valid:
+            raise ValueError("Invalid speaker settling observation")
+        if uvls and (elapsed < first or (state != "skipped" and elapsed < 2000)):
+            raise ValueError("Speaker VDD observation precedes the clock protection stop")
     return record
 
 

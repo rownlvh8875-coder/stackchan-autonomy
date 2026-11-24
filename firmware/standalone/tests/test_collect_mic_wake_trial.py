@@ -771,6 +771,75 @@ def test_speaker_vdd_followup_preserves_the_first_protection(receiver, followup)
 
 
 @pytest.mark.parametrize(
+    "stage, settling",
+    [
+        ("none", [-1, -1]),
+        ("none", [570, 2570]),
+        ("wait_clock", [570, -1]),
+        ("pre_amplifier_status", [570, -1]),
+        ("pre_amplifier_status", [-1, -1]),
+        ("wait_switching", [570, 2570]),
+    ],
+)
+def test_speaker_settling_records_power_readiness_separately_from_protection(
+    receiver, stage, settling
+):
+    protocol = "K151_SPEAKER_V9"
+    wait = SPEAKER_WAIT | {"mic_trial": receiver.SPEAKER_CHALLENGES[protocol]}
+    active = stage != "none"
+    wait_fault = stage == "wait_clock"
+    protection = dict.fromkeys(receiver.SPEAKER_PROTECTION_FLAGS, False)
+    protection["undervoltage"] = active
+    report = SPEAKER_REPORT | {
+        "speaker_probe": protocol,
+        "result": "amplifier_start_failed" if active else "dma_and_mute_observed",
+        "startup_stage": stage,
+        "clock_wait_exit": "protection_active" if wait_fault else "none",
+        "clock_wait_last": "stable" if wait_fault else "none",
+        "protection": protection,
+        "standby_uvls": True if wait_fault else None,
+        "reset_uvls": [True, True, True] if wait_fault else [None, None, None],
+        "vdd": [2570, 579, "sampled", 4482, False, 560]
+        if wait_fault
+        else [-1, -1, "not_requested", 0, None, -1],
+        "settling_uvls": settling,
+    }
+    wire = json.dumps(report, separators=(",", ":")).encode("ascii") + b"\n"
+    assert len(wire) < receiver.WIRE_LIMIT
+    port = FakeSerial([wait, wire, HOLD])
+    assert (
+        receiver.receive_once(port, lambda: None, speaker=True, speaker_protocol=protocol) == report
+    )
+    for invalid in ([2000, 2570], [570, 1999], [-1, 2570], [True, -1], [570]):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | {"settling_uvls": invalid}, speaker=True, speaker_protocol=protocol
+            )
+    if wait_fault or stage == "pre_amplifier_status":
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | {"settling_uvls": [570, 2570]}, speaker=True, speaker_protocol=protocol
+            )
+    if wait_fault:
+        for early_vdd in (
+            [300, -1, "skipped", 0, None, -1],
+            [1200, 579, "sampled", 4482, False, 560],
+        ):
+            with pytest.raises(ValueError):
+                receiver.validate_output_report(
+                    report | {"vdd": early_vdd}, speaker=True, speaker_protocol=protocol
+                )
+        mixed_fault = report | {
+            "protection": protection | {"amplifier_overcurrent": True},
+            "vdd": [1200, -1, "skipped", 0, None, -1],
+        }
+        assert (
+            receiver.validate_output_report(mixed_fault, speaker=True, speaker_protocol=protocol)
+            == mixed_fault
+        )
+
+
+@pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )
 def test_silent_tx_is_single_start_and_collects_hold(receiver, outcome):
@@ -827,6 +896,7 @@ def test_silent_tx_challenge_cannot_start_the_wrong_image(receiver, challenge, s
         "K151_SPEAKER_V6",
         "K151_SPEAKER_V7",
         "K151_SPEAKER_V8",
+        "K151_SPEAKER_V9",
     ],
 )
 def test_output_trial_binds_approval_and_install_to_exact_review(

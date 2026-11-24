@@ -132,6 +132,8 @@ def speaker_probe_binary(tmp_path_factory):
     "case",
     [
         "ok",
+        "settling_uvls",
+        "stop_during_settling",
         "denied",
         "stop_before",
         "stop_write",
@@ -701,6 +703,13 @@ def test_real_aw88298_startup_stays_quiet(aw88298_startup_binary, mode):
     "mode",
     [
         "start_low_volume",
+        "start_uvls_clears_while_muted",
+        "start_uvls_persists",
+        "start_uvls_at_settle_boundary",
+        "start_uvls_stop",
+        "start_uvls_reasserts_before_amp",
+        "start_uvls_reasserts_after_amp",
+        "start_late_uvls_without_transient",
         "start_no_clock",
         "start_reference_missing",
         "start_clock_unstable",

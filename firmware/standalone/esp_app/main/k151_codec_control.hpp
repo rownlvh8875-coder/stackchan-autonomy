@@ -82,6 +82,7 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     constexpr uint16_t kClockLocked = kInternalClock | kPllLocked;
     constexpr uint16_t kClockMask = kNoReference | kClockLocked;
     constexpr uint16_t kSwitching = 0x0100;
+    constexpr auto kUnderVoltage = aw88298_protection::undervoltage;
     static_assert(aw88298_protection::mask == 0xcc0a);
     constexpr uint8_t kPowerMask = 0x43; // I2SEN, AMPPD, PWDN
     constexpr uint8_t kStandbyI2s = 0x43; // I2S configured before system power-up
@@ -96,6 +97,8 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     auto wait_exit = Exit::none;
     auto last_status = Sample::unobserved;
     uint16_t protection_flags = 0;
+    int32_t settling_uvls_us = -1;
+    int32_t clock_ready_after_uvls_us = -1;
     const auto live = [&] {
       if (!allowed() || !healthy()) {
         wait_exit = Exit::admission_lost;
@@ -143,10 +146,6 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
       else if (!(status & kInternalClock)) last_status = Sample::internal_unstable;
       else last_status = Sample::stable;
       protection_flags = status & aw88298_protection::mask;
-      if (protection_flags) {
-        wait_exit = Exit::protection_active;
-        return false;
-      }
       return true;
     };
     const auto await_stage = [&](bool operating, uint16_t& status) {
@@ -155,12 +154,25 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
       // The poll count also bounds failure if the injected clock never advances.
       for (int poll = 0; poll < 100; ++poll) {
         if (!read_status(status)) return false;
-        if (!operating && (status & kSwitching)) {
-          wait_exit = Exit::early_switching;
-          return false;
+        const auto elapsed = sampled - stage_started;
+        if (protection_flags) {
+          // During the existing clock setup interval, an isolated UVLS keeps
+          // the output powered down and muted. All other faults stop now.
+          if (operating || (status & kSwitching) || protection_flags != kUnderVoltage ||
+              elapsed >= kStageSettleUs) {
+            wait_exit = Exit::protection_active;
+            return false;
+          }
+          if (settling_uvls_us < 0) settling_uvls_us = static_cast<int32_t>(elapsed);
+          protection_flags = 0; // Terminal protection; the earlier sample has its own field.
+        } else {
+          if (!operating && (status & kSwitching)) {
+            wait_exit = Exit::early_switching;
+            return false;
+          }
+          if (elapsed >= kStageSettleUs &&
+              (status & (kClockMask | kSwitching)) == expected) return true;
         }
-        if (sampled - stage_started >= kStageSettleUs &&
-            (status & (kClockMask | kSwitching)) == expected) return true;
         if (!live()) return false;
         pause();
       }
@@ -178,18 +190,18 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     uint16_t status{};
     if (!await_stage(false, status)) {
       K151SpeakerStartupDiagnostic failure{Stage::wait_clock, wait_exit, last_status, protection_flags};
-      constexpr auto under_voltage = aw88298_protection::undervoltage;
-      if (protection_flags & under_voltage)
-        failure.standby_uvls = (standby_status & under_voltage) != 0;
+      failure.settling_uvls_us = settling_uvls_us;
+      if (protection_flags & kUnderVoltage)
+        failure.standby_uvls = (standby_status & kUnderVoltage) != 0;
       if constexpr (!std::is_same_v<VoltageRead, std::nullptr_t>) {
         constexpr int64_t kVoltageReadReserveUs = 30'000;
-        if (wait_exit == Exit::protection_active && (protection_flags & under_voltage)) {
+        if (wait_exit == Exit::protection_active && (protection_flags & kUnderVoltage)) {
           const auto fault_observed = sampled;
           failure.uvls_after_clock_us = static_cast<int32_t>(fault_observed - clock_verified);
           failure.vdd = {k151::PowerSample::skipped};
           // The VDD read cannot change the failure or proceed to amplification.
           // Keep the existing HW mute and powered-down output stage throughout.
-          if (protection_flags == under_voltage && !(status & kSwitching) && live() &&
+          if (protection_flags == kUnderVoltage && !(status & kSwitching) && live() &&
               sampled - started <= kStartupLimitUs - kVoltageReadReserveUs) {
             const auto reading = read_voltage();
             if (live()) {
@@ -216,20 +228,31 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
       }
       return failure;
     }
-    if (!read_live(0x05, value) || !(value[1] & kHardMute)) return {Stage::mute_readback};
-    if (!transition(0x04, kPowerMask, kConfiguring, kOperating)) return {Stage::amplifier_enable};
-    if (!await_stage(true, status))
-      return {Stage::wait_switching, Exit::none, Sample::none, protection_flags};
-    if (!read_live(0x0c, value) || value[0] < kMinAttenuation || value[0] > kMaxAttenuation)
-      return {Stage::attenuation};
+    const auto result = [&](Stage stage, uint16_t flags = 0) {
+      K151SpeakerStartupDiagnostic report{stage, Exit::none, Sample::none, flags};
+      report.settling_uvls_us = settling_uvls_us;
+      report.clock_ready_after_uvls_us = clock_ready_after_uvls_us;
+      return report;
+    };
     constexpr auto kStatusMask = kClockMask | kSwitching;
+    if (!read_live(0x05, value) || !(value[1] & kHardMute)) return result(Stage::mute_readback);
+    // Confirm a fresh, clear status after checking HMUTE and before clearing AMPPD.
+    if (!read_status(status) || protection_flags || (status & kStatusMask) != kClockLocked)
+      return result(Stage::pre_amplifier_status, protection_flags);
+    if (settling_uvls_us >= 0)
+      clock_ready_after_uvls_us = static_cast<int32_t>(sampled - clock_verified);
+    if (!transition(0x04, kPowerMask, kConfiguring, kOperating)) return result(Stage::amplifier_enable);
+    if (!await_stage(true, status))
+      return result(Stage::wait_switching, protection_flags);
+    if (!read_live(0x0c, value) || value[0] < kMinAttenuation || value[0] > kMaxAttenuation)
+      return result(Stage::attenuation);
     constexpr auto kReady = kClockLocked | kSwitching;
-    if (!read_status(status) || (status & kStatusMask) != kReady)
-      return {Stage::pre_unmute_status, Exit::none, Sample::none, protection_flags};
-    if (!transition(0x05, kHardMute, kHardMute, 0)) return {Stage::unmute};
-    if (!read_status(status) || (status & kStatusMask) != kReady)
-      return {Stage::post_unmute_status, Exit::none, Sample::none, protection_flags};
-    return {};
+    if (!read_status(status) || protection_flags || (status & kStatusMask) != kReady)
+      return result(Stage::pre_unmute_status, protection_flags);
+    if (!transition(0x05, kHardMute, kHardMute, 0)) return result(Stage::unmute);
+    if (!read_status(status) || protection_flags || (status & kStatusMask) != kReady)
+      return result(Stage::post_unmute_status, protection_flags);
+    return result(Stage::none);
   }
  private:
   static constexpr uint8_t kPowerVerified = 1, kMuteVerified = 2, kAttenuationVerified = 4;

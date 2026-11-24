@@ -34,8 +34,10 @@ def inspect_image(
             "K151_SPEAKER_V6": b"WAIT_SPEAKER_STANDBY_UVLS_LOCAL_START\0",
             "K151_SPEAKER_V7": b"WAIT_SPEAKER_RESET_UVLS_LOCAL_START\0",
             "K151_SPEAKER_V8": b"WAIT_SPEAKER_VDD_FOLLOWUP_LOCAL_START\0",
+            "K151_SPEAKER_V9": b"WAIT_SPEAKER_SETTLING_LOCAL_START\0",
         }
-        reset_protocols = {"K151_SPEAKER_V7", "K151_SPEAKER_V8"}
+        compact_vdd_protocols = {"K151_SPEAKER_V8", "K151_SPEAKER_V9"}
+        reset_protocols = compact_vdd_protocols | {"K151_SPEAKER_V7"}
         standby_protocols = reset_protocols | {"K151_SPEAKER_V6"}
         legacy_vdd_protocols = {"K151_SPEAKER_V5", "K151_SPEAKER_V6", "K151_SPEAKER_V7"}
         protection_protocols = standby_protocols | {"K151_SPEAKER_V4", "K151_SPEAKER_V5"}
@@ -72,7 +74,8 @@ def inspect_image(
             )
             or (observed[0] in standby_protocols and b'"standby_uvls"' not in app)
             or (observed[0] in reset_protocols and b'"reset_uvls"' not in app)
-            or (observed[0] == "K151_SPEAKER_V8" and b'"vdd"' not in app)
+            or (observed[0] in compact_vdd_protocols and b'"vdd"' not in app)
+            or (observed[0] == "K151_SPEAKER_V9" and b'"settling_uvls"' not in app)
         ):
             raise ValueError("Unexpected speaker diagnostic image")
         return {

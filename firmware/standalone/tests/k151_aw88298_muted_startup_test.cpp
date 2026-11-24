@@ -34,13 +34,24 @@ int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* outpu
   if (standby_request && scenario == "standby_mute_read_fail" && reg == 0x05)
     return ESP_CODEC_DEV_READ_FAIL;
   auto value = registers.at(reg);
+  if (activating && reg == 0x01 && (registers[0x04] & 0x43) == 0x42 &&
+      scenario.starts_with("start_uvls_")) {
+    if (now_us == 0) now_us = scenario == "start_uvls_at_settle_boundary" ? 2000 : 570;
+    if (now_us < 1709 || scenario == "start_uvls_persists" ||
+        scenario == "start_uvls_at_settle_boundary")
+      value |= 0x4000;
+  }
+  if (activating && reg == 0x05 && now_us >= 2000 &&
+      (scenario == "start_uvls_reasserts_before_amp" || scenario == "start_late_uvls_without_transient"))
+    registers[0x01] |= 0x4000;
   if (activating && reg == 0x04 && (value & 0x43) == 0x43) {
     if (scenario == "start_revoked_at_i2s_readback") allowed = false;
     if (scenario == "start_i2s_readback_mismatch") value &= ~0x40;
   }
   if (activating && reg == 0x01 && scenario.starts_with("uvls_") &&
       (registers[0x04] & 0x43) == 0x42) {
-    now_us = scenario == "uvls_no_budget" ? 71'000 : 1200;
+    now_us = scenario == "uvls_no_budget" ? 71'000 :
+             scenario == "uvls_other_protection" || scenario == "uvls_switching" ? 1200 : 2000;
     value = scenario == "uvls_other_protection" ? 0x4019 :
             scenario == "uvls_switching" ? 0x4111 : 0x4011;
   }
@@ -75,6 +86,7 @@ int write(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* inpu
       assert(now_us >= 2000);
       if (scenario != "start_no_switching") registers[0x01] |= 0x0100;
       if (scenario == "start_fault") registers[0x01] |= 0x0008;
+      if (scenario == "start_uvls_reasserts_after_amp") registers[0x01] |= 0x4000;
       if (scenario == "start_mute_lost") registers[0x05] &= ~0x10;
     }
   } else if (activating && reg == 0x05 && (word & 0x10) == 0) {
@@ -193,7 +205,9 @@ int main(int argc, char** argv) {
       assert(result.clock_wait_exit == K151ClockWaitExit::protection_active);
       assert((result.protection_flags & 0x4000) != 0);
       assert(result.standby_uvls == standby_uvls);
-      assert(result.uvls_after_clock_us == (scenario == "uvls_no_budget" ? 71'000 : 1200));
+      const bool early_unsafe = scenario == "uvls_other_protection" || scenario == "uvls_switching";
+      assert(result.uvls_after_clock_us == (scenario == "uvls_no_budget" ? 71'000 :
+                                           early_unsafe ? 1200 : 2000));
       const bool forbidden = scenario == "uvls_no_budget" || scenario == "uvls_other_protection" ||
                              scenario == "uvls_switching";
       assert(reads == (forbidden ? 0 : 1));
@@ -201,7 +215,7 @@ int main(int argc, char** argv) {
         const bool invalid = scenario == "uvls_followup_invalid_vdd";
         assert(result.vdd.state == (invalid ? Power::reset_value : Power::sampled));
         assert(result.vdd.mv == (invalid ? 0 : 2497));
-        assert(result.vdd_after_uvls_us == (scenario == "uvls_followup_no_budget" ? 88'801 : 700));
+        assert(result.vdd_after_uvls_us == (scenario == "uvls_followup_no_budget" ? 88'001 : 700));
       } else {
         assert(result.vdd.state == Power::skipped && result.vdd.mv == 0);
         assert(result.vdd_after_uvls_us == -1);
@@ -237,10 +251,11 @@ int main(int argc, char** argv) {
             if (scenario == "start_clock_reversed") --now_us;
             else if (scenario != "start_frozen_clock")
               now_us += scenario == "start_no_clock" ? 1200 : 1000;
-            if (scenario == "start_revoked_while_muted") allowed = false;
+            if (scenario == "start_revoked_while_muted" || scenario == "start_uvls_stop") allowed = false;
           });
       activating = false;
-      const bool success = scenario == "start_low_volume";
+      const bool success = scenario == "start_low_volume" ||
+                           scenario == "start_uvls_clears_while_muted";
       const bool side_effect = success || scenario == "start_revoked_at_unmute" ||
                                scenario == "start_clock_lost_at_unmute";
       const auto stage = startup.stage;
@@ -249,6 +264,21 @@ int main(int argc, char** argv) {
         assert(stage == Stage::wait_clock && startup.clock_wait_exit == reason &&
                startup.clock_wait_last == sample);
       };
+      if (scenario == "start_late_uvls_without_transient") {
+        assert(stage == Stage::pre_amplifier_status && writes == before + 2);
+        assert(startup.settling_uvls_us == -1 && startup.clock_ready_after_uvls_us == -1);
+      }
+      if (scenario.starts_with("start_uvls_")) {
+        assert(startup.settling_uvls_us == (scenario == "start_uvls_at_settle_boundary" ? -1 : 570));
+        const bool ready = success || scenario == "start_uvls_reasserts_after_amp";
+        assert(startup.clock_ready_after_uvls_us == (ready ? 2570 : -1));
+        if (scenario == "start_uvls_persists" || scenario == "start_uvls_at_settle_boundary")
+          check_wait(Exit::protection_active, Sample::stable);
+        if (scenario == "start_uvls_stop") check_wait(Exit::admission_lost, Sample::stable);
+        if (scenario == "start_uvls_reasserts_before_amp")
+          assert(stage == Stage::pre_amplifier_status && writes == before + 2);
+        if (scenario == "start_uvls_reasserts_after_amp") assert(stage == Stage::wait_switching);
+      }
       if (scenario == "start_no_clock") check_wait(Exit::startup_deadline, Sample::pll_unlocked);
       if (scenario == "start_reference_missing")
         check_wait(Exit::poll_limit, Sample::reference_missing);
@@ -259,8 +289,12 @@ int main(int argc, char** argv) {
         assert((registers[0x04] & 0x43) == 0x42 && (registers[0x05] & 0x10) != 0);
         assert(writes == before + 2 && startup.protection_flags == injected_clock_protection);
       } else {
-        assert(startup.protection_flags == (scenario == "start_fault" ? 0x0008 : 0));
-        assert(!startup.standby_uvls.has_value());
+        const bool uvls = (scenario.starts_with("start_uvls_") && !success &&
+                           scenario != "start_uvls_stop") ||
+                          scenario == "start_late_uvls_without_transient";
+        assert(startup.protection_flags == (scenario == "start_fault" ? 0x0008 : uvls ? 0x4000 : 0));
+        const bool rejected_at_wait = uvls && stage == Stage::wait_clock;
+        assert(startup.standby_uvls.has_value() == rejected_at_wait);
       }
       if (scenario == "start_revoked_at_i2s_readback" || scenario == "start_i2s_readback_mismatch") {
         assert(stage == Stage::i2s_enable && writes == before + 1);

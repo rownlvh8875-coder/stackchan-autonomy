@@ -178,6 +178,11 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
                                  mode == "speaker_probe_clock_and_release_failure";
       bytes[1] = tx.enabled && (power & 1) == 0 && !clock_missing ? 0x11 : 0;
       if (mode.starts_with("speaker_probe_uvls_") && power == 0x42) bytes[0] |= 0x40;
+      if ((mode=="speaker_probe_settling_uvls" || mode=="speaker_probe_stop_during_settling") &&
+          power==0x42) {
+        if (speaker_clock_us==1000) speaker_clock_us=1570;
+        if (speaker_clock_us<2709) bytes[0] |= 0x40;
+      }
       if (power == 0x03 &&
           ((phase.empty() && mode=="speaker_probe_uvls_before_codec_init") ||
            (phase=="init" && mode=="speaker_probe_uvls_after_codec_init")))
@@ -484,6 +489,7 @@ void vTaskDelay(unsigned ticks) {
   if (speaker_probe() && reset_waits==2) {
     assert(ticks==1 && tx.enabled && !rx.enabled);
     speaker_clock_us += calls==25 ? 10'000 : 1000;
+    if (mode=="speaker_probe_stop_during_settling") local_stop=true;
     if (calls==25 && mode!="speaker_probe_dma_failure") {
       i2s_event_data_t eof{&speaker_dma_ids[speaker_eof++ % speaker_dma_ids.size()], 480};
       assert(!speaker_callback(&tx,&eof,speaker_callback_data));
@@ -745,9 +751,16 @@ int main(int argc,char** argv) {
     }
     assert(amp_pre_tx_reads==(mode=="speaker_probe_uvls_not_seen" || mode=="speaker_probe_paired"
                                   ? 0 : 1));
-    if (mode=="speaker_probe_ok") {
+    if (mode=="speaker_probe_ok" || mode=="speaker_probe_settling_uvls") {
       assert(result==Result::observed && speaker_peak==4096 && calls==25 && speaker_eof==7);
+      if (mode=="speaker_probe_settling_uvls") {
+        assert(report.startup.settling_uvls_us==570 && report.startup.clock_ready_after_uvls_us==2570);
+        assert(amp_monitor_reads==0 && amp_post_vdd_reads==0);
+      }
       assert(run_k151_speaker_probe(local_owner,local_stop,{true,true}).result==Result::denied);
+    } else if (mode=="speaker_probe_stop_during_settling") {
+      assert(result==Result::stopped && local_stop && !speaker_unmuted && calls==0);
+      assert(amp_monitor_reads==0 && speaker_eof==0);
     } else if (mode=="speaker_probe_stop_on_pre_tx_status") {
       assert(result==Result::stopped && created==0 && !speaker_unmuted && calls==0);
       assert(!report.reset.before_tx && !report.reset.before_codec_init &&
@@ -787,7 +800,8 @@ int main(int argc,char** argv) {
                             mode=="speaker_probe_uvls_read_failed" ? Power::read_failed : Power::sampled;
       assert(report.startup.clock_wait_exit==K151ClockWaitExit::protection_active);
       assert(report.startup.clock_wait_last==K151ClockWaitSample::stable);
-      assert(report.startup.uvls_after_clock_us==0 && report.startup.vdd.state==expected);
+      assert(report.startup.uvls_after_clock_us==2000 && report.startup.vdd.state==expected);
+      assert(report.startup.settling_uvls_us==0 && report.startup.clock_ready_after_uvls_us==-1);
       const bool followup_clear=mode=="speaker_probe_uvls_followup_clear";
       assert(report.startup.vdd.mv==(expected==Power::sampled ? (followup_clear ? 4370 : 2497) : 0));
       assert(amp_monitor_reads==(expected==Power::not_seen ? 0 : 1));

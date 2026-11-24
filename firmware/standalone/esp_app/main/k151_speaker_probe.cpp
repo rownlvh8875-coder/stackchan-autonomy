@@ -58,11 +58,11 @@ K151SpeakerProbeReport run_k151_speaker_probe(const std::atomic_bool& owner,
   if (!audio.playback_begin())
     return finish(Result::amplifier_start_failed, codec.speaker_startup());
   const auto started_us = esp_timer_get_time();
-  if (started_us < 0) return finish(Result::clock_fault);
+  if (started_us < 0) return finish(Result::clock_fault, codec.speaker_startup());
   const auto playback = sink.play_pcm24k(tone, static_cast<uint64_t>(started_us / 1000));
-  if (!playback.complete) return finish(Result::transfer_failed);
-  if (!audio.playback_end()) return finish(Result::mute_confirmation_failed);
-  return finish(Result::observed);
+  if (!playback.complete) return finish(Result::transfer_failed, codec.speaker_startup());
+  if (!audio.playback_end()) return finish(Result::mute_confirmation_failed, codec.speaker_startup());
+  return finish(Result::observed, codec.speaker_startup());
 }
 
 const char* speaker_startup_stage_name(Stage stage) {
@@ -81,6 +81,7 @@ const char* speaker_startup_stage_name(Stage stage) {
     case Stage::clock_enable: return "clock_enable";
     case Stage::wait_clock: return "wait_clock";
     case Stage::mute_readback: return "mute_readback";
+    case Stage::pre_amplifier_status: return "pre_amplifier_status";
     case Stage::amplifier_enable: return "amplifier_enable";
     case Stage::wait_switching: return "wait_switching";
     case Stage::attenuation: return "attenuation";
