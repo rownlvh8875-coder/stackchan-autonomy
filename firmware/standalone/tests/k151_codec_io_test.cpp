@@ -6,6 +6,8 @@
 #include "k151_mic_reader.hpp"
 #include "k151_mic_wake_trial.hpp"
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
+#include "k151_display_stop.hpp"
+#include "k151_lcd_panel.hpp"
 #include "k151_speaker_probe.hpp"
 #endif
 #ifdef STACKCHAN_K151_CONVERSATION_IMAGE
@@ -31,6 +33,8 @@ struct i2c_master_dev_t { uint16_t address; bool open=false; };
 struct Dev { const audio_codec_data_if_t* data{}; esp_codec_dev_type_t type{}; bool open=false; };
 namespace {
 std::string mode;
+bool screen_stop_probe() { return mode.starts_with("speaker_probe_screen_stop_"); }
+int64_t sampled_display_stop = -1;
 i2s_channel_obj tx,rx;
 i2c_master_bus_t bus;
 i2c_master_dev_t pmic{0x34}, expander{0x58};
@@ -539,15 +543,25 @@ extern "C" void esp_rom_delay_us(uint32_t us) {
 }
 void vTaskDelay(unsigned ticks) {
   assert(!mic_only());
+  if (screen_stop_probe() && channels_created==0) {
+    assert(ticks==1);
+    speaker_clock_us+=10'000;
+    if (mode=="speaker_probe_screen_stop_early") {
+      sampled_display_stop=speaker_clock_us;
+      local_stop=true;
+    }
+    return;
+  }
   if (exercise_playback() && reset_waits==2) {
     assert(ticks==1 && tx.enabled && !rx.enabled);
     if (speaker_unmuted && (amp_registers[0x04][1] & 0x43) == 0x42) {
       speaker_clock_us+=10'000;  // Speaker probe uses 100 Hz FreeRTOS ticks.
       return;
     }
-    speaker_clock_us += playback_writes==25 ? 10'000 : 1000;
+    const auto full_clip_writes=screen_stop_probe() ? 250 : 25;
+    speaker_clock_us += playback_writes==full_clip_writes ? 10'000 : 1000;
     if (mode=="speaker_probe_stop_during_settling") local_stop=true;
-    if (playback_writes==25 && mode!="speaker_probe_dma_failure") {
+    if (playback_writes==full_clip_writes && mode!="speaker_probe_dma_failure") {
       i2s_event_data_t eof{&speaker_dma_ids[speaker_eof++ % speaker_dma_ids.size()], 480};
       assert(!speaker_callback(&tx,&eof,speaker_callback_data));
     }
@@ -721,8 +735,16 @@ extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void* data,size
     assert(n==480 && tx.enabled && !rx.enabled && speaker_unmuted);
     const auto* pcm=static_cast<const int16_t*>(data);
     for (size_t i=0;i<n/2;++i) speaker_peak=std::max(speaker_peak, std::abs(int(pcm[i])));
-    if (playback_writes==1) assert(pcm[0]==0);
-    if (playback_writes==25) assert(pcm[239]==0);
+    if (playback_writes % 25==1) assert(pcm[0]==0);
+    if (playback_writes % 25==0) assert(pcm[239]==0);
+    if (screen_stop_probe() && playback_writes==3) {
+      if (mode=="speaker_probe_screen_stop_host") local_owner=false;
+      else if (mode!="speaker_probe_screen_stop_no_touch") {
+        sampled_display_stop=speaker_clock_us+5'000;
+        local_stop=true;
+      }
+      if (mode=="speaker_probe_screen_stop_write_fault") *bytes-=2;
+    }
     speaker_clock_us+=10'000;
     if (mode=="speaker_probe_stop_write") local_stop=true;
     if (mode=="speaker_probe_write_failure" || mode=="speaker_probe_write_and_release_failure")
@@ -796,6 +818,51 @@ extern "C" int audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t* c) {
 }
 extern "C" int audio_codec_delete_gpio_if(const audio_codec_gpio_if_t*){return 0;}
 extern "C" int audio_codec_delete_data_if(const audio_codec_data_if_t* h){assert(h==&base && deleted==created);++data_deletes;return 0;}
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+struct lv_display_t {};
+struct lv_obj_t {};
+namespace {
+bool lvgl_ready{}, stop_armed{};
+lv_display_t display;
+lv_obj_t label;
+}
+extern "C" bool lv_is_initialized() { return lvgl_ready; }
+extern "C" void lv_init() { assert(!lvgl_ready); lvgl_ready = true; }
+extern "C" void lv_deinit() { assert(lvgl_ready && !stop_armed); lvgl_ready = false; }
+extern "C" lv_obj_t* lv_display_get_screen_active(lv_display_t* object) {
+  assert(object == &display); return &label;
+}
+extern "C" lv_obj_t* lv_label_create(lv_obj_t* parent) { assert(parent == &label); return &label; }
+extern "C" void lv_obj_center(lv_obj_t* object) { assert(object == &label); }
+extern "C" void lv_label_set_text(lv_obj_t* object, const char* text) {
+  assert(object == &label && std::string_view(text) == "Tap screen during tone");
+}
+namespace stackchan::standalone {
+K151LcdPanel::~K151LcdPanel() = default;
+bool K151LcdPanel::start(i2c_master_bus_handle_t board_bus, bool requested) {
+  assert(!display_ && board_bus == &bus && bus.alive && requested && !tx.enabled);
+  display_ = &::display;
+  return true;
+}
+bool K151LcdPanel::present_now() { return ready(); }
+bool K151LcdPanel::shutdown() { assert(!stop_armed && !tx.enabled); display_ = nullptr; return true; }
+const std::atomic_bool& K151DisplayStop::flag() { return local_stop; }
+int64_t K151DisplayStop::observed_at_us() { return sampled_display_stop; }
+K151DisplayStop::ArmResult K151DisplayStop::arm(i2c_master_bus_handle_t board_bus,
+                                               K151LcdPanel& panel) {
+  assert(board_bus == &bus && panel.ready() && lvgl_ready && !tx.enabled);
+  stop_armed = true;
+  return ArmResult::armed;
+}
+bool K151DisplayStop::disarm() {
+  assert(stop_armed && !tx.enabled);
+  if (mode=="speaker_probe_screen_stop_cleanup") return false;
+  stop_armed = false;
+  return true;
+}
+void report_k151_speaker_stop_probe(const std::atomic_bool&, K151AudioBoardEvidence);
+} // namespace stackchan::standalone
+#endif
 #ifdef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
 std::string run_mic_trial_with_embedded_model_double(
     std::string_view, std::atomic_bool&, std::atomic_bool&);
@@ -809,6 +876,17 @@ bool k151_conversation_boot_armed() {
 #endif
 int main(int argc,char** argv) {
   assert(argc==2 || (argc==3 && std::string_view(argv[2])=="--report"));mode=argv[1];
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+  if (screen_stop_probe()) {
+    report_k151_speaker_stop_probe(local_owner, {true, true});
+    if (mode=="speaker_probe_screen_stop_early") assert(playback_writes==0);
+    else if (mode=="speaker_probe_screen_stop_no_touch") assert(playback_writes==250);
+    else assert(playback_writes==3);
+    assert(!tx.enabled && !rx.enabled);
+    assert(bus.alive==(mode=="speaker_probe_screen_stop_cleanup"));
+    return 0;
+  }
+#endif
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
   if (speaker_probe()) {
     using Result=K151SpeakerProbeResult;

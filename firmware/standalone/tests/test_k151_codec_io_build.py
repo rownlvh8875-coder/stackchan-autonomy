@@ -91,8 +91,13 @@ def _build_port(
     ]
     command += ["-isystem", str(SDK)]  # Unmodified vendor C anonymous unions.
     if speaker_probe:
-        command += ["-DSTACKCHAN_K151_SPEAKER_PROBE=1"]
-        sources += [app / "k151_speaker_probe.cpp"]
+        command += [
+            "-DSTACKCHAN_K151_SPEAKER_PROBE=1",
+            "-DSTACKCHAN_K151_SPEAKER_STOP_PROBE=1",
+            "-I",
+            str(BASE / "tests/lcd_io_doubles"),
+        ]
+        sources += [app / "k151_speaker_probe.cpp", app / "k151_speaker_stop_probe.cpp"]
     if conversation:
         command += ["-DSTACKCHAN_K151_CONVERSATION_IMAGE=1"]
     for directory in [
@@ -130,6 +135,35 @@ def speaker_probe_binary(tmp_path_factory):
         pytest.skip("C++20 compiler required")
     binary = tmp_path_factory.mktemp("speaker-probe") / "speaker"
     return _build_port(compiler, binary, BASE / "esp_app/main", speaker_probe=True)
+
+
+@pytest.mark.parametrize(
+    ("case", "outcome"),
+    [
+        ("playing", "screen_stop_and_standby_observed"),
+        ("early", "no_playing_stop"),
+        ("host", "no_playing_stop"),
+        ("no_touch", "no_playing_stop"),
+        ("write_fault", "cleanup_failed"),
+        ("cleanup", "cleanup_failed"),
+    ],
+)
+def test_combined_speaker_stop_and_standby(speaker_probe_binary, case, outcome):
+    import json
+
+    process = subprocess.run(
+        [str(speaker_probe_binary), f"speaker_probe_screen_stop_{case}"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert process.returncode == 0, process.stderr
+    report = json.loads(process.stdout.splitlines()[-1])
+    assert report["result"] == outcome
+    if case == "playing":
+        assert report["sample_to_standby_us"] == 5_000
+    else:
+        assert report["sample_to_standby_us"] is None
 
 
 @pytest.fixture(scope="module")

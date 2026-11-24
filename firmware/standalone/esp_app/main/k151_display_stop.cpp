@@ -19,6 +19,9 @@ constexpr int kReadTimeoutMs = 30;
 constexpr uint64_t kSamplePeriodUs = 10'000;
 
 std::atomic_bool latched{false};
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+std::atomic<int64_t> first_sample_us{-1};
+#endif
 bool attempted = false;
 esp_timer_handle_t monitor = nullptr;
 i2c_master_dev_handle_t probe = nullptr;
@@ -98,7 +101,12 @@ bool prepare_route(i2c_master_bus_handle_t bus) {
 void sample_stop(void*) {
   // AW9523B keeps the active-low interrupt pending until input-register
   // reads. The timer task samples the pad without I2C, even during owner TLS.
-  if (!latched.load() && gpio_get_level(kIrq) == 0) latched.store(true);
+  if (latched.load() || gpio_get_level(kIrq) != 0) return;
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+  int64_t unset = -1;
+  (void)first_sample_us.compare_exchange_strong(unset, esp_timer_get_time());
+#endif
+  latched.store(true);
 }
 bool start_monitor() {
   gpio_config_t gpio{};
@@ -134,6 +142,9 @@ bool stop_monitor() {
 } // namespace
 
 const std::atomic_bool& K151DisplayStop::flag() { return latched; }
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+int64_t K151DisplayStop::observed_at_us() { return first_sample_us.load(); }
+#endif
 
 K151DisplayStop::ArmResult K151DisplayStop::arm(i2c_master_bus_handle_t board_bus,
                                                K151LcdPanel& panel) {

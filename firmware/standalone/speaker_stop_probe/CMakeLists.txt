@@ -1,0 +1,15 @@
+# One-shot synthetic tone and display STOP diagnostic.
+# The generated bootloader and partition table are never installed.
+cmake_minimum_required(VERSION 3.16)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(COMPONENTS main)
+set(SDKCONFIG_DEFAULTS "../speaker_probe/sdkconfig.defaults")
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(k151_speaker_stop_probe)
+idf_build_get_property(probe_components BUILD_COMPONENTS)
+foreach(forbidden nvs_flash esp_wifi esp_netif esp_http_client esp_tls espressif__esp-sr)
+    if(forbidden IN_LIST probe_components)
+        message(FATAL_ERROR "Speaker STOP probe must not link ${forbidden}")
+    endif()
+endforeach()

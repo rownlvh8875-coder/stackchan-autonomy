@@ -28,6 +28,12 @@ std::span<const uint8_t> linked_mic_trial_model();
 }
 #endif
 
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+namespace stackchan::standalone {
+void report_k151_speaker_stop_probe(const std::atomic_bool& owner, K151AudioBoardEvidence evidence);
+}
+#endif
+
 namespace {
 using namespace stackchan::standalone;
 std::atomic_bool owner{false}, stop{false}, reader_done{false};
@@ -53,6 +59,9 @@ const char* tx_result_name(K151SilentTxResult result) {
   }
   return nullptr;
 }
+#elif defined(STACKCHAN_K151_SPEAKER_STOP_PROBE)
+constexpr char kBootMarker[] = "K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_SCREEN_STOP_START";
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
 constexpr char kChallengeMarker[] = "WAIT_SPEAKER_AMP_OFF_LOCAL_START";
@@ -154,8 +163,8 @@ void reader(void*) {
     }
     if (gate.running()) owner = true;
   }
-  stop = true;
   owner = false;
+  stop = true;
   vTaskDelete(nullptr);
 }
 
@@ -198,6 +207,8 @@ extern "C" void app_main() {
       std::printf("{\"tx_dma_probe\":\"K151_SILENT_TX_V1\",\"result\":\"%s\","
                   "\"operating_admission\":false}\n", result);
     }
+#elif defined(STACKCHAN_K151_SPEAKER_STOP_PROBE)
+    report_k151_speaker_stop_probe(owner, {expected_location, true});
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
     const K151AudioBoardEvidence evidence{expected_location, true};
     const auto report = run_k151_speaker_probe(owner, stop, evidence);

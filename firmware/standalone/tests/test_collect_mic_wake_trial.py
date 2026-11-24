@@ -894,6 +894,40 @@ def test_speaker_cleanup_preserves_playback_progress(receiver, version, outcome,
             )
 
 
+def test_stopped_speaker_wire_report_requires_an_armed_window_and_strict_timing(receiver):
+    protocol = "K151_SPEAKER_STOP_V1"
+    window = {"mic_trial": "SPEAKER_STOP_ARMED", "operating_admission": False}
+    challenge = SPEAKER_WAIT | {"mic_trial": "WAIT_SPEAKER_SCREEN_STOP_START"}
+    report = {
+        "speaker_probe": protocol,
+        "result": "screen_stop_and_standby_observed",
+        "sample_to_standby_us": 42350,
+        "operating_admission": False,
+    }
+    wire = json.dumps(report, separators=(",", ":")).encode("ascii") + b"\n"
+    cues = []
+    port = FakeSerial([challenge, window, wire, HOLD])
+    assert (
+        receiver.receive_once(
+            port, lambda: cues.append(True), speaker=True, speaker_protocol=protocol
+        )
+        == report
+    )
+    assert cues == [True]
+    for invalid in (True, -1, None, 10_000_001):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | {"sample_to_standby_us": invalid}, speaker=True, speaker_protocol=protocol
+            )
+    with pytest.raises(ValueError, match="armed"):
+        receiver.receive_once(
+            FakeSerial([challenge, wire, HOLD]),
+            lambda: None,
+            speaker=True,
+            speaker_protocol=protocol,
+        )
+
+
 @pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )

@@ -2,9 +2,7 @@
 #include "k151_speaker_probe.hpp"
 #include "k151_audio_hold_hooks.hpp"
 #include "k151_pcm_speaker_sink.hpp"
-
-#include <algorithm>
-#include <array>
+#include "k151_probe_tone.hpp"
 
 #ifndef STACKCHAN_K151_SPEAKER_PROBE
 #error "The speaker probe must only be built in its dedicated TX-only image"
@@ -16,20 +14,7 @@ using Result = K151SpeakerProbeResult;
 using Stage = K151SpeakerStartupStage;
 using Progress = K151SpeakerPlaybackProgress;
 using Cleanup = K151SpeakerCleanupStage;
-constexpr size_t kToneSamples = 6000; // 250 ms at 24 kHz.
-constexpr int16_t kPeakPcm = 4096;
-constexpr size_t kFadeSamples = kPcmOutputChunkSamples;
-constexpr auto tone = [] {
-  constexpr std::array<int16_t, 24> wave{
-      0, 1060, 2048, 2896, 3547, 3956, kPeakPcm, 3956, 3547, 2896, 2048, 1060,
-      0, -1060, -2048, -2896, -3547, -3956, -kPeakPcm, -3956, -3547, -2896, -2048, -1060};
-  std::array<int16_t, kToneSamples> pcm{};
-  for (size_t i = 0; i < pcm.size(); ++i) {
-    const int ramp = static_cast<int>(std::min({i, pcm.size() - i - 1, kFadeSamples}));
-    pcm[i] = static_cast<int16_t>(wave[i % wave.size()] * ramp / static_cast<int>(kFadeSamples));
-  }
-  return pcm;
-}();
+constexpr auto tone = k151_probe_tone<6000>(); // 250 ms at 24 kHz.
 std::atomic_flag attempted = ATOMIC_FLAG_INIT;
 }
 

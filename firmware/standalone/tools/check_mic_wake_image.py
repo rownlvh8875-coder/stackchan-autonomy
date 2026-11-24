@@ -20,9 +20,44 @@ def inspect_image(
     question_only=False,
     silent_tx=False,
     speaker=False,
+    speaker_stop=False,
 ) -> dict:
-    if sum((question, wake_only_control, question_only, silent_tx, speaker)) > 1:
+    if sum((question, wake_only_control, question_only, silent_tx, speaker, speaker_stop)) > 1:
         raise ValueError("Select a single trial image")
+    if speaker_stop:
+        envelope, _ = inspect_envelope(app, elf_sha256, b"k151_speaker_stop_probe")
+        required = (
+            b"K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL\0",
+            b"WAIT_SPEAKER_SCREEN_STOP_START\0",
+            b'K151_SPEAKER_STOP_V1"',
+            b'"SPEAKER_STOP_ARMED"',
+            b'"sample_to_standby_us"',
+        )
+        forbidden = (
+            check_resource_bench.PACK_PREFIX,
+            b"LISTEN_NOW\0",
+            b"QUESTION_ONLY_NOW\0",
+            b"api.openai.com\0",
+            b"K151_SPEAKER_V13",
+        )
+        if not all(marker in app for marker in required) or any(
+            marker in app for marker in forbidden
+        ):
+            raise ValueError("Unexpected speaker STOP diagnostic image")
+        return {
+            **envelope,
+            **validate_slot(partition_csv, SLOT_OFFSET, envelope["erase_span_bytes"]),
+            "kind": "SYNTHETIC_SPEAKER_SCREEN_STOP_NOT_OPERATIONAL",
+            "expected_protocol": "K151_SPEAKER_STOP_V1",
+            "local_nonce_start_required": True,
+            "combined_start_window_ms": 10_000,
+            "tone_samples": 60_000,
+            "tone_peak_pcm16": 4096,
+            "sample_rate_hz": 24_000,
+            "microphone_enabled": False,
+            "cloud_enabled": False,
+            "electrical_stop_mute_verified": False,
+        }
     if speaker:
         envelope, _ = inspect_envelope(app, elf_sha256, b"k151_speaker_probe")
         protocols = {
@@ -196,6 +231,7 @@ def main():
     mode.add_argument("--question-only", action="store_true")
     mode.add_argument("--silent-tx", action="store_true")
     mode.add_argument("--speaker", action="store_true")
+    mode.add_argument("--speaker-stop", action="store_true")
     args = parser.parse_args()
     validate_source_head(args.source_head)
     build = validate(args.elf, args.bin, args.idf_head)
@@ -208,6 +244,7 @@ def main():
         question_only=args.question_only,
         silent_tx=args.silent_tx,
         speaker=args.speaker,
+        speaker_stop=args.speaker_stop,
     )
     result.update(
         idf_commit=build["idf_commit"],
