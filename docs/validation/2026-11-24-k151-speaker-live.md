@@ -239,3 +239,41 @@ soak는 시작하지 않았다. 로컬 Windows/Python 3.12에서 같은 시험�
 [PR CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45362286359)
 · [타깃 빌드](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45362286456)
 · [실패 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45362270298/job/138335024294)
+
+## V7 TX 시작 전 저전압과 출고 복구
+
+리셋 해제 대기 후의 상태와 SDK 초기화 구간을 나눈 V7 합성음 진단을
+별도 승인 범위에서 1회 실행했다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `f50d1a93806fc82df197823079eb3187c3369cc9`, SHA256 `9ec14c287ed5016da601af272bc749b2f284ce7ec349b4cc00900c3cb11c53b6` |
+| 쓰기 전 확인 | 원본 A/B와 복구 파일의 길이·해시, 동일 보드, 16MB 플래시, 보안 상태, 파티션 표·OTA 선택 데이터 및 기존 OTA1 대조 통과 |
+| 진단 쓰기 | `ota_1 [0x510000,0x552AC0)` 273,088바이트, 영향 섹터 `[0x510000,0x553000)`. 독립 검증 통과 |
+| 초기화 구간 | `reset_uvls=[true,true,true]`. 순서대로 하드웨어 리셋 해제 대기 후 TX 시작 전, TX 시작 후 SDK 초기화 전, SDK 초기화 직후 |
+| 대기 후 전환 | `standby_uvls=true`. `PWDN` 해제 읽기 확인 554µs 뒤 `SYSST.UVLS` 관측. 584µs 뒤 내부 ADC는 `startup_vdd=sampled`, `startup_vdd_mv=4370` 보고 |
+| 기기 결과 | `amplifier_start_failed / wait_clock`, `clock_wait_last=stable`, `clock_wait_exit=protection_active`. `undervoltage`만 활성화됐고 합성 PCM 전송 전에 정지 |
+| 출고 복구 | `ota_1 [0x510000,0xA00000)` 5,177,344바이트. 독립 플래시 해시와 원본 파티션 표·OTA 선택 데이터 일치 확인 |
+| 재부팅 | 출고 부팅 요청과 USB Serial/JTAG의 COM3 재연결 확인. 출고 화면은 현장 확인 전. |
+
+감독 프로세스는 `preflight_exit=0`, `trial_runner_exit=1`,
+`factory_restore_verified=true`를 기록했다. 보호 정지가 진단 종료 코드에
+반영됐고 복구 절차는 완료됐다. 파티션 표, OTA 선택 데이터, NVS, assets
+및 eFuse에는 쓰지 않았다. 마이크 사용, 음성 수집이나 유료 API 호출은
+없었다.
+
+저전압 표시는 I²S TX 시작과 SDK 초기화 전에 이미 관측됐으므로
+두 단계가 이 시험의 첫 관측에 필요한 조건은 아니었다. 리셋 해제부터
+첫 읽기까지와 각 표본 사이의 전압은 미측정이다. 4.370V는 보호 비트가
+읽힌 뒤의 별도 ADC 값이다. 앰프 입력 `AXP_PS`의 실제 전압 파형과
+실제 스피커 재생, 독립 대화는 확인되지 않았다.
+[CoreS3 호스트 회로도](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf#page=4)
+· [AW88298의 VDD ADC 설명](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=23)
+
+`f50d1a9` Windows standalone 회귀 1,486개가 통과했고 8개는
+건너뛰었다. V7 ELF·bin의 ESP32-S3 빌드와 이미지 검사, 실물에서
+수집한 V7 레코드와 설치 이미지 바인딩 검증이 통과했다. 같은 커밋의
+GitHub 검사는 9/9 통과다.
+[Push CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45370103227)
+· [PR CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45370114330)
+· [ESP32-S3 빌드](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45370114312)
