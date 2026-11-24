@@ -277,3 +277,38 @@ GitHub 검사는 9/9 통과다.
 [Push CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45370103227)
 · [PR CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45370114330)
 · [ESP32-S3 빌드](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45370114312)
+
+## V8 ADC 뒤 저전압 표시 해제와 출고 복구
+
+앰프의 전압 ADC 뒤에 저전압 상태를 한 번 더 읽는 V8 합성음 진단을
+별도 승인 범위에서 1회 실행했다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `4d686b1fb7c467ae4fed23cfbf533fb68ba3fc26`, SHA256 `32433a472c265fb052816245a220ea6bb6490d23cd58155a94ee597868ed61e2` |
+| 쓰기 전 확인 | 원본 A/B와 복구 파일의 길이·해시, 동일 보드, 16MB 플래시, 보안 상태, 파티션 표·OTA 선택 데이터 및 기존 OTA1 대조 통과 |
+| 진단 쓰기 | `ota_1 [0x510000,0x552BF0)` 273,392바이트, 영향 섹터 `[0x510000,0x553000)`. 독립 검증 통과 |
+| 초기화 구간 | `reset_uvls=[true,true,true]`, `standby_uvls=true` |
+| 전환 이후 | `vdd=[570,579,"sampled",4482,false,560]`. `PWDN` 해제 읽기 확인 후 570µs에 최초 저전압 보고, 1,149µs에 4.482V ADC 표본, 1,709µs에 저전압 표시 해제 관측 |
+| 기기 결과 | `amplifier_start_failed / wait_clock`, `clock_wait_last=stable`, `clock_wait_exit=protection_active`. `undervoltage`만 최초 보호로 보고됐고 PCM 전송 전에 정지 |
+| 출고 복구 | `ota_1 [0x510000,0xA00000)` 5,177,344바이트. 독립 플래시 해시와 원본 파티션 표·OTA 선택 데이터 일치 확인 |
+| 재부팅 | 출고 부팅 요청과 USB Serial/JTAG의 COM3 재연결 확인. 출고 화면은 현장 확인 전. |
+
+감독 프로세스는 `preflight_exit=0`, `trial_runner_exit=1`,
+`factory_restore_verified=true`를 기록했다. 파티션 표, OTA 선택 데이터,
+NVS, assets 및 eFuse에는 쓰지 않았다. 마이크 사용, 음성 수집이나
+유료 API 호출은 없었다.
+
+기존 2ms 정착 조건보다 앞선 두 시점에서 저전압 표시가 서로 다르게
+읽혔다. 실제 전압 파형이나 저전압 상태의 정확한 전환 시점은
+미측정이다. 별도 임시 Mock은 같은 포트 코드에 실물의 세 시각과
+4.482V를 주입하고, 마지막 표본만 해제 또는 지속으로 바꿔 실행했다.
+두 경우 모두 최초 보호 정지가 유지됐고 PCM은 전송되지 않았다.
+후속 실물 재생과 독립 대화는 미검증이다.
+
+Windows standalone 회귀 1,498개 통과, 8개 건너뜀을 기록했고
+V8 ESP32-S3 컴파일·링크와 이미지 검사가 통과했다. 이번 실물에서
+수집한 V8 레코드와 설치 이미지 바인딩 검증도 통과했다.
+[Push CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45376911604)
+· [PR CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45376929218)
+· [ESP32-S3 빌드](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45376929342)
