@@ -29,6 +29,7 @@ SPEAKER_SETTLING_PROTOCOL = "K151_SPEAKER_V9"
 SPEAKER_CLEANUP_PROTOCOL = "K151_SPEAKER_V10"
 SPEAKER_STANDBY_CHECK_PROTOCOL = "K151_SPEAKER_V11"
 SPEAKER_MUTE_SETTLE_PROTOCOL = "K151_SPEAKER_V12"
+SPEAKER_AMP_OFF_PROTOCOL = "K151_SPEAKER_V13"
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
     SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
@@ -42,6 +43,7 @@ SPEAKER_CHALLENGES = {
     SPEAKER_CLEANUP_PROTOCOL: "WAIT_SPEAKER_CLEANUP_LOCAL_START",
     SPEAKER_STANDBY_CHECK_PROTOCOL: "WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START",
     SPEAKER_MUTE_SETTLE_PROTOCOL: "WAIT_SPEAKER_MUTE_SETTLE_LOCAL_START",
+    SPEAKER_AMP_OFF_PROTOCOL: "WAIT_SPEAKER_AMP_OFF_LOCAL_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
@@ -56,6 +58,7 @@ SPEAKER_REVIEW_KINDS = {
     SPEAKER_CLEANUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V10",
     SPEAKER_STANDBY_CHECK_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V11",
     SPEAKER_MUTE_SETTLE_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V12",
+    SPEAKER_AMP_OFF_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V13",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -185,7 +188,10 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
     )
     result = record.get("result")
     expected_fields = {field, "result", "operating_admission"}
-    mute_settle_report = speaker and speaker_protocol == SPEAKER_MUTE_SETTLE_PROTOCOL
+    amp_off_report = speaker and speaker_protocol == SPEAKER_AMP_OFF_PROTOCOL
+    mute_settle_report = amp_off_report or (
+        speaker and speaker_protocol == SPEAKER_MUTE_SETTLE_PROTOCOL
+    )
     detailed_standby = mute_settle_report or (
         speaker and speaker_protocol == SPEAKER_STANDBY_CHECK_PROTOCOL
     )
@@ -229,7 +235,9 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
         raise ValueError("Invalid output diagnostic result")
     if cleanup_report:
         end = record["end"]
-        last_stage = 24 if mute_settle_report else 20 if detailed_standby else 11
+        last_stage = (
+            25 if amp_off_report else 24 if mute_settle_report else 20 if detailed_standby else 11
+        )
         if (
             not isinstance(end, list)
             or len(end) != 2

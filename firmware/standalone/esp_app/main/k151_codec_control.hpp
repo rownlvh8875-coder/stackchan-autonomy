@@ -60,16 +60,31 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
   }
   bool request_aw88298_standby() {
     if (profile_ != Profile::aw88298_muted_startup || !opened(this)) return false;
-    const auto update = [&](int reg) {
-      std::array<uint8_t, 2> value{};
-      return read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK &&
-             write_aw88298(reg, 1, value.data(), value.size(), true) == ESP_CODEC_DEV_OK;
-    };
     // Force HMUTE before power-down. Attempt power-down even if mute was
     // unsuccessful. Only these two masked writes may run after a fault.
-    const bool mute = update(0x05);
-    const bool power = update(0x04);
+    const bool mute = force_standby_register(0x05);
+    const bool power = force_standby_register(0x04);
     return mute && power;
+  }
+
+  template <typename Allowed>
+  bool request_aw88298_amplifier_off(Allowed allowed) {
+    if (profile_ != Profile::aw88298_muted_startup || !allowed() || !healthy() ||
+        !force_standby_register(0x05) || !allowed()) return false;
+    constexpr uint8_t kPowerMask = 0x43; // I2SEN, AMPPD, PWDN
+    constexpr uint8_t kOperating = 0x40;
+    constexpr uint8_t kAmplifierPowerDown = 0x02;
+    std::array<uint8_t, 2> value{};
+    if (read(this, 0x04, 1, value.data(), value.size()) != ESP_CODEC_DEV_OK ||
+        (value[1] & kPowerMask) != kOperating || !allowed()) return false;
+    // Keep the chip's I2S interface and system enabled while the amplifier
+    // stops switching. The full-standby mask would disable both too soon.
+    value[1] |= kAmplifierPowerDown;
+    verified_ &= ~kPowerVerified;
+    if (record(base_->write_reg(base_, 0x04, 1, value.data(), value.size())) != ESP_CODEC_DEV_OK ||
+        !allowed() || read(this, 0x04, 1, value.data(), value.size()) != ESP_CODEC_DEV_OK)
+      return false;
+    return (value[1] & kPowerMask) == (kOperating | kAmplifierPowerDown) && allowed();
   }
 
   std::optional<bool> aw88298_switching() {
@@ -272,6 +287,12 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
  private:
   static constexpr uint8_t kPowerVerified = 1, kMuteVerified = 2, kAttenuationVerified = 4;
   static constexpr uint8_t kMinAttenuation = 0x60, kMaxAttenuation = 0xc0;
+
+  bool force_standby_register(int reg) {
+    std::array<uint8_t, 2> value{};
+    return read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK &&
+           write_aw88298(reg, 1, value.data(), value.size(), true) == ESP_CODEC_DEV_OK;
+  }
 
   template <typename Read>
   static K151SpeakerCleanupStage standby_register_check(Read read_word, uint16_t* status) {

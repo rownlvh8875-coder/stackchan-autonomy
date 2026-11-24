@@ -549,21 +549,25 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
 
 K151SpeakerCleanupStage K151CodecPort::wait_for_standby_switch_off(const std::atomic_bool& consent) {
   using Cleanup = K151SpeakerCleanupStage;
+  const auto allowed = [&] {
+    i2s_chan_info_t info{};
+    return input_allowed() && consent.load() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT) &&
+        i2s_channel_get_info(tx_, &info) == ESP_OK && info.is_enabled;
+  };
+  if (!out_control_.request_aw88298_amplifier_off(allowed))
+    return allowed() ? Cleanup::standby_amplifier_request : Cleanup::standby_interrupted;
   const auto started = esp_timer_get_time();
   if (started < 0) return Cleanup::standby_clock_fault;
   auto previous = started;
   const auto check = [&] {
-    i2s_chan_info_t info{};
-    if (!input_allowed() || !consent.load() || !data_port_.ready(ESP_CODEC_DEV_TYPE_OUT) ||
-        i2s_channel_get_info(tx_, &info) != ESP_OK || !info.is_enabled)
-      return Cleanup::standby_interrupted;
+    if (!allowed()) return Cleanup::standby_interrupted;
     const auto now = esp_timer_get_time();
     if (now < previous) return Cleanup::standby_clock_fault;
     previous = now;
     return now - started < kStandbySwitchLimitUs ? Cleanup::none : Cleanup::standby_switch_timeout;
   };
-  // HMUTE and the power-down bits are already verified. Poll only SWS with TX
-  // still clocked. An I2C read failure is terminal, as is late delivery.
+  // HMUTE and AMPPD are verified with the codec system still enabled. Poll
+  // only SWS. An I2C read failure is terminal, as is late delivery.
   for (unsigned poll = 0; poll < kStandbySwitchPollLimit; ++poll) {
     if (const auto stage = check(); stage != Cleanup::none) return stage;
     const auto switching = out_control_.aw88298_switching();
@@ -580,10 +584,10 @@ bool K151CodecPort::speaker_off(const std::atomic_bool* consent) {
   using Cleanup = K151SpeakerCleanupStage;
   const bool normal_end = std::exchange(output_data_, OutputData::empty) == OutputData::drain_confirmed;
   if (!output_open_) return !out_control_.faulted();
-  const bool standby_requested = out_control_.request_aw88298_standby();
-  const auto before_close = standby_requested && normal_end
+  const auto before_close = normal_end
       ? (consent ? wait_for_standby_switch_off(*consent) : Cleanup::standby_interrupted)
       : Cleanup::none;
+  const bool standby_requested = out_control_.request_aw88298_standby();
   // Close even on a failed check or STOP. The normal playback path must prove
   // switch-off before stopping I2S and still pass the original standby readback.
   const int rc = esp_codec_dev_close(out_dev_);
@@ -596,8 +600,8 @@ bool K151CodecPort::speaker_off(const std::atomic_bool* consent) {
   const bool still_allowed = !normal_end || (consent && input_allowed() && consent->load());
   if (verified && still_allowed) return true;
 
-  if (!standby_requested) note_speaker_cleanup_failure(Cleanup::standby_request);
-  else if (before_close != Cleanup::none) note_speaker_cleanup_failure(before_close);
+  if (before_close != Cleanup::none) note_speaker_cleanup_failure(before_close);
+  else if (!standby_requested) note_speaker_cleanup_failure(Cleanup::standby_request);
   else if (!closed) note_speaker_cleanup_failure(Cleanup::output_disable);
   else note_speaker_cleanup_failure(verified ? Cleanup::standby_interrupted : standby_failure);
   fault_ = true;

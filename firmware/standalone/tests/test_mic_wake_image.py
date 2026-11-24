@@ -129,7 +129,7 @@ def test_silent_tx_image_is_distinct_and_has_no_voice_trial(model_fixture):
 
 @pytest.mark.parametrize(
     "protocol",
-    [f"K151_SPEAKER_V{version}" for version in range(1, 13)],
+    [f"K151_SPEAKER_V{version}" for version in range(1, 14)],
 )
 def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, protocol):
     from check_mic_wake_image import inspect_image
@@ -184,6 +184,11 @@ def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, prot
         ),
         "K151_SPEAKER_V12": (
             b'WAIT_SPEAKER_MUTE_SETTLE_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0"end"\0'
+        ),
+        "K151_SPEAKER_V13": (
+            b'WAIT_SPEAKER_AMP_OFF_LOCAL_START\0"startup_stage"\0'
             b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
             b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0"end"\0'
         ),

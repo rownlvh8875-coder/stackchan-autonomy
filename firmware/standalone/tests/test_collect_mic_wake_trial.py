@@ -852,6 +852,8 @@ def test_speaker_settling_records_power_readiness_separately_from_protection(
         (12, "mute_confirmation_failed", [1, 22]),
         (12, "cleanup_failed", [1, 24]),
         (12, "stopped", [1, 21]),
+        (13, "mute_confirmation_failed", [1, 25]),
+        (13, "stopped", [1, 21]),
     ],
 )
 def test_speaker_cleanup_preserves_playback_progress(receiver, version, outcome, end):
@@ -875,6 +877,7 @@ def test_speaker_cleanup_preserves_playback_progress(receiver, version, outcome,
         10: "WAIT_SPEAKER_CLEANUP_LOCAL_START",
         11: "WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START",
         12: "WAIT_SPEAKER_MUTE_SETTLE_LOCAL_START",
+        13: "WAIT_SPEAKER_AMP_OFF_LOCAL_START",
     }[version]
     wait = SPEAKER_WAIT | {"mic_trial": challenge}
     assert (
@@ -883,7 +886,7 @@ def test_speaker_cleanup_preserves_playback_progress(receiver, version, outcome,
         )
         == report
     )
-    foreign = [2, 20] if version == 10 else [1, 3]
+    foreign = [2, 20] if version == 10 else [1, 25] if version == 12 else [1, 3]
     for invalid in ([3, 0], [True, 0], [2, 99], [0], foreign):
         with pytest.raises(ValueError):
             receiver.validate_output_report(
