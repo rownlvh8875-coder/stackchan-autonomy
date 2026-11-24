@@ -427,6 +427,22 @@ verify-flash --flash-mode keep --flash-freq keep --flash-size keep 0x9000 NVS
 NVS 검증 뒤 파티션 표와 OTA 선택 데이터를 다시 대조하고 원본
 부팅을 요청한다. 로봇 화면에서 출고 상태 복귀를 확인한다.
 
+### 유료 한 턴의 전송 범위와 비용
+
+같은 한 턴에 아래 순서로 최대 세 요청을 보낸다. 호출어는 로봇에서
+처리한다. 첫 요청 전에 한 턴의 예산을 선차감하고 각 단계에서
+일회성 전송 권한을 사용한다.
+
+| 단계 | OpenAI로 전송하는 데이터 | 2026-11-24 공개 단가와 계산 |
+| --- | --- | --- |
+| STT | 질문 음성 최대 8초 | `gpt-transcribe` 분당 US$0.0045. 8초는 약 US$0.0006. [공식 단가](https://developers.openai.com/api/docs/models/gpt-transcribe) |
+| GPT | 전사 최대 500자와 고정 답변 지침. `store: false`, 출력 최대 400토큰 | `gpt-6-luna` 입력 백만 토큰당 US$0.10, 출력 US$0.50. 출력 400토큰은 최대 US$0.0002. [공식 단가](https://developers.openai.com/api/docs/models/gpt-6-luna) |
+| TTS | 답변 최대 300자와 고정 낭독 지침. 출력 최대 750토큰, 보드가 받는 PCM 최대 20초 | `gpt-realtime-2.1-mini` 텍스트 입력 백만 토큰당 US$0.60, 오디오 출력 US$20.00. 750토큰을 모두 오디오 출력으로 계산하면 US$0.015. [공식 단가](https://developers.openai.com/api/docs/models/gpt-realtime-2.1-mini) |
+
+위 상한으로 계산한 전사와 두 출력의 합은 약 US$0.0158이며, 여기에
+GPT·TTS 입력 토큰 비용이 더해진다. 청구액은 실제 사용량과 적용 단가로
+결정된다. 유료 시험에서는 승인 범위를 해당 이미지와 한 턴에 한정한다.
+
 ## 2026-11-23 오프라인 후속 — 재부팅 후 한 턴 승인 확인
 
 한 턴 시험은 Wi-Fi 연결 전에 승인 당시의 `sc_gpt/budget`을 확인한다.
