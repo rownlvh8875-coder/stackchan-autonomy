@@ -87,6 +87,7 @@ async def test_stop_during_capture_cancels_recording_without_synthesis_or_playba
         await voice.engine.aclose()
 
 
+@pytest.mark.usefixtures("lease_timing_probe")
 async def test_stop_during_tts_cancels_without_playback_and_no_task_leak():
     entered = asyncio.Event()
 
@@ -99,7 +100,12 @@ async def test_stop_during_tts_cancels_without_playback_and_no_task_leak():
     voice, robot, _, _, playback = conversation(service=SlowTTS())
     task = asyncio.create_task(voice.handle(Event(kind=EventKind.TOUCH_TAP)))
     try:
-        await asyncio.wait_for(entered.wait(), 1)
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+        except TimeoutError:
+            if task.done() and not task.cancelled():
+                pytest.fail(f"voice finished before TTS ({task.result().code})")
+            raise
         voice.engine.stop()
         assert (await asyncio.wait_for(task, 1)).code == "stopped"
         assert playback.calls == 0 and not robot.history
