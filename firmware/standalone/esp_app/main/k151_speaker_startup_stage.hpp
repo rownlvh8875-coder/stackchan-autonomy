@@ -2,13 +2,14 @@
 #pragma once
 #include "board_evidence.hpp"
 #include <cstdint>
+#include <optional>
 
 namespace stackchan::standalone {
 
 // First failed checkpoint, with no register values or audio in the report.
 enum class K151SpeakerStartupStage : uint8_t {
   none, audio_guard, admission, codec_open, codec_ready, i2s_tx_state, volume,
-  muted_admission, clock_origin, standby_readback, clock_enable, wait_clock,
+  muted_admission, clock_origin, standby_readback, i2s_enable, clock_enable, wait_clock,
   mute_readback, amplifier_enable, wait_switching, attenuation, pre_unmute_status,
   unmute, post_unmute_status,
 };
@@ -42,6 +43,7 @@ struct K151SpeakerStartupDiagnostic {
   int32_t uvls_after_clock_us = -1;
   int32_t vdd_after_uvls_us = -1;
   k151::VoltageReading vdd{};
+  std::optional<bool> standby_uvls{};
 };
 
 } // namespace stackchan::standalone

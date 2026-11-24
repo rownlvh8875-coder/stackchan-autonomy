@@ -26,6 +26,7 @@ uint16_t injected_clock_protection = 0;
 bool is_open(const audio_codec_ctrl_if_t* h) { return h == &i2c; }
 int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* output, int bytes) {
   assert(h == &i2c && address_bytes == 1 && bytes == 2);
+  if (activating) assert(reg != 0x02); // Leave clear-on-read SYSINT untouched.
   if (scenario == "read_failure" && reg == 0x05) return ESP_CODEC_DEV_READ_FAIL;
   if (activating && reg == 0x01 && (registers[0x04] & 0x43) == 0x42 &&
       scenario == "start_clock_read_failure")
@@ -33,6 +34,10 @@ int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* outpu
   if (standby_request && scenario == "standby_mute_read_fail" && reg == 0x05)
     return ESP_CODEC_DEV_READ_FAIL;
   auto value = registers.at(reg);
+  if (activating && reg == 0x04 && (value & 0x43) == 0x43) {
+    if (scenario == "start_revoked_at_i2s_readback") allowed = false;
+    if (scenario == "start_i2s_readback_mismatch") value &= ~0x40;
+  }
   if (activating && reg == 0x01 && scenario.starts_with("uvls_") &&
       (registers[0x04] & 0x43) == 0x42) {
     now_us = scenario == "uvls_no_budget" ? 71'000 : 1200;
@@ -53,8 +58,10 @@ int write(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* inpu
   if (activating && reg == 0x04 && (word & 0x43) != 0x03) {
     assert((word & ~0x43) == (registers[0x04] & ~0x43));
     assert((registers[0x05] & 0x10) != 0 && allowed);
-    if ((word & 0x43) == 0x42) {
+    if ((word & 0x43) == 0x43) {
       assert((registers[0x04] & 0x43) == 0x03);
+    } else if ((word & 0x43) == 0x42) {
+      assert((registers[0x04] & 0x43) == 0x43);
       if (scenario != "start_no_clock" && scenario != "start_frozen_clock")
         registers[0x01] = 0x0011;
       if (scenario == "start_reference_missing") registers[0x01] = 0x0020;
@@ -154,7 +161,8 @@ int main(int argc, char** argv) {
       using Power = k151::PowerSample;
       int reads = 0;
       registers[0x00] = 0x1852;
-      registers[0x01] = 0;
+      const bool standby_uvls = scenario == "uvls_already_in_standby";
+      registers[0x01] = standby_uvls ? 0x4000 : 0;
       activating = true;
       const auto result = guarded.start_aw88298_low_volume(
           [] { return allowed; }, [] { return now_us; }, [] { assert(false); }, [&] {
@@ -163,17 +171,18 @@ int main(int argc, char** argv) {
             if (scenario == "uvls_stop_during_read") allowed = false;
             if (scenario == "uvls_clock_deadline") now_us = 100'000;
             if (scenario == "uvls_clock_regression") --now_us;
-            if (scenario == "uvls_observed") now_us += 700;
+            if (scenario == "uvls_observed" || standby_uvls) now_us += 700;
             return k151::VoltageReading{Power::sampled, 2497};
           });
       assert(!unmuted && result.stage == Stage::wait_clock);
       assert(result.clock_wait_exit == K151ClockWaitExit::protection_active);
       assert((result.protection_flags & 0x4000) != 0);
+      assert(result.standby_uvls == standby_uvls);
       assert(result.uvls_after_clock_us == (scenario == "uvls_no_budget" ? 71'000 : 1200));
       const bool forbidden = scenario == "uvls_no_budget" || scenario == "uvls_other_protection" ||
                              scenario == "uvls_switching";
       assert(reads == (forbidden ? 0 : 1));
-      if (scenario == "uvls_observed") {
+      if (scenario == "uvls_observed" || standby_uvls) {
         assert(result.vdd.state == Power::sampled && result.vdd.mv == 2497);
         assert(result.vdd_after_uvls_us == 700);
       } else {
@@ -223,9 +232,14 @@ int main(int argc, char** argv) {
       if (scenario == "start_clock_protection") {
         check_wait(Exit::protection_active, Sample::stable);
         assert((registers[0x04] & 0x43) == 0x42 && (registers[0x05] & 0x10) != 0);
-        assert(writes == before + 1 && startup.protection_flags == injected_clock_protection);
+        assert(writes == before + 2 && startup.protection_flags == injected_clock_protection);
       } else {
         assert(startup.protection_flags == (scenario == "start_fault" ? 0x0008 : 0));
+        assert(!startup.standby_uvls.has_value());
+      }
+      if (scenario == "start_revoked_at_i2s_readback" || scenario == "start_i2s_readback_mismatch") {
+        assert(stage == Stage::i2s_enable && writes == before + 1);
+        assert((registers[0x04] & 0x43) == 0x43 && (registers[0x05] & 0x10) != 0);
       }
       if (scenario == "start_early_switching") check_wait(Exit::early_switching, Sample::stable);
       if (scenario == "start_clock_read_failure")

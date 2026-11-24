@@ -705,6 +705,8 @@ def test_real_aw88298_startup_stays_quiet(aw88298_startup_binary, mode):
         "start_mute_lost",
         "start_clock_lost_at_unmute",
         "start_revoked_initially",
+        "start_revoked_at_i2s_readback",
+        "start_i2s_readback_mismatch",
         "start_revoked_while_muted",
         "start_revoked_at_unmute",
         "start_clock_reversed",
@@ -735,6 +737,7 @@ def test_real_aw88298_preserves_all_active_protection_bits_without_unmuting(
     "mode",
     [
         "uvls_observed",
+        "uvls_already_in_standby",
         "uvls_no_budget",
         "uvls_other_protection",
         "uvls_switching",

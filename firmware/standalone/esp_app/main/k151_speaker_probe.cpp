@@ -75,6 +75,7 @@ const char* speaker_startup_stage_name(Stage stage) {
     case Stage::muted_admission: return "muted_admission";
     case Stage::clock_origin: return "clock_origin";
     case Stage::standby_readback: return "standby_readback";
+    case Stage::i2s_enable: return "i2s_enable";
     case Stage::clock_enable: return "clock_enable";
     case Stage::wait_clock: return "wait_clock";
     case Stage::mute_readback: return "mute_readback";

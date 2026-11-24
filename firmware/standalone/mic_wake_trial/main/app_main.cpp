@@ -55,7 +55,7 @@ const char* tx_result_name(K151SilentTxResult result) {
 }
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_SPEAKER_VDD_LOCAL_START";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_STANDBY_UVLS_LOCAL_START";
 
 const char* speaker_result_name(K151SpeakerProbeResult result) {
   using Result = K151SpeakerProbeResult;
@@ -211,17 +211,19 @@ extern "C" void app_main() {
         return (flags & bit) ? "true" : "false";
       };
       using namespace aw88298_protection;
-      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V5\",\"result\":\"%s\","
+      const auto standby_uvls = report.startup.standby_uvls;
+      const char* standby = standby_uvls ? (*standby_uvls ? "true" : "false") : "null";
+      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V6\",\"result\":\"%s\","
                   "\"startup_stage\":\"%s\",\"clock_wait_exit\":\"%s\","
                   "\"clock_wait_last\":\"%s\",\"protection\":{"
                   "\"ovp2\":%s,\"undervoltage\":%s,\"boost_overcurrent\":%s,\"ovp\":%s,"
                   "\"amplifier_overcurrent\":%s,\"overtemperature\":%s},"
-                  "\"uvls_after_clock_us\":%ld,\"vdd_after_uvls_us\":%ld,"
+                  "\"standby_uvls\":%s,\"uvls_after_clock_us\":%ld,\"vdd_after_uvls_us\":%ld,"
                   "\"startup_vdd\":\"%s\",\"startup_vdd_mv\":%u,"
                   "\"operating_admission\":false}\n",
                   result, stage, wait_exit, last, active(ovp2), active(undervoltage),
                   active(boost_overcurrent), active(ovp), active(amplifier_overcurrent),
-                  active(overtemperature), static_cast<long>(report.startup.uvls_after_clock_us),
+                  active(overtemperature), standby, static_cast<long>(report.startup.uvls_after_clock_us),
                   static_cast<long>(report.startup.vdd_after_uvls_us),
                   vdd, unsigned(report.startup.vdd.mv));
     }

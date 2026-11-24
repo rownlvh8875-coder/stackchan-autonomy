@@ -174,7 +174,7 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
                  (speaker_unmuted && mode == "speaker_probe_mute_failure") ? 1 : 0;
       const bool clock_missing = mode == "speaker_probe_clock_failure" ||
                                  mode == "speaker_probe_clock_and_release_failure";
-      bytes[1] = tx.enabled && power != 3 && !clock_missing ? 0x11 : 0;
+      bytes[1] = tx.enabled && (power & 1) == 0 && !clock_missing ? 0x11 : 0;
       if (mode.starts_with("speaker_probe_uvls_") && power == 0x42) bytes[0] |= 0x40;
     }
     return ESP_CODEC_DEV_OK;
@@ -186,7 +186,8 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
         assert(speaker_probe() && tx.enabled && !rx.enabled && !local_stop);
         assert((amp_registers[0x05][1] & 0x10) != 0);
         const auto power = bytes[1] & 0x43;
-        assert((power == 0x42 && (stored[1] & 0x43) == 3) ||
+        assert((power == 0x43 && (stored[1] & 0x43) == 0x03) ||
+               (power == 0x42 && (stored[1] & 0x43) == 0x43) ||
                (power == 0x40 && (stored[1] & 0x43) == 0x42));
       }
       if (reg == 0x05 && !(bytes[1] & 0x10)) {

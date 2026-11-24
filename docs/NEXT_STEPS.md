@@ -1,5 +1,21 @@
 # Next steps
 
+## 2026-11-24 오프라인 후속 — 앰프 대기 상태와 전원 시작 분리
+
+AW88298 대기 상태에서 `I2SEN`을 먼저 쓰고 읽어 확인한 뒤 `PWDN`을
+해제한다. 두 단계에서 `AMPPD`와 `HMUTE`를 유지하고 기존 100ms
+시작 제한, PLL 확인 및 보호 정지 조건을 적용한다. 첫 쓰기 확인에
+실패하거나 STOP이 들어오면 두 번째 쓰기는 실행하지 않는다.
+[AW88298 전원 시작 순서 표 2](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=17)
+
+`K151_SPEAKER_V6`는 `wait_clock`에서 저전압으로 정지한 경우,
+`I2SEN` 쓰기 전 기존 대기 상태 읽기에서 `SYSST.UVLS`가
+이미 설정돼 있었는지도 보고한다. 다른 결과의 `standby_uvls`는
+`null`이다. 대기 표본과 실패 표본 사이에 전압 파형은 측정하지
+않는다. 로컬 Windows 회귀 375개에서 전환 순서, 첫 읽기 확인 중
+STOP, 대기 상태 저전압 유무 및 V5 결과 읽기를 검증했다. 실물
+재생과 운영 대화 검증은 별도 단계다.
+
 ## 2026-11-24 Windows 가상 soak의 갱신 지연
 
 `dc65da3` PR의 Windows/Python 3.12에서 기본 시험 503개가 통과하고

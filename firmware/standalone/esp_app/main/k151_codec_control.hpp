@@ -80,6 +80,7 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     constexpr uint16_t kSwitching = 0x0100;
     static_assert(aw88298_protection::mask == 0xcc0a);
     constexpr uint8_t kPowerMask = 0x43; // I2SEN, AMPPD, PWDN
+    constexpr uint8_t kStandbyI2s = 0x43; // I2S configured before system power-up
     constexpr uint8_t kConfiguring = 0x42; // I2S enabled, amplifier still off
     constexpr uint8_t kOperating = 0x40;
     constexpr uint8_t kHardMute = 0x10;
@@ -164,14 +165,19 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     };
 
     std::array<uint8_t, 2> value{};
-    if (!standby_registers_verified(read_live)) return {Stage::standby_readback};
-    if (!transition(0x04, kPowerMask, 0x03, kConfiguring)) return {Stage::clock_enable};
+    uint16_t standby_status{};
+    if (!standby_registers_verified(read_live, &standby_status)) return {Stage::standby_readback};
+    // AW88298 Table 2 configures the I2S data path in standby, then clears PWDN.
+    if (!transition(0x04, kPowerMask, 0x03, kStandbyI2s)) return {Stage::i2s_enable};
+    if (!transition(0x04, kPowerMask, kStandbyI2s, kConfiguring)) return {Stage::clock_enable};
     const auto clock_verified = sampled;
     uint16_t status{};
     if (!await_stage(false, status)) {
       K151SpeakerStartupDiagnostic failure{Stage::wait_clock, wait_exit, last_status, protection_flags};
+      constexpr auto under_voltage = aw88298_protection::undervoltage;
+      if (protection_flags & under_voltage)
+        failure.standby_uvls = (standby_status & under_voltage) != 0;
       if constexpr (!std::is_same_v<VoltageRead, std::nullptr_t>) {
-        constexpr auto under_voltage = aw88298_protection::undervoltage;
         constexpr int64_t kVoltageReadReserveUs = 30'000;
         if (wait_exit == Exit::protection_active && (protection_flags & under_voltage)) {
           const auto fault_observed = sampled;
@@ -212,13 +218,16 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
   static constexpr uint8_t kMinAttenuation = 0x60, kMaxAttenuation = 0xc0;
 
   template <typename Read>
-  static bool standby_registers_verified(Read read_word) {
+  static bool standby_registers_verified(Read read_word, uint16_t* status = nullptr) {
     std::array<uint8_t, 2> value{};
     // ID, SYSCTRL, SYSCTRL2 and SYSST. SYSINT is clear-on-read and is not used.
-    return read_word(0x00, value) && value[0] == 0x18 && value[1] == 0x52 &&
-           read_word(0x04, value) && (value[1] & 0x43) == 0x03 &&
-           read_word(0x05, value) && (value[1] & 0x10) != 0 &&
-           read_word(0x01, value) && (value[0] & 0x01) == 0;
+    if (!read_word(0x00, value) || value[0] != 0x18 || value[1] != 0x52 ||
+        !read_word(0x04, value) || (value[1] & 0x43) != 0x03 ||
+        !read_word(0x05, value) || (value[1] & 0x10) == 0 ||
+        !read_word(0x01, value) || (value[0] & 0x01) != 0)
+      return false;
+    if (status) *status = (static_cast<uint16_t>(value[0]) << 8) | value[1];
+    return true;
   }
 
   int write_aw88298(int reg, int len, void* data, int size, bool standby_request = false) {
