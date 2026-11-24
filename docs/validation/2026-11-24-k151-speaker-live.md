@@ -145,3 +145,28 @@ push PC 검사 4개 중 Windows/Python 3.12의 가속 Mock soak만 실패해
 최대 5.0ms, 이벤트 루프 지연 최대 12.6ms였고, 갱신은 한 번만
 시도했으며 로봇 명령은 없었다. 관련 회귀 24개 통과를 확인했다.
 GitHub 환경에서 SQLite 커밋이 지연된 원인은 미확인이다.
+
+## V5 시작 시 VDD 표본과 출고 복구
+
+검토한 V5 진단을 승인 범위에 따라 1회 실행했다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `6cef0c92e80dc3245f85801df16e710a559c01c5`, SHA256 `b2b2cbbc609565287ba14d4d0d94384748116dd9407ed155bd0a4be487c01aa9` |
+| 쓰기 전 확인 | 원본 A/B와 복구 파일의 길이·해시, 동일 보드, 16MB 플래시, 보안 상태, 파티션 표·OTA 선택 데이터·기존 OTA1 대조 통과 |
+| 진단 쓰기 | `ota_1 [0x510000,0x5528B0)` 272,560바이트, 영향 섹터 `[0x510000,0x553000)`. 독립 검증 통과 |
+| 기기 결과 | `K151_SPEAKER_V5 / amplifier_start_failed / wait_clock`, `clock_wait_exit=protection_active`, `clock_wait_last=stable`. `undervoltage`만 활성화됐고 합성 PCM 전송 전에 정지했다. |
+| 저전압 표시와 VDD | 클럭 활성화 설정 읽기 확인 556µs 뒤 `SYSST.UVLS` 관측. 그 관측 572µs 뒤 `startup_vdd=sampled`, `startup_vdd_mv=4370`. |
+| 출고 복구 | `ota_1 [0x510000,0xA00000)` 5,177,344바이트. 독립 해시 및 파티션 표·OTA 선택 데이터 일치 확인 |
+| 재부팅 | 출고 펌웨어 부팅 요청과 USB Serial/JTAG의 COM3 재연결 확인. 출고 화면은 현장 확인 전. |
+
+감독 세션에서 `preflight_exit=0`, `trial_runner_exit=1`,
+`factory_restore_verified=true`를 확인했다. 파티션 표, OTA 선택 데이터,
+NVS, assets 및 eFuse에는 쓰지 않았다. 마이크 사용, 음성 수집, 외부
+전송 및 유료 API 호출은 없었다.
+
+데이터시트의 `SYSST.UVLS` 기준은 2.8V다. 4.370V는 표시를 읽은 뒤
+다른 레지스터에서 얻은 내부 ADC 표본이다. 표시 시점의 VDD와 그
+사이의 파형은 미측정이므로 순간 전압 강하나 시작 시퀀스의 영향을
+구분할 수 없다. 출력 보호와 운영 승인 조건을 유지한다.
+[AW88298의 저전압 상태 비트](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=31) · [VDD ADC 설명](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=23)
