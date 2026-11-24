@@ -277,6 +277,24 @@ jobs:
             --out firmware/standalone/board_probe/validation-manifest.json
           python3 firmware/standalone/tools/collect_board_probe_notices.py \
             --idf "$IDF_PATH" --out firmware/standalone/board_probe/review-notices
+      - name: Build separate read-only power probe (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          PROBE=firmware/standalone/board_probe
+          OUT="$GITHUB_WORKSPACE/.local/power-ci"
+          idf.py -C "$PROBE" -B "$OUT" -DSDKCONFIG="$OUT/sdkconfig" -DK151_POWER_READBACK=ON \
+            -DIDF_TARGET=esp32s3 -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_board_probe.py --power-readback \
+            --nm xtensa-esp32s3-elf-nm --write-offset 0x510000 \
+            --elf "$OUT/k151_power_readback.elf" --bin "$OUT/k151_power_readback.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
       - name: Build one-shot microphone trial for review (NO INSTALL)
         shell: bash
         run: |

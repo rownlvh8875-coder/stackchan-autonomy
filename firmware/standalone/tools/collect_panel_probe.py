@@ -1,4 +1,4 @@
-"""Collect a separately approved, single K151 panel/head/STOP diagnostic."""
+"""Collect one separately approved K151 panel, STOP, or power diagnostic."""
 
 import argparse
 import hashlib
@@ -15,6 +15,12 @@ STOP_SCOPE = "ONE_PANEL_SCREEN_STOP_PROBE_AND_OTA1_RESTORE"
 STOP_MODE = "PANEL_SCREEN_STOP_ONLY"
 STOP_KIND = "REVIEW_ONLY_PANEL_SCREEN_STOP_V1"
 STOP_PROTOCOL = "K151_PANEL_SCREEN_STOP_PROBE_NOT_OPERATIONAL"
+POWER_SCOPE = "ONE_POWER_READBACK_AND_OTA1_RESTORE"
+POWER_MODE = "POWER_READBACK_ONLY"
+POWER_KIND = "REVIEW_ONLY_POWER_READBACK_V1"
+POWER_BOOT = "K151_POWER_READBACK_NOT_OPERATIONAL"
+POWER_PROTOCOL = "K151_POWER_READBACK_V1"
+POWER_CHALLENGE = "WAIT_POWER_LOCAL_START"
 STAGES = {
     "PANEL_FRAME_READY": "숫자가 보이면 머리 윗면에 손가락을 3초 가볍게 댄 뒤 떼세요.",
     "HEAD_CONFIRMED": "머리 터치가 확인됐습니다. 화면 터치 안내를 기다려 주세요.",
@@ -47,10 +53,54 @@ class PanelProbeFailure(ValueError):
         self.report = {"failure": reason}
 
 
-def receive_once(port, announce, reserve, clock=time.monotonic, *, stop_only=False):
-    protocol = STOP_PROTOCOL if stop_only else PROTOCOL
-    challenge = "WAIT_SCREEN_STOP_START" if stop_only else "WAIT_LOCAL_START"
-    expected_stages = ("WAIT_SCREEN_STOP",) if stop_only else tuple(STAGES)
+def validate_power_readback(record):
+    if (
+        set(record)
+        != {
+            "probe",
+            "pmic_vsys",
+            "pmic_vsys_mv",
+            "amp_vdd",
+            "amp_vdd_mv",
+            "amp_uvls",
+            "operating_admission",
+        }
+        or record["probe"] != POWER_PROTOCOL
+        or record["operating_admission"] is not False
+    ):
+        raise PanelProbeFailure("invalid_power_readback")
+    for state, mv, unavailable, maximum in (
+        ("pmic_vsys", "pmic_vsys_mv", ("not_seen", "id_mismatch", "disabled", "invalid"), 16383),
+        (
+            "amp_vdd",
+            "amp_vdd_mv",
+            ("not_seen", "id_mismatch", "powered_down", "reset_value", "invalid"),
+            6025,
+        ),
+    ):
+        reading, voltage = record[state], record[mv]
+        if type(voltage) is not int or not (
+            (reading == "sampled" and 0 < voltage <= maximum)
+            or (reading in unavailable and voltage == 0)
+        ):
+            raise PanelProbeFailure("invalid_power_readback")
+    amp_status_read = record["amp_vdd"] in ("reset_value", "invalid", "sampled")
+    if (amp_status_read and type(record["amp_uvls"]) is not bool) or (
+        not amp_status_read and record["amp_uvls"] is not None
+    ):
+        raise PanelProbeFailure("invalid_power_readback")
+    return record
+
+
+def receive_once(
+    port, announce, reserve, clock=time.monotonic, *, stop_only=False, power_readback=False
+):
+    if power_readback:
+        protocol, challenge, expected_stages = POWER_BOOT, POWER_CHALLENGE, ()
+    else:
+        protocol = STOP_PROTOCOL if stop_only else PROTOCOL
+        challenge = "WAIT_SCREEN_STOP_START" if stop_only else "WAIT_LOCAL_START"
+        expected_stages = ("WAIT_SCREEN_STOP",) if stop_only else tuple(STAGES)
     next_hello = clock()
     deadline = next_hello + 8
     outstanding = 0
@@ -91,9 +141,13 @@ def receive_once(port, announce, reserve, clock=time.monotonic, *, stop_only=Fal
             marker = record.get("probe")
             if marker == "PANEL_USB_READY" and record.get("operating_admission") is False:
                 evidence["usb_ready"] = True
-            elif marker in ("WAIT_LOCAL_START", "WAIT_SCREEN_STOP_START"):
+            elif marker in ("WAIT_LOCAL_START", "WAIT_SCREEN_STOP_START", POWER_CHALLENGE):
                 if marker != challenge:
                     raise PanelProbeFailure("unexpected_trial_mode")
+                if power_readback and (
+                    set(record) != {"probe", "nonce", "wait_ms"} or record.get("wait_ms") != 60000
+                ):
+                    raise PanelProbeFailure("invalid_or_changed_challenge")
                 offered = record.get("nonce")
                 if (
                     not outstanding
@@ -128,10 +182,16 @@ def receive_once(port, announce, reserve, clock=time.monotonic, *, stop_only=Fal
                     raise PanelProbeFailure("unexpected_stage")
                 stages.append(marker)
                 announce(STAGES[marker])
+            elif marker == POWER_PROTOCOL:
+                if not power_readback or nonce is None or result is not None:
+                    raise PanelProbeFailure("invalid_power_readback")
+                result = {"power_readback": validate_power_readback(record)}
             elif "result" in record:
                 label = record["result"]
                 if nonce is None and isinstance(label, str) and label in EARLY_RESULTS:
                     raise PanelProbeFailure(EARLY_RESULTS[label])
+                if power_readback:
+                    raise PanelProbeFailure("power_readback_stopped_or_failed")
                 if (
                     nonce is None
                     or result is not None
@@ -144,7 +204,11 @@ def receive_once(port, announce, reserve, clock=time.monotonic, *, stop_only=Fal
                     raise PanelProbeFailure("invalid_result")
                 result = {"result": label, "cleanup": record["cleanup"]}
             elif marker == "HOLD_UNTIL_RESET":
-                if result is None or record.get("operating_admission") is not False:
+                if (
+                    result is None
+                    or record.get("operating_admission") is not False
+                    or (power_readback and set(record) != {"probe", "operating_admission"})
+                ):
                     raise PanelProbeFailure("invalid_hold")
                 return {**result, **evidence, "stages": stages, "hold_observed": True}
         if nonce is not None:
@@ -165,7 +229,7 @@ def receive_once(port, announce, reserve, clock=time.monotonic, *, stop_only=Fal
         raise failure from None
 
 
-def verified_port(directory):
+def verified_port(directory, *, power_readback=False):
     def load(name):
         return json.loads((directory / name).read_text(encoding="utf-8"))
 
@@ -176,12 +240,20 @@ def verified_port(directory):
     )
     digest = review["image_sha256"]
     port = review["port"]
-    stop_only = review.get("kind") == STOP_KIND
+    stop_only = not power_readback and review.get("kind") == STOP_KIND
     scope, mode, kind, protocol, image_name = (
         (STOP_SCOPE, STOP_MODE, STOP_KIND, STOP_PROTOCOL, "k151_screen_stop_probe.bin")
         if stop_only
         else (SCOPE, MODE, KIND, PROTOCOL, "k151_panel_probe.bin")
     )
+    if power_readback:
+        scope, mode, kind, protocol, image_name = (
+            POWER_SCOPE,
+            POWER_MODE,
+            POWER_KIND,
+            POWER_PROTOCOL,
+            "k151_power_readback.bin",
+        )
     if not (
         isinstance(digest, str)
         and re.fullmatch("[0-9a-f]{64}", digest)
@@ -212,11 +284,14 @@ def verified_port(directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review-dir", type=Path, required=True)
-    directory = parser.parse_args().review_dir
-    intent = directory / "panel-trial-intent.json"
-    result_file = directory / "panel-result.json"
+    parser.add_argument("--power-readback", action="store_true")
+    args = parser.parse_args()
+    directory = args.review_dir
+    trial = "power" if args.power_readback else "panel"
+    intent = directory / f"{trial}-trial-intent.json"
+    result_file = directory / f"{trial}-result.json"
     try:
-        name, digest, stop_only = verified_port(directory)
+        name, digest, stop_only = verified_port(directory, power_readback=args.power_readback)
         if any(path.exists() for path in (intent, result_file, directory / "restore-started.json")):
             raise ValueError("Trial already attempted")
         import serial
@@ -225,8 +300,9 @@ def main():
         return 1
 
     def reserve():
+        scope = POWER_SCOPE if args.power_readback else STOP_SCOPE if stop_only else SCOPE
         with intent.open("x", encoding="utf-8") as out:
-            json.dump({"image_sha256": digest, "scope": STOP_SCOPE if stop_only else SCOPE}, out)
+            json.dump({"image_sha256": digest, "scope": scope}, out)
 
     port = serial.Serial(port=None, baudrate=115200, timeout=0.08, write_timeout=0.5)
     port.port = name
@@ -238,7 +314,11 @@ def main():
     else:
         try:
             report = receive_once(
-                port, lambda message: print(message, flush=True), reserve, stop_only=stop_only
+                port,
+                lambda message: print(message, flush=True),
+                reserve,
+                stop_only=stop_only,
+                power_readback=args.power_readback,
             )
         except PanelProbeFailure as exc:
             report = exc.report
@@ -247,6 +327,8 @@ def main():
     with result_file.open("x", encoding="utf-8") as out:
         json.dump(report, out, indent=2)
     print(json.dumps(report))
+    if args.power_readback:
+        return 0 if report.get("hold_observed") and "power_readback" in report else 1
     return 0 if report.get("result") == "DISPLAY_STOP_LATCHED" and report["cleanup"] else 1
 
 

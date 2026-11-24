@@ -56,3 +56,28 @@ def test_every_sdk_boundary(probe_binary, mode, at):
         [str(probe_binary), mode, str(at)], capture_output=True, text=True, timeout=10
     )
     assert run.returncode == 0, run.stderr
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "power_ok",
+        "power_disabled",
+        "power_wrong_ids",
+        "power_invalid",
+        "power_default",
+        "power_absent",
+    ],
+)
+def test_power_readback_reports_only_identified_enabled_sources(probe_binary, mode):
+    run = subprocess.run([str(probe_binary), mode], capture_output=True, text=True, timeout=10)
+    assert run.returncode == 0, run.stderr
+
+
+@pytest.mark.parametrize("mode", ["stop", "revoke", "fail"])
+@pytest.mark.parametrize("at", range(15))
+def test_power_readback_discards_partial_result_at_every_sdk_boundary(probe_binary, mode, at):
+    run = subprocess.run(
+        [str(probe_binary), mode, str(at), "power"], capture_output=True, text=True, timeout=10
+    )
+    assert run.returncode == 0, run.stderr

@@ -18,5 +18,7 @@ class K151ReadOnlyProbe final {
                     k151::ReadOnlyEvidence& out) const;
   bool observe_once(bool explicitly_authorized, const std::atomic_bool& stop,
                     k151::ReadOnlyEvidence& out) const;
+  bool observe_power_once(const std::atomic_bool& owner, const std::atomic_bool& stop,
+                          k151::PowerReadback& out) const;
 };
 }  // namespace stackchan::standalone

@@ -56,6 +56,19 @@ struct ReadOnlyEvidence {
   bool finished_without_bus_error = false;
 };
 
+enum class PowerSample : std::uint8_t {
+  not_seen, id_mismatch, disabled, powered_down, reset_value, invalid, sampled,
+};
+
+struct PowerReadback {
+  PowerSample pmic_vsys = PowerSample::not_seen;
+  std::uint16_t pmic_vsys_mv = 0;
+  PowerSample amp_vdd = PowerSample::not_seen;
+  std::uint16_t amp_vdd_mv = 0;
+  bool amp_uvls_valid = false;
+  bool amp_uvls = false;
+};
+
 constexpr std::size_t index(Device device) {
   return static_cast<std::size_t>(device);
 }

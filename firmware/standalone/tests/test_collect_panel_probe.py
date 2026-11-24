@@ -12,6 +12,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import collect_panel_probe as probe  # noqa: E402
 
 CHALLENGE = b'{"probe":"WAIT_LOCAL_START","nonce":"C07ACAFE"}\n'
+POWER_CHALLENGE = b'{"probe":"WAIT_POWER_LOCAL_START","nonce":"C07ACAFE","wait_ms":60000}\n'
+POWER_REPORT = {
+    "probe": "K151_POWER_READBACK_V1",
+    "pmic_vsys": "disabled",
+    "pmic_vsys_mv": 0,
+    "amp_vdd": "sampled",
+    "amp_vdd_mv": 2497,
+    "amp_uvls": True,
+    "operating_admission": False,
+}
+HOLD = b'{"probe":"HOLD_UNTIL_RESET","operating_admission":false}\n'
 
 
 class Port:
@@ -31,6 +42,36 @@ class Port:
         if self.callback:
             self.callback(self, data)
         return len(data)
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [{}, {"pmic_vsys_mv": 3700}, {"amp_vdd_mv": True}, {"amp_uvls": None}, {"raw": [0]}],
+)
+def test_power_collector_requires_fixed_voltage_schema_and_hold(updates):
+    voltage_record = json.dumps(POWER_REPORT | updates).encode("ascii") + b"\n"
+    port = Port([POWER_CHALLENGE, voltage_record, HOLD])
+    reserved = []
+
+    def receive():
+        return probe.receive_once(
+            port,
+            lambda _: pytest.fail("no physical cue"),
+            lambda: reserved.append(True),
+            lambda: port.now,
+            power_readback=True,
+        )
+
+    if updates:
+        with pytest.raises(probe.PanelProbeFailure, match="invalid_power_readback"):
+            receive()
+        assert port.writes[-1] == b"STOP\n"
+    else:
+        report = receive()
+        assert report["power_readback"] == POWER_REPORT
+        assert report["hold_observed"] is True
+    assert port.writes[:2] == [b"HELLO\n", b"START C07ACAFE\n"]
+    assert reserved == [True]
 
 
 def test_delayed_boot_and_duplicate_challenge_still_send_only_one_start():
@@ -195,3 +236,35 @@ def test_stop_only_rejects_prior_panel_approval(tmp_path):
     }
     (tmp_path / "approval.json").write_text(json.dumps(fresh_approval), encoding="utf-8")
     assert probe.verified_port(tmp_path) == ("COM3", digest, True)
+
+
+def test_power_readback_requires_bound_image_and_power_approval(tmp_path):
+    image = tmp_path / "artifact/k151_power_readback.bin"
+    image.parent.mkdir()
+    image.write_bytes(b"synthetic power-only image")
+    digest = hashlib.sha256(image.read_bytes()).hexdigest()
+    base = {"image_sha256": digest, "review_id": tmp_path.name, "port": "COM3"}
+    authorization = {"scope": probe.POWER_SCOPE, "operator_mode": probe.POWER_MODE}
+    records = {
+        "review-manifest.json": authorization
+        | {
+            "kind": probe.POWER_KIND,
+            "expected_protocol": probe.POWER_PROTOCOL,
+            "write_bytes": image.stat().st_size,
+        },
+        "approval.json": {"scope": probe.SCOPE, "operator_mode": probe.MODE, "approved": True},
+        "install-verified.json": {"independent_verify_passed": True, "offset": 0x510000},
+    }
+    for filename, record in records.items():
+        (tmp_path / filename).write_text(json.dumps(base | record), encoding="utf-8")
+    with pytest.raises(ValueError, match="Reviewed scope"):
+        probe.verified_port(tmp_path, power_readback=True)
+    (tmp_path / "approval.json").write_text(
+        json.dumps(base | authorization | {"approved": True}), encoding="utf-8"
+    )
+    assert probe.verified_port(tmp_path, power_readback=True) == ("COM3", digest, False)
+    with pytest.raises(ValueError, match="Reviewed scope"):
+        probe.verified_port(tmp_path)
+    image.write_bytes(b"substituted")
+    with pytest.raises(ValueError, match="image mismatch"):
+        probe.verified_port(tmp_path, power_readback=True)

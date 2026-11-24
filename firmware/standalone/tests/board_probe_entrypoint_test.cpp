@@ -27,7 +27,11 @@ int64_t esp_timer_get_time() {
 }
 int usb_serial_jtag_read_bytes(void* out, size_t size, unsigned) {
   assert(scenario == "report" && size == 1);
+#ifdef STACKCHAN_K151_POWER_READBACK
+  constexpr std::string_view start = "HELLO\nSTART 00000001\n";
+#else
   constexpr std::string_view start = "START 00000001\n";
+#endif
   static size_t pos = 0;
   if (pos < start.size()) {
     *static_cast<char*>(out) = start[pos++];
@@ -64,6 +68,13 @@ bool stackchan::standalone::K151ReadOnlyProbe::observe_once(const std::atomic_bo
   evidence.aw9523_p0_mode = 0xFD;
   evidence.touch_version_read = true;
   evidence.touch_version = {0x64, 0x01, 0x01, 0x12, 0x00, 0x11};
+  return true;
+}
+bool stackchan::standalone::K151ReadOnlyProbe::observe_power_once(const std::atomic_bool& owner,
+    const std::atomic_bool& stop, k151::PowerReadback& evidence) const {
+  assert(scenario == "report" && owner.load() && !stop.load());
+  using k151::PowerSample;
+  evidence = {PowerSample::sampled, 3700, PowerSample::reset_value, 0, true, true};
   return true;
 }
 extern "C" void app_main();

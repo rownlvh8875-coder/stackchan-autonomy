@@ -30,6 +30,39 @@ def test_board_envelope():
     assert result["gpio_mux_changes_after_start"] is True
 
 
+def test_power_review_rejects_board_image_and_requires_power_specific_markers():
+    project = b"k151_power_readback"
+    markers = b"K151_POWER_READBACK_NOT_OPERATIONAL\0WAIT_POWER_LOCAL_START\0K151_POWER_READBACK_V1"
+    manifest = board.inspect_image(
+        image(markers, project=project),
+        ELF_SHA,
+        write_offset=0x510000,
+        partition_csv=TABLE,
+        power_readback=True,
+    )
+    assert manifest["kind"] == "READONLY_POWER_READBACK_NOT_OPERATIONAL"
+    assert manifest["expected_protocol"] == "K151_POWER_READBACK_V1"
+    assert manifest["device_configuration_writes"] is False
+    assert manifest["power_mute_or_audio_readiness_proven"] is False
+    assert manifest["install_authorized"] is False
+    for wrong in (image(markers, project=b"k151_board_probe"), image(b"missing", project=project)):
+        with pytest.raises(ValueError):
+            board.inspect_image(
+                wrong,
+                ELF_SHA,
+                write_offset=0x510000,
+                partition_csv=TABLE,
+                power_readback=True,
+            )
+
+
+def test_power_elf_rejects_i2c_configuration_writer():
+    listing = "0001 T app_main\n0002 T i2c_master_transmit_receive\n"
+    board.verify_panel_symbols(listing, power_readback=True)
+    with pytest.raises(ValueError, match="configuration write"):
+        board.verify_panel_symbols(listing + "0003 T i2c_master_transmit\n", power_readback=True)
+
+
 @pytest.mark.parametrize("kind", ["bench", "elf", "chip", "revision", "corrupt", "oversized"])
 def test_board_rejects_unrelated_or_invalid(kind):
     app = image(b"board-only", project=b"k151_board_probe")

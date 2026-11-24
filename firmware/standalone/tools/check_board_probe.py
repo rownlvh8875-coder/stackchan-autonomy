@@ -79,10 +79,13 @@ def inspect_image(
     partition_csv: str,
     panel: bool = False,
     screen_stop_only: bool = False,
+    power_readback: bool = False,
 ) -> dict:
     project = b"k151_panel_probe" if panel else b"k151_board_probe"
     if screen_stop_only:
         project = b"k151_screen_stop_probe"
+    if power_readback:
+        project = b"k151_power_readback"
     envelope, _ = inspect_envelope(app, elf_sha256, project)
     if screen_stop_only and b"K151_PANEL_SCREEN_STOP_PROBE_NOT_OPERATIONAL\x00" not in app:
         raise ValueError("STOP-only diagnostic protocol marker absent")
@@ -110,6 +113,20 @@ def inspect_image(
             head_sensor_in_trial=False,
             physical_screen_stop_verified=False,
         )
+    if power_readback:
+        if not all(
+            marker in app
+            for marker in (
+                b"K151_POWER_READBACK_NOT_OPERATIONAL\0",
+                b"WAIT_POWER_LOCAL_START\0",
+                b"K151_POWER_READBACK_V1",
+            )
+        ):
+            raise ValueError("Power-only diagnostic protocol markers absent")
+        scope.update(
+            kind="READONLY_POWER_READBACK_NOT_OPERATIONAL",
+            expected_protocol="K151_POWER_READBACK_V1",
+        )
     return {
         **envelope,
         **validate_slot(partition_csv, write_offset, envelope["erase_span_bytes"]),
@@ -119,7 +136,9 @@ def inspect_image(
     }
 
 
-def verify_panel_symbols(nm_listing: str, *, screen_stop_only: bool = False) -> None:
+def verify_panel_symbols(
+    nm_listing: str, *, screen_stop_only: bool = False, power_readback: bool = False
+) -> None:
     symbols = {line.split()[-1] for line in nm_listing.splitlines() if line.split()}
     if "app_main" not in symbols:
         raise ValueError("missing diagnostic app_main in ELF symbol table")
@@ -139,6 +158,8 @@ def verify_panel_symbols(nm_listing: str, *, screen_stop_only: bool = False) -> 
         raise ValueError("unexpected operational symbol in panel probe ELF")
     if screen_stop_only and any("K151HeadTouchOwner" in name for name in symbols):
         raise ValueError("unexpected head sensor symbol in STOP-only probe ELF")
+    if power_readback and symbols & {"i2c_master_transmit", "i2c_master_multi_buffer_transmit"}:
+        raise ValueError("unexpected configuration write symbol in power readback ELF")
 
 
 def main():
@@ -153,10 +174,12 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--panel", action="store_true")
     mode.add_argument("--screen-stop-only", action="store_true")
-    parser.add_argument("--nm", help="Pinned Xtensa nm, required for the panel probe")
+    mode.add_argument("--power-readback", action="store_true")
+    parser.add_argument("--nm", help="Pinned Xtensa nm for panel and power diagnostics")
     args = parser.parse_args()
-    if (args.panel or args.screen_stop_only) and not args.nm:
-        parser.error("panel diagnostics require --nm to check the linked ELF")
+    inspect_symbols = args.panel or args.screen_stop_only or args.power_readback
+    if inspect_symbols and not args.nm:
+        parser.error("panel and power diagnostics require --nm to check the linked ELF")
     validate_source_head(args.source_head)
     base = validate(args.elf, args.bin, args.idf_head)
     result = inspect_image(
@@ -166,13 +189,14 @@ def main():
         partition_csv=args.partition_csv.read_text(encoding="utf-8"),
         panel=args.panel,
         screen_stop_only=args.screen_stop_only,
+        power_readback=args.power_readback,
     )
     result.update(
         idf_commit=base["idf_commit"],
         elf=base["elf"],
         source_head=bind_source_head(result["app_version"], args.source_head),
     )
-    if args.panel or args.screen_stop_only:
+    if inspect_symbols:
         symbols = subprocess.run(
             [args.nm, "--defined-only", str(args.elf)],
             capture_output=True,
@@ -180,7 +204,11 @@ def main():
             check=True,
             timeout=30,
         )
-        verify_panel_symbols(symbols.stdout, screen_stop_only=args.screen_stop_only)
+        verify_panel_symbols(
+            symbols.stdout,
+            screen_stop_only=args.screen_stop_only,
+            power_readback=args.power_readback,
+        )
         result["no_operational_symbols_verified"] = True
     with args.out.open("x", encoding="utf-8") as output:
         output.write(json.dumps(result, indent=2) + "\n")

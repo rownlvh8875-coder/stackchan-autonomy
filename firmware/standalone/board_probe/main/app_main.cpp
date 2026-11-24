@@ -15,23 +15,62 @@ using namespace stackchan::standalone;
 namespace {
 std::atomic_bool owner{false}, stop{false}, reader_done{false};
 bool allowed() { return owner.load() && !stop.load(); }
+#ifdef STACKCHAN_K151_POWER_READBACK
+constexpr char kBootMarker[] = "K151_POWER_READBACK_NOT_OPERATIONAL";
+constexpr char kWaitMarker[] = "WAIT_POWER_LOCAL_START";
+constexpr bool kRequestedChallenge = true;
+#else
+constexpr char kBootMarker[] = "K151_READONLY_BOARD_PROBE_NOT_OPERATIONAL";
+constexpr char kWaitMarker[] = "WAIT_LOCAL_START";
+constexpr bool kRequestedChallenge = false;
+#endif
 void reader(void*) {
   const uint32_t nonce = esp_random();
-  BenchGate gate{nonce, esp_timer_get_time() / 1000};
-  std::printf("{\"probe\":\"WAIT_LOCAL_START\",\"nonce\":\"%08lX\",\"wait_ms\":60000}\n",
-              static_cast<unsigned long>(nonce));
+  BenchGate gate{nonce, esp_timer_get_time() / 1000, kRequestedChallenge};
+  const auto offer = [&] {
+    std::printf("{\"probe\":\"%s\",\"nonce\":\"%08lX\",\"wait_ms\":60000}\n",
+                kWaitMarker, static_cast<unsigned long>(nonce));
+  };
+  if (!kRequestedChallenge) offer();
   while (!gate.stopped() && !reader_done.load()) {
     char c{};
     const int count = usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(20));
     const auto now = esp_timer_get_time() / 1000;
-    if (count == 1) gate.feed(c, now);
-    else if (count < 0) { stop = true; break; }
+    if (count == 1) {
+      if (gate.feed(c, now)) offer();
+    } else if (count < 0) { stop = true; break; }
     else gate.tick(now);
     if (gate.running()) owner = true;
   }
   owner = false; stop = true;
   vTaskDelete(nullptr);
 }
+#ifdef STACKCHAN_K151_POWER_READBACK
+const char* power_sample_name(k151::PowerSample sample) {
+  using Sample = k151::PowerSample;
+  switch (sample) {
+    case Sample::not_seen: return "not_seen";
+    case Sample::id_mismatch: return "id_mismatch";
+    case Sample::disabled: return "disabled";
+    case Sample::powered_down: return "powered_down";
+    case Sample::reset_value: return "reset_value";
+    case Sample::invalid: return "invalid";
+    case Sample::sampled: return "sampled";
+  }
+  return nullptr;
+}
+
+void report(const k151::PowerReadback& e, int64_t) {
+  const char* vsys = power_sample_name(e.pmic_vsys);
+  const char* vdd = power_sample_name(e.amp_vdd);
+  if (!vsys || !vdd) return;
+  const char* uvls = !e.amp_uvls_valid ? "null" : e.amp_uvls ? "true" : "false";
+  std::printf("{\"probe\":\"K151_POWER_READBACK_V1\",\"pmic_vsys\":\"%s\","
+      "\"pmic_vsys_mv\":%u,\"amp_vdd\":\"%s\",\"amp_vdd_mv\":%u,\"amp_uvls\":%s,"
+      "\"operating_admission\":false}\n",
+      vsys, unsigned(e.pmic_vsys_mv), vdd, unsigned(e.amp_vdd_mv), uvls);
+}
+#else
 void report(const k151::ReadOnlyEvidence& e, int64_t elapsed) {
   // Fixed numeric fields only. No raw console input, MAC, NVS, keys or voice.
   std::printf("{\"probe\":\"READBACK_COMPLETED\",\"elapsed_us\":%lld,"
@@ -59,9 +98,10 @@ void report(const k151::ReadOnlyEvidence& e, int64_t elapsed) {
       unsigned(e.touch_version[2]), unsigned(e.touch_version[3]), unsigned(e.touch_version[4]),
       unsigned(e.touch_version[5]));
 }
+#endif
 }
 extern "C" void app_main() {
-  std::puts("K151_READONLY_BOARD_PROBE_NOT_OPERATIONAL");
+  std::puts(kBootMarker);
   esp_chip_info_t chip{};
   esp_chip_info(&chip);
   const auto* partition = esp_ota_get_running_partition();
@@ -84,9 +124,14 @@ extern "C" void app_main() {
   if (xTaskCreate(reader, "board_consent", 4096, nullptr, 6, nullptr) != pdPASS) return;
   while (!owner.load() && !stop.load()) vTaskDelay(pdMS_TO_TICKS(10));
   if (allowed()) {
-    k151::ReadOnlyEvidence evidence{};
     const auto before = esp_timer_get_time();
+#ifdef STACKCHAN_K151_POWER_READBACK
+    k151::PowerReadback evidence{};
+    const bool ok = K151ReadOnlyProbe{}.observe_power_once(owner, stop, evidence);
+#else
+    k151::ReadOnlyEvidence evidence{};
     const bool ok = K151ReadOnlyProbe{}.observe_once(owner, stop, evidence);
+#endif
     const auto elapsed = esp_timer_get_time() - before;
     if (ok && allowed() && elapsed >= 0) report(evidence, elapsed);
     else std::puts("{\"result\":\"READBACK_STOPPED_OR_FAILED\"}");

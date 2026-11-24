@@ -1,5 +1,25 @@
 # Next steps
 
+## 2026-11-24 오프라인 후속 — 전원 전용 읽기 진단
+
+공개 출고 코드의 AXP2101 초기화는 전압 ADC를 켠다. V4의 앰프 준비는
+AXP2101 ID와 ALDO1/2 활성 상태를 확인한다. 이 순서 차이만으로 V4의
+저전압 표시가 발생한 원인을 확정할 수 없다.
+[공개 출고 코드의 전원 초기화](https://github.com/m5stack/StackChan/blob/28b9f0c8bd6acd81cb3c70f1a93c3e373b39d400/firmware/main/hal/board/stackchan.cc#L96-L119)
+
+기존 보드 진단의 별도 `K151_POWER_READBACK` 빌드에서 AXP2101의
+VSYS와 AW88298의 VDD·UVLS를 한 번씩 읽고 HOLD로 복귀한다. 설정을
+쓰거나 앰프를 깨우지 않는다. ADC 비활성, 기기 부재, ID 불일치, 전원
+차단 상태와 레지스터 초기값을 실제 전압 표본과 구분한다. AW88298의
+초기값과 같은 읽기는 유효 표본으로 보고하지 않는다. 오디오·네트워크
+구성요소가 없고, V4와 독립된 START와 이미지 승인 범위를 사용한다.
+[AXP2101 ADC 레지스터](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/K128%20CoreS3/AXP2101_Datasheet_V1.0_en.pdf#page=40)
+[AW88298의 VDD 모니터](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=36)
+
+이 모드에서 얻을 수 있는 값은 대기 상태 칩 내부 ADC와 상태 비트다.
+V4의 클럭 활성화 순간과 다른 구간이므로, 대기 값만으로 순간 전압
+강하 여부를 판정할 수 없다. 실물 설치와 복구에는 별도 승인이 필요하다.
+
 ## 2026-11-24 실물 후속 — V4에서 앰프 저전압 표시 확인
 
 승인된 V4 진단 1회에서 클럭 상태가 `stable`인 샘플의 보호 비트 중

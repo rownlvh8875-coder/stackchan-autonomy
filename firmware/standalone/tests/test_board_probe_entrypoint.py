@@ -10,8 +10,7 @@ import pytest
 BASE = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture(scope="module")
-def entrypoint(tmp_path_factory):
+def build_entrypoint(tmp_path_factory, *, power=False):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("C++20 compiler required")
@@ -25,6 +24,7 @@ def entrypoint(tmp_path_factory):
             "-Wextra",
             "-Werror",
             "-pthread",
+            *(["-DSTACKCHAN_K151_POWER_READBACK=1"] if power else []),
             "-I",
             str(BASE / "tests/board_probe_doubles"),
             "-I",
@@ -44,6 +44,16 @@ def entrypoint(tmp_path_factory):
     )
     assert built.returncode == 0, built.stderr
     return binary
+
+
+@pytest.fixture(scope="module")
+def entrypoint(tmp_path_factory):
+    return build_entrypoint(tmp_path_factory)
+
+
+@pytest.fixture(scope="module")
+def power_entrypoint(tmp_path_factory):
+    return build_entrypoint(tmp_path_factory, power=True)
 
 
 @pytest.mark.parametrize("kind", ["missing", "slot", "chip", "revision"])
@@ -83,3 +93,22 @@ def test_report_retains_old_fields_and_includes_audio_registers(entrypoint):
     assert report["touch_version"] == [0x64, 0x01, 0x01, 0x12, 0x00, 0x11]
     assert report["operating_admission"] is False
     assert records[-1] == {"probe": "HOLD_UNTIL_RESET", "operating_admission": False}
+
+
+def test_power_readback_reports_adc_availability_and_then_holds(power_entrypoint):
+    run = subprocess.run(
+        [str(power_entrypoint), "report"], capture_output=True, text=True, timeout=10
+    )
+    assert run.returncode == 0, run.stderr
+    records = [json.loads(line) for line in run.stdout.splitlines() if line.startswith("{")]
+    assert records[1] == {"probe": "WAIT_POWER_LOCAL_START", "nonce": "00000001", "wait_ms": 60000}
+    assert records[2] == {
+        "probe": "K151_POWER_READBACK_V1",
+        "pmic_vsys": "sampled",
+        "pmic_vsys_mv": 3700,
+        "amp_vdd": "reset_value",
+        "amp_vdd_mv": 0,
+        "amp_uvls": True,
+        "operating_admission": False,
+    }
+    assert records[3:] == [{"probe": "HOLD_UNTIL_RESET", "operating_admission": False}]
