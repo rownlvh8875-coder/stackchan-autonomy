@@ -26,7 +26,10 @@ constexpr std::string_view kAudioDone =
 constexpr std::string_view kDone =
     R"({"type":"response.done","response":{"id":"resp_a","status":"completed","status_details":null}})";
 
-enum class Case { success, stop, deadline, deny_permit, oversized, redirect, short_write, binary };
+enum class Case {
+  success, stop, deadline, deny_permit, oversized, redirect, short_write, binary,
+  poll_stop, poll_error, poll_deadline
+};
 
 struct Frame {
   std::string_view data;
@@ -44,6 +47,7 @@ const std::vector<Frame> frames{
     {kCreated.substr(0, 25), WS_TRANSPORT_OPCODES_TEXT, true, int(kCreated.size())},
     {kCreated.substr(25), WS_TRANSPORT_OPCODES_TEXT, true, int(kCreated.size())},
     {"ping", WS_TRANSPORT_OPCODES_PING},
+    {{}, WS_TRANSPORT_OPCODES_NONE},
     {kDelta}, {kAudioDone}, {kDone},
 };
 
@@ -53,8 +57,9 @@ Case scenario;
 std::atomic_bool stopped{false};
 int64_t usec = 1'000'000;
 unsigned read_count = 0, sends = 0, pongs = 0, connects = 0, spends = 0, closes = 0, destroys = 0;
+unsigned polls = 0;
 bool crt_bundle = false, authorized = false;
-constexpr uint64_t kDeadlineMs = 1110;
+constexpr uint64_t kDeadlineMs = 1360;
 }
 
 extern "C" int64_t esp_timer_get_time() { return usec; }
@@ -91,8 +96,25 @@ extern "C" int esp_transport_ws_get_upgrade_request_status(esp_transport_handle_
   assert(t == &ws);
   return scenario == Case::redirect ? 307 : 101;
 }
+extern "C" int esp_transport_poll_read(esp_transport_handle_t t, int timeout) {
+  assert(t == &ws && !authorized && timeout == 250 && !stopped && read_count < frames.size());
+  assert(pongs == 1 && current.opcode == WS_TRANSPORT_OPCODES_PING);
+  ++polls;
+  if (scenario == Case::poll_error) return -1;
+  if (frames[read_count].opcode != WS_TRANSPORT_OPCODES_NONE) {
+    if (scenario == Case::poll_stop) stopped = true;
+    return 1;
+  }
+  ++read_count;
+  usec += timeout * 1000;
+  if (scenario == Case::poll_deadline) usec = kDeadlineMs * 1000;
+  return 0;
+}
 extern "C" int esp_transport_read(esp_transport_handle_t t, char* data, int size, int timeout) {
   assert(t == &ws && !authorized && timeout == 250 && !stopped && read_count < frames.size());
+  // ESP-IDF 6.1 can report an error on an idle read after a non-empty control frame.
+  if (current.opcode == WS_TRANSPORT_OPCODES_PING &&
+      frames[read_count].opcode == WS_TRANSPORT_OPCODES_NONE) return -1;
   current = frames[read_count++];
   usec += 10'000;
   if (current.data == kDelta) {
@@ -146,11 +168,13 @@ void test_realtime_transport() {
                             "test reply", "marin", {}, {}, 1, 1000, kDeadlineMs, 0, false, true};
   K151RealtimeSpeechPort port;
   for (const auto next : {Case::success, Case::stop, Case::deadline, Case::deny_permit,
-                          Case::oversized, Case::redirect, Case::short_write, Case::binary}) {
+                          Case::oversized, Case::redirect, Case::short_write, Case::binary,
+                          Case::poll_stop, Case::poll_error, Case::poll_deadline}) {
     scenario = next;
     stopped = false;
     usec = 1'000'000;
-    read_count = sends = pongs = connects = spends = closes = destroys = 0;
+    current = {};
+    read_count = sends = pongs = connects = spends = closes = destroys = polls = 0;
     crt_bundle = authorized = false;
     std::vector<uint8_t> pcm{10, 11};
     uint64_t finished = 0;
@@ -162,10 +186,15 @@ void test_realtime_transport() {
     assert(closes == 1 && destroys == 2);
     if (ok) {
       const std::vector<uint8_t> expected{0, 128, 255, 127};
-      assert(pcm == expected && finished == 1100 && sends == 1 && pongs == 1);
+      assert(pcm == expected && finished == 1350 && sends == 1 && pongs == 1 && polls == 2);
     } else {
       assert(pcm.empty() && !finished);
       assert(sends == unsigned(scenario != Case::deny_permit && scenario != Case::redirect));
+      if (scenario == Case::poll_stop || scenario == Case::poll_error ||
+          scenario == Case::poll_deadline) {
+        assert(pongs == 1 && current.opcode == WS_TRANSPORT_OPCODES_PING);
+        assert(polls == (scenario == Case::poll_stop ? 2U : 1U));
+      }
     }
   }
 }

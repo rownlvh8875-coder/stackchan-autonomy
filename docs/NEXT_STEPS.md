@@ -505,6 +505,13 @@ Realtime 경로가 있고 연결 요청 덤프 문자열이 없음을 검사한�
 반환하는 것을 확인했다.
 [OpenAI 응답 생성 명세](https://developers.openai.com/api/reference/resources/realtime/server-events#response-created)
 
+고정 ESP-IDF 6.1에서 페이로드가 있는 PING/PONG 처리 직후에는
+다음 프레임을 읽기 전에 수신 가능 상태를 확인한다. 기존 250ms 폴링과
+요청 기한 안에서 대기하며, STOP이나 수신 오류가 감지되면 연결을
+닫는다. 오프라인에서 PING 뒤 수신이 지연돼 기존 합성이 중단되는
+경로를 재현했고, 수정 후 PCM 반환과 STOP·기한·오류 처리를 검증했다.
+[고정 ESP-IDF의 WebSocket 프레임 읽기](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/components/tcp_transport/transport_ws.c#L721-L766)
+
 ## 2026-11-23 오프라인 후속 — 독립 대화 한 턴과 대기 복귀
 
 보드 설정, 로컬 화면 승인, WakeNet과 대화 실행기를 하나의 고정

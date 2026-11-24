@@ -66,6 +66,14 @@ class ReceiveBuffer {
 
   bool read(Socket& socket, LiveIoGate& gate, uint64_t started,
             K151RealtimeSpeechExchange& exchange) {
+    if (after_control_payload_) {
+      // ESP-IDF 6.1 can reuse the last control-frame length if polling the
+      // next header times out. Wait for readability before reading it.
+      const auto ready = esp_transport_poll_read(socket.ws, kReadTimeoutMs);
+      if (ready < 0 || !live_time(gate, started)) return false;
+      if (ready == 0) return true;
+      after_control_payload_ = false;
+    }
     const auto count = esp_transport_read(socket.ws, reinterpret_cast<char*>(chunk_.data()),
                                           chunk_.size(), kReadTimeoutMs);
     if (count < 0 || static_cast<size_t>(count) > chunk_.size() || !live_time(gate, started))
@@ -74,14 +82,15 @@ class ReceiveBuffer {
     if (!frame_left_) {
       const auto opcode = esp_transport_ws_get_read_opcode(socket.ws);
       if (opcode == WS_TRANSPORT_OPCODES_NONE) return count == 0;
-      if (opcode == WS_TRANSPORT_OPCODES_PING) {
+      if (opcode == WS_TRANSPORT_OPCODES_PING || opcode == WS_TRANSPORT_OPCODES_PONG) {
+        if (length > 125) return false;
+        after_control_payload_ = length != 0;
+        if (opcode == WS_TRANSPORT_OPCODES_PONG) return true;
         constexpr auto pong = static_cast<ws_transport_opcodes_t>(
             WS_TRANSPORT_OPCODES_PONG | WS_TRANSPORT_OPCODES_FIN);
-        return length <= 125 &&
-               esp_transport_ws_send_raw(socket.ws, pong,
+        return esp_transport_ws_send_raw(socket.ws, pong,
                    reinterpret_cast<char*>(chunk_.data()), count, kWriteTimeoutMs) == count;
       }
-      if (opcode == WS_TRANSPORT_OPCODES_PONG) return length <= 125;
       if (opcode != (continuation_ ? WS_TRANSPORT_OPCODES_CONT : WS_TRANSPORT_OPCODES_TEXT))
         return false;
       const auto declared = esp_transport_ws_get_read_payload_len(socket.ws);
@@ -106,6 +115,7 @@ class ReceiveBuffer {
   std::vector<uint8_t> message_;
   size_t frame_left_ = 0;
   bool continuation_ = false;
+  bool after_control_payload_ = false;
 };
 } // namespace
 
