@@ -39,6 +39,7 @@ class K151RealtimeSpeechExchange final {
  private:
   bool fail();
   State state_ = State::connecting;
+  bool conversation_created_ = false;
   std::string response_id_;
   std::string item_id_;
   std::vector<uint8_t> pcm_;

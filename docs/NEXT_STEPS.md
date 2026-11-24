@@ -492,6 +492,12 @@ Realtime 경로가 있고 연결 요청 덤프 문자열이 없음을 검사한�
 실물 재생 검증에는 별도 설치·유료 시험 승인이 필요하다.
 [Realtime 음성 합성 안내](https://developers.openai.com/api/docs/guides/text-to-speech)
 
+세션 생성 직후 오는 `conversation.created`를 음성 응답 전 한 번 처리한다.
+이 이벤트를 넣은 오프라인 WebSocket 시험에서 수정 전 합성 실패를
+재현했다. 수정 후에는 요청 한 번으로 완료된 PCM을 받았고, 순서가
+어긋나거나 중복되거나 잘못된 이벤트는 계속 합성을 중단했다.
+[OpenAI Realtime 서버 이벤트 명세](https://developers.openai.com/api/reference/resources/realtime/server-events#conversation-created)
+
 ## 2026-11-23 오프라인 후속 — 독립 대화 한 턴과 대기 복귀
 
 보드 설정, 로컬 화면 승인, WakeNet과 대화 실행기를 하나의 고정

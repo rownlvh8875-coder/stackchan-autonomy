@@ -232,6 +232,20 @@ bool K151RealtimeSpeechExchange::accept(std::span<const uint8_t> message) {
   state_ = State::ready;
   return true;
  }
+ if (type == "conversation.created") {
+  // The default conversation follows session creation, even for out-of-band synthesis.
+  if ((state_ != State::ready && state_ != State::waiting_response) || conversation_created_)
+   return fail();
+  const auto* conversation = get(root.get(), "conversation");
+  const cJSON* id = nullptr;
+  const cJSON* object = nullptr;
+  if (!member(conversation, "id", id) || !member(conversation, "object", object) ||
+      (id && !httpwire::identifier(string_value(id))) ||
+      (object && string_value(object) != "realtime.conversation"))
+   return fail();
+  conversation_created_ = true;
+  return true;
+ }
  if (type == "response.created" && state_ == State::waiting_response) {
   const auto* response = get(root.get(), "response");
   const auto id = string_value(get(response, "id"));

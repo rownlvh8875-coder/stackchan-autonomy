@@ -15,6 +15,8 @@ struct esp_transport {};
 namespace {
 constexpr std::string_view kSession =
     R"({"type":"session.created","session":{"type":"realtime"}})";
+constexpr std::string_view kConversation =
+    R"({"event_id":"event_a","type":"conversation.created","conversation":{"id":"conv_a","object":"realtime.conversation"}})";
 constexpr std::string_view kCreated =
     R"({"type":"response.created","response":{"id":"resp_a","status":"in_progress","metadata":{"stackchan":"speech"},"audio":{"output":{"format":{"type":"audio/pcm","rate":24000}}}}})";
 constexpr std::string_view kDelta =
@@ -38,6 +40,7 @@ const std::vector<Frame> frames{
     {kSession.substr(0, 9), WS_TRANSPORT_OPCODES_TEXT, false},
     {{}, WS_TRANSPORT_OPCODES_NONE},
     {kSession.substr(9), WS_TRANSPORT_OPCODES_CONT},
+    {kConversation},
     {kCreated.substr(0, 25), WS_TRANSPORT_OPCODES_TEXT, true, int(kCreated.size())},
     {kCreated.substr(25), WS_TRANSPORT_OPCODES_TEXT, true, int(kCreated.size())},
     {"ping", WS_TRANSPORT_OPCODES_PING},
@@ -51,6 +54,7 @@ std::atomic_bool stopped{false};
 int64_t usec = 1'000'000;
 unsigned read_count = 0, sends = 0, pongs = 0, connects = 0, spends = 0, closes = 0, destroys = 0;
 bool crt_bundle = false, authorized = false;
+constexpr uint64_t kDeadlineMs = 1110;
 }
 
 extern "C" int64_t esp_timer_get_time() { return usec; }
@@ -91,9 +95,9 @@ extern "C" int esp_transport_read(esp_transport_handle_t t, char* data, int size
   assert(t == &ws && !authorized && timeout == 250 && !stopped && read_count < frames.size());
   current = frames[read_count++];
   usec += 10'000;
-  if (read_count == 7) {
+  if (current.data == kDelta) {
     if (scenario == Case::stop) stopped = true;
-    if (scenario == Case::deadline) usec = 1'100'000;
+    if (scenario == Case::deadline) usec = kDeadlineMs * 1000;
     if (scenario == Case::oversized) current.declared = 32 * 1024 + 1;
     if (scenario == Case::binary) current.opcode = WS_TRANSPORT_OPCODES_BINARY;
   }
@@ -118,7 +122,7 @@ extern "C" int esp_transport_ws_send_raw(esp_transport_handle_t t, ws_transport_
   assert(t == &ws && !authorized && timeout == 1500 && !stopped);
   const std::string_view payload(data, size);
   if (opcode == (WS_TRANSPORT_OPCODES_FIN | WS_TRANSPORT_OPCODES_PONG)) {
-    assert(payload == "ping" && read_count == 6 && !pongs++);
+    assert(payload == "ping" && current.opcode == WS_TRANSPORT_OPCODES_PING && !pongs++);
     return size;
   }
   assert(opcode == (WS_TRANSPORT_OPCODES_FIN | WS_TRANSPORT_OPCODES_TEXT) && read_count == 3);
@@ -139,7 +143,7 @@ extern "C" esp_err_t esp_transport_destroy(esp_transport_handle_t t) {
 void test_realtime_transport() {
   const std::atomic_bool allowed{true};
   const VoiceApiRequest req{VoiceApiStage::synthesize, kRealtimeSpeechPath, kRealtimeSpeechModel,
-                            "test reply", "marin", {}, {}, 1, 1000, 1100, 0, false, true};
+                            "test reply", "marin", {}, {}, 1, 1000, kDeadlineMs, 0, false, true};
   K151RealtimeSpeechPort port;
   for (const auto next : {Case::success, Case::stop, Case::deadline, Case::deny_permit,
                           Case::oversized, Case::redirect, Case::short_write, Case::binary}) {
@@ -158,7 +162,7 @@ void test_realtime_transport() {
     assert(closes == 1 && destroys == 2);
     if (ok) {
       const std::vector<uint8_t> expected{0, 128, 255, 127};
-      assert(pcm == expected && finished == 1090 && sends == 1 && pongs == 1);
+      assert(pcm == expected && finished == 1100 && sends == 1 && pongs == 1);
     } else {
       assert(pcm.empty() && !finished);
       assert(sends == unsigned(scenario != Case::deny_permit && scenario != Case::redirect));

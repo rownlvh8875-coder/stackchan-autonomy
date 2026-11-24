@@ -18,6 +18,7 @@ static std::span<const uint8_t> bytes(const std::string& text){
 static void realtime_speech() {
  using Speech = K151RealtimeSpeechExchange;
  constexpr auto session = R"({"type":"session.created","session":{"type":"realtime"}})";
+ constexpr auto conversation = R"({"event_id":"event_a","type":"conversation.created","conversation":{}})";
  constexpr auto response = R"({"type":"response.created","response":{"id":"resp_a","status":"in_progress","metadata":{"stackchan":"speech"},"audio":{"output":{"format":{"type":"audio/pcm","rate":24000}}}}})";
  constexpr auto delta = R"({"type":"response.output_audio.delta","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0,"delta":"AID/fw=="})";
  constexpr auto audio_done = R"({"type":"response.output_audio.done","response_id":"resp_a","item_id":"msg_a","output_index":0,"content_index":0})";
@@ -55,7 +56,7 @@ static void realtime_speech() {
      R"({"type":"response.output_audio.delta","response_id":"resp_a","item_id":"msg_a","output_index":1,"content_index":0,"delta":"AA=="})",
      R"({"type":"response.output_audio.done","response_id":"resp_a","item_id":"msg_b","output_index":0,"content_index":0})",
      R"({"type":"response.done","response":{"id":"resp_a","status":"incomplete"}})",
-     R"({"type":"error"})", response, done}) {
+     R"({"type":"error"})", conversation, response, done}) {
   Speech failed;
   begin(failed);
   assert(failed.accept(bytes(delta)));
@@ -65,6 +66,25 @@ static void realtime_speech() {
  Speech premature;
  assert(!premature.begin_response());
  assert(!premature.accept(bytes(delta)) && premature.take_pcm().empty());
+ Speech early_conversation;
+ assert(!early_conversation.accept(bytes(conversation)));
+ Speech duplicate_conversation;
+ assert(duplicate_conversation.accept(bytes(session)));
+ assert(duplicate_conversation.accept(bytes(conversation)));
+ assert(duplicate_conversation.state() == Speech::State::ready);
+ assert(duplicate_conversation.begin_response());
+ assert(!duplicate_conversation.accept(bytes(conversation)));
+ assert(duplicate_conversation.state() == Speech::State::failed);
+ for (const auto invalid : {
+     R"({"type":"conversation.created","conversation":[]})",
+     R"({"type":"conversation.created","conversation":{"id":5}})",
+     R"({"type":"conversation.created","conversation":{"object":"realtime.session"}})",
+     R"({"type":"conversation.created","conversation":{"id":"a","id":"b"}})"}) {
+  Speech failed;
+  assert(failed.accept(bytes(session)) && failed.begin_response());
+  assert(!failed.accept(bytes(invalid)) && failed.state() == Speech::State::failed);
+  assert(failed.take_pcm().empty());
+ }
  Speech too_large;
  begin(too_large);
  assert(!too_large.accept(bytes(std::string(Speech::kMaxEventBytes + 1, ' '))));
