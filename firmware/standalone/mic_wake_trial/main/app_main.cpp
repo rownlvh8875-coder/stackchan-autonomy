@@ -55,7 +55,7 @@ const char* tx_result_name(K151SilentTxResult result) {
 }
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_SPEAKER_SETTLING_LOCAL_START";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_CLEANUP_LOCAL_START";
 
 const char* speaker_result_name(K151SpeakerProbeResult result) {
   using Result = K151SpeakerProbeResult;
@@ -214,7 +214,7 @@ extern "C" void app_main() {
       const auto bool_or_null = [](std::optional<bool> value) {
         return value ? (*value ? "true" : "false") : "null";
       };
-      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V9\",\"result\":\"%s\","
+      std::printf("{\"speaker_probe\":\"K151_SPEAKER_V10\",\"result\":\"%s\","
                   "\"startup_stage\":\"%s\",\"clock_wait_exit\":\"%s\","
                   "\"clock_wait_last\":\"%s\",\"protection\":{"
                   "\"ovp2\":%s,\"undervoltage\":%s,\"boost_overcurrent\":%s,\"ovp\":%s,"
@@ -222,6 +222,7 @@ extern "C" void app_main() {
                   "\"standby_uvls\":%s,\"vdd\":[%ld,%ld,\"%s\",%u,%s,%ld],"
                   "\"reset_uvls\":[%s,%s,%s],"
                   "\"settling_uvls\":[%ld,%ld],"
+                  "\"end\":[%u,%u],"
                   "\"operating_admission\":false}\n",
                   result, stage, wait_exit, last, active(ovp2), active(undervoltage),
                   active(boost_overcurrent), active(ovp), active(amplifier_overcurrent),
@@ -232,7 +233,8 @@ extern "C" void app_main() {
                   static_cast<long>(report.startup.uvls_after_vdd_us), bool_or_null(report.reset.before_tx),
                   bool_or_null(report.reset.before_codec_init), bool_or_null(report.reset.after_codec_init),
                   static_cast<long>(report.startup.settling_uvls_us),
-                  static_cast<long>(report.startup.clock_ready_after_uvls_us));
+                  static_cast<long>(report.startup.clock_ready_after_uvls_us),
+                  unsigned(report.progress), unsigned(report.cleanup_stage));
     }
 #else
     // This app has one I2S caller, using the port's exclusive RX allocation.

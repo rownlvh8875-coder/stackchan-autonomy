@@ -182,6 +182,7 @@ def test_conversation_audio_capture_playback_and_return(conversation_audio_binar
         "clock_and_release_failure",
         "paired",
         "release_failure",
+        "write_and_release_failure",
     ],
 )
 def test_speaker_probe_runs_without_rx_and_uses_real_codec_guard(speaker_probe_binary, case):

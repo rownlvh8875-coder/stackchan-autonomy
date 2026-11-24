@@ -550,7 +550,8 @@ extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
 }
 extern "C" esp_err_t i2s_del_channel(i2s_chan_handle_t h){
   assert(h->alive);++h->deletes;
-  if (mode=="speaker_probe_release_failure" || mode=="speaker_probe_clock_and_release_failure")
+  if (mode=="speaker_probe_release_failure" || mode=="speaker_probe_clock_and_release_failure" ||
+      mode=="speaker_probe_write_and_release_failure")
     return ESP_FAIL;
   if(h->enabled)return ESP_ERR_INVALID_STATE; // Pinned IDF refuses BEFORE free.
   h->alive=false;return 0;
@@ -668,7 +669,8 @@ extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void* data,size
     if (playback_writes==25) assert(pcm[239]==0);
     speaker_clock_us+=10'000;
     if (mode=="speaker_probe_stop_write") local_stop=true;
-    if (mode=="speaker_probe_write_failure") *bytes-=2;
+    if (mode=="speaker_probe_write_failure" || mode=="speaker_probe_write_and_release_failure")
+      *bytes-=2;
   }
   return mode=="write_fail"?ESP_ERR_TIMEOUT:ESP_OK;
 }
@@ -768,6 +770,8 @@ int main(int argc,char** argv) {
                                   ? 0 : 1));
     if (mode=="speaker_probe_ok" || mode=="speaker_probe_settling_uvls") {
       assert(result==Result::observed && speaker_peak==4096 && calls==25 && speaker_eof==7);
+      assert(report.progress==K151SpeakerPlaybackProgress::mute_verified);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::none);
       if (mode=="speaker_probe_settling_uvls") {
         assert(report.startup.settling_uvls_us==570 && report.startup.clock_ready_after_uvls_us==2570);
         assert(amp_monitor_reads==0 && amp_post_vdd_reads==0);
@@ -784,8 +788,15 @@ int main(int argc,char** argv) {
       assert(result==Result::stopped && calls==1 && speaker_eof==0);
     } else if (mode=="speaker_probe_write_failure" || mode=="speaker_probe_dma_failure") {
       assert(result==Result::transfer_failed);
+      assert(report.progress==K151SpeakerPlaybackProgress::none);
     } else if (mode=="speaker_probe_mute_failure") {
       assert(result==Result::mute_confirmation_failed && speaker_eof==7);
+      assert(report.progress==K151SpeakerPlaybackProgress::dma_complete);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::standby_readback);
+    } else if (mode=="speaker_probe_write_and_release_failure") {
+      assert(result==Result::cleanup_failed && report.startup.stage==Stage::none);
+      assert(report.progress==K151SpeakerPlaybackProgress::none);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::i2s_release);
     } else if (mode=="speaker_probe_clock_failure" || mode.starts_with("speaker_probe_uvls_") ||
                mode=="speaker_probe_codec_open" ||
                mode=="speaker_probe_tx_state" || mode=="speaker_probe_volume") {
@@ -797,6 +808,8 @@ int main(int argc,char** argv) {
       assert(report.startup.stage==expected);
     } else if (mode=="speaker_probe_clock_and_release_failure") {
       assert(result==Result::cleanup_failed && report.startup.stage==Stage::wait_clock);
+      assert(report.progress==K151SpeakerPlaybackProgress::none);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::i2s_release);
       assert(!speaker_unmuted && calls==0);
     } else if (mode=="speaker_probe_codec_ready") {
       assert(result==Result::cleanup_failed && report.startup.stage==Stage::codec_ready);
@@ -805,6 +818,8 @@ int main(int argc,char** argv) {
       assert(result==Result::codec_prepare_failed && !speaker_unmuted && calls==0);
     } else {
       assert(mode=="speaker_probe_release_failure" && result==Result::cleanup_failed);
+      assert(report.progress==K151SpeakerPlaybackProgress::mute_verified);
+      assert(report.cleanup_stage==K151SpeakerCleanupStage::i2s_release);
     }
     if (result!=Result::amplifier_start_failed && mode!="speaker_probe_clock_and_release_failure" &&
         mode!="speaker_probe_codec_ready")

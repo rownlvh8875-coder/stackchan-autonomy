@@ -26,6 +26,7 @@ SPEAKER_STANDBY_UVLS_PROTOCOL = "K151_SPEAKER_V6"
 SPEAKER_RESET_UVLS_PROTOCOL = "K151_SPEAKER_V7"
 SPEAKER_VDD_FOLLOWUP_PROTOCOL = "K151_SPEAKER_V8"
 SPEAKER_SETTLING_PROTOCOL = "K151_SPEAKER_V9"
+SPEAKER_CLEANUP_PROTOCOL = "K151_SPEAKER_V10"
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
     SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
@@ -36,6 +37,7 @@ SPEAKER_CHALLENGES = {
     SPEAKER_RESET_UVLS_PROTOCOL: "WAIT_SPEAKER_RESET_UVLS_LOCAL_START",
     SPEAKER_VDD_FOLLOWUP_PROTOCOL: "WAIT_SPEAKER_VDD_FOLLOWUP_LOCAL_START",
     SPEAKER_SETTLING_PROTOCOL: "WAIT_SPEAKER_SETTLING_LOCAL_START",
+    SPEAKER_CLEANUP_PROTOCOL: "WAIT_SPEAKER_CLEANUP_LOCAL_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
@@ -47,6 +49,7 @@ SPEAKER_REVIEW_KINDS = {
     SPEAKER_RESET_UVLS_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V7",
     SPEAKER_VDD_FOLLOWUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V8",
     SPEAKER_SETTLING_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V9",
+    SPEAKER_CLEANUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V10",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -176,7 +179,8 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
     )
     result = record.get("result")
     expected_fields = {field, "result", "operating_admission"}
-    settling_report = speaker and speaker_protocol == SPEAKER_SETTLING_PROTOCOL
+    cleanup_report = speaker and speaker_protocol == SPEAKER_CLEANUP_PROTOCOL
+    settling_report = cleanup_report or (speaker and speaker_protocol == SPEAKER_SETTLING_PROTOCOL)
     followup_report = settling_report or (
         speaker and speaker_protocol == SPEAKER_VDD_FOLLOWUP_PROTOCOL
     )
@@ -203,6 +207,8 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
         expected_fields.add("reset_uvls")
     if settling_report:
         expected_fields.add("settling_uvls")
+    if cleanup_report:
+        expected_fields.add("end")
     if (
         set(record) != expected_fields
         or record.get(field) != protocol
@@ -211,6 +217,24 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
         or result not in results
     ):
         raise ValueError("Invalid output diagnostic result")
+    if cleanup_report:
+        end = record["end"]
+        if (
+            not isinstance(end, list)
+            or len(end) != 2
+            or any(type(value) is not int for value in end)
+            or not 0 <= end[0] <= 2
+            or not 0 <= end[1] <= 11
+        ):
+            raise ValueError("Invalid speaker end checkpoint")
+        progress, failure = end
+        if result == "cleanup_failed":
+            if failure == 0:
+                raise ValueError("Speaker cleanup failure missing its checkpoint")
+        else:
+            expected = {"dma_and_mute_observed": 2, "mute_confirmation_failed": 1}.get(result, 0)
+            if progress != expected or (expected == 2 and failure != 0):
+                raise ValueError("Speaker playback progress contradicts result")
     if "startup_stage" in expected_fields:
         stage = record["startup_stage"]
         if not isinstance(stage, str):

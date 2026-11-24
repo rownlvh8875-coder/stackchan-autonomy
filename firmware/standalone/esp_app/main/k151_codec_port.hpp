@@ -62,6 +62,7 @@ class K151CodecPort final {
   }
   K151MicWakeStage prepare_stage() const { return prepare_stage_; }
   K151SpeakerStartupDiagnostic speaker_startup() const { return speaker_startup_; }
+  K151SpeakerCleanupStage speaker_cleanup_stage() const { return speaker_cleanup_stage_; }
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
   K151SpeakerResetObservations speaker_reset_observations() const { return speaker_reset_observations_; }
 #endif
@@ -82,6 +83,11 @@ class K151CodecPort final {
     return owner_ ? owner_->load() && !stop_->load() : !attempted_;
   }
   bool fail();
+  void note_speaker_cleanup_failure(K151SpeakerCleanupStage stage) {
+    if constexpr (speaker_probe_build()) {
+      if (speaker_cleanup_stage_ == K151SpeakerCleanupStage::none) speaker_cleanup_stage_ = stage;
+    }
+  }
   bool prepare_hardware();
   bool prepare_board();
   bool attach_board_device(uint16_t address);
@@ -131,6 +137,7 @@ class K151CodecPort final {
   OutputData output_data_ = OutputData::empty;
   K151MicWakeStage prepare_stage_ = K151MicWakeStage::admission;
   K151SpeakerStartupDiagnostic speaker_startup_{K151SpeakerStartupStage::audio_guard};
+  K151SpeakerCleanupStage speaker_cleanup_stage_ = K151SpeakerCleanupStage::none;
   bool cleanup_unverified_ = false;
 };
 

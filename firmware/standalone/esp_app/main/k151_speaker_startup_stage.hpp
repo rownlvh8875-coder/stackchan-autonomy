@@ -6,6 +6,13 @@
 
 namespace stackchan::standalone {
 
+// Stable numeric codes for the bounded speaker probe report.
+enum class K151SpeakerCleanupStage : uint8_t {
+  none, standby_request, output_disable, standby_readback, amplifier_reset,
+  codec_release, codec_control, interface_release, i2s_disable, i2s_release,
+  i2c_release, previous_fault,
+};
+
 // First failed checkpoint, with no register values or audio in the report.
 enum class K151SpeakerStartupStage : uint8_t {
   none, audio_guard, admission, codec_open, codec_ready, i2s_tx_state, volume,

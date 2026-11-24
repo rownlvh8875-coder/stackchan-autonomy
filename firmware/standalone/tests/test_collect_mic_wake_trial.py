@@ -840,6 +840,46 @@ def test_speaker_settling_records_power_readiness_separately_from_protection(
 
 
 @pytest.mark.parametrize(
+    ("outcome", "end"),
+    [
+        ("cleanup_failed", [2, 9]),
+        ("mute_confirmation_failed", [1, 3]),
+        ("transfer_failed", [0, 0]),
+        ("dma_and_mute_observed", [2, 0]),
+    ],
+)
+def test_speaker_cleanup_preserves_playback_progress(receiver, outcome, end):
+    protocol = "K151_SPEAKER_V10"
+    report = SPEAKER_REPORT | {
+        "speaker_probe": protocol,
+        "result": outcome,
+        "startup_stage": "none",
+        "clock_wait_exit": "none",
+        "clock_wait_last": "none",
+        "protection": dict.fromkeys(receiver.SPEAKER_PROTECTION_FLAGS, False),
+        "standby_uvls": None,
+        "reset_uvls": [None, None, None],
+        "vdd": [-1, -1, "not_requested", 0, None, -1],
+        "settling_uvls": [558, 7847],
+        "end": end,
+    }
+    wire = json.dumps(report, separators=(",", ":")).encode("ascii") + b"\n"
+    assert len(wire) < receiver.WIRE_LIMIT
+    wait = SPEAKER_WAIT | {"mic_trial": "WAIT_SPEAKER_CLEANUP_LOCAL_START"}
+    assert (
+        receiver.receive_once(
+            FakeSerial([wait, wire, HOLD]), lambda: None, speaker=True, speaker_protocol=protocol
+        )
+        == report
+    )
+    for invalid in ([3, 0], [True, 0], [2, 99], [0]):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | {"end": invalid}, speaker=True, speaker_protocol=protocol
+            )
+
+
+@pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )
 def test_silent_tx_is_single_start_and_collects_hold(receiver, outcome):

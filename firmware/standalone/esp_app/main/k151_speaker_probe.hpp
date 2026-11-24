@@ -11,10 +11,14 @@ enum class K151SpeakerProbeResult {
   transfer_failed, mute_confirmation_failed, cleanup_failed, observed,
 };
 
+enum class K151SpeakerPlaybackProgress : uint8_t { none, dma_complete, mute_verified };
+
 struct K151SpeakerProbeReport {
   K151SpeakerProbeResult result;
   K151SpeakerStartupDiagnostic startup{};
   K151SpeakerResetObservations reset{};
+  K151SpeakerPlaybackProgress progress = K151SpeakerPlaybackProgress::none;
+  K151SpeakerCleanupStage cleanup_stage = K151SpeakerCleanupStage::none;
 };
 
 // This is linked only into the separate TX-only synthetic speaker image.

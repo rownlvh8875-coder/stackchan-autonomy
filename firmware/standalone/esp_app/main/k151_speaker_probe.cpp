@@ -14,6 +14,8 @@ namespace stackchan::standalone {
 namespace {
 using Result = K151SpeakerProbeResult;
 using Stage = K151SpeakerStartupStage;
+using Progress = K151SpeakerPlaybackProgress;
+using Cleanup = K151SpeakerCleanupStage;
 constexpr size_t kToneSamples = 6000; // 250 ms at 24 kHz.
 constexpr int16_t kPeakPcm = 4096;
 constexpr size_t kFadeSamples = kPcmOutputChunkSamples;
@@ -42,15 +44,19 @@ K151SpeakerProbeReport run_k151_speaker_probe(const std::atomic_bool& owner,
   // playback. This image links no cloud client or microphone codec.
   AudioGuard audio{k151_audio_hooks(codec, owner, stop, owner, evidence)};
   K151PcmSpeakerSink sink{codec, stop, owner, owner};
+  auto progress = Progress::none;
   const auto finish = [&](Result result, K151SpeakerStartupDiagnostic startup = {})
       -> K151SpeakerProbeReport {
     const auto reset = startup.standby_uvls.has_value() ? codec.speaker_reset_observations()
                                                        : K151SpeakerResetObservations{};
     if (audio.state() == AudioState::playback) audio.stop();
     const bool released = codec.shutdown();
-    if (codec.cleanup_unverified() || (result == Result::observed && !released))
-      return {Result::cleanup_failed, startup, reset};
-    return allowed() ? K151SpeakerProbeReport{result, startup, reset}
+    auto cleanup = codec.speaker_cleanup_stage();
+    if (codec.cleanup_unverified() || (result == Result::observed && !released)) {
+      if (cleanup == Cleanup::none) cleanup = Cleanup::previous_fault;
+      return {Result::cleanup_failed, startup, reset, progress, cleanup};
+    }
+    return allowed() ? K151SpeakerProbeReport{result, startup, reset, progress, cleanup}
                      : K151SpeakerProbeReport{Result::stopped};
   };
   if (!audio.initialize(allowed(), evidence.verified())) return finish(Result::codec_prepare_failed);
@@ -61,7 +67,9 @@ K151SpeakerProbeReport run_k151_speaker_probe(const std::atomic_bool& owner,
   if (started_us < 0) return finish(Result::clock_fault, codec.speaker_startup());
   const auto playback = sink.play_pcm24k(tone, static_cast<uint64_t>(started_us / 1000));
   if (!playback.complete) return finish(Result::transfer_failed, codec.speaker_startup());
+  progress = Progress::dma_complete;
   if (!audio.playback_end()) return finish(Result::mute_confirmation_failed, codec.speaker_startup());
+  progress = Progress::mute_verified;
   return finish(Result::observed, codec.speaker_startup());
 }
 

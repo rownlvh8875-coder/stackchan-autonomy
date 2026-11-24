@@ -544,6 +544,7 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
 }
 
 bool K151CodecPort::speaker_off() {
+  using Cleanup = K151SpeakerCleanupStage;
   output_data_ = OutputData::empty;
   if (!output_open_) return !out_control_.faulted();
   const bool standby_requested = out_control_.request_aw88298_standby();
@@ -553,6 +554,9 @@ bool K151CodecPort::speaker_off() {
   if (standby_requested && closed && out_control_.aw88298_standby_verified())
     return true;
 
+  if (!standby_requested) note_speaker_cleanup_failure(Cleanup::standby_request);
+  else if (!closed) note_speaker_cleanup_failure(Cleanup::output_disable);
+  else note_speaker_cleanup_failure(Cleanup::standby_readback);
   fault_ = true;
   // Reset is a fallback on uncertainty, never a successful completed turn.
   if (!reset_controlled_ || !set_amplifier_reset(true)) cleanup_unverified_ = true;
@@ -631,46 +635,65 @@ bool K151CodecPort::quiet() {
 }
 
 bool K151CodecPort::shutdown() {
+  using Cleanup = K151SpeakerCleanupStage;
   const bool previously_faulted = faulted();
   in_control_.begin_cleanup();
   out_control_.begin_cleanup();
   bool input_driver_closed = true;
   const bool mic_ok = close_microphone(&input_driver_closed);
   const bool speaker_ok = speaker_off();
-  bool cleanup_ok = input_driver_closed && speaker_ok;
+  bool cleanup_ok = true;
+  const auto check_cleanup = [&](bool ok, Cleanup stage) {
+    if (!ok) {
+      note_speaker_cleanup_failure(stage);
+      cleanup_ok = false;
+    }
+  };
+  check_cleanup(input_driver_closed, Cleanup::i2s_disable);
+  check_cleanup(speaker_ok, Cleanup::codec_control);
   if (in_dev_) { esp_codec_dev_delete(in_dev_); in_dev_ = nullptr; }
   if (out_dev_) { esp_codec_dev_delete(out_dev_); out_dev_ = nullptr; }
-  if (in_codec_ && audio_codec_delete_codec_if(std::exchange(in_codec_, nullptr)) != ESP_CODEC_DEV_OK)
-    cleanup_ok = false;
-  if (out_codec_ && audio_codec_delete_codec_if(std::exchange(out_codec_, nullptr)) != ESP_CODEC_DEV_OK)
-    cleanup_ok = false;
+  if (in_codec_)
+    check_cleanup(audio_codec_delete_codec_if(std::exchange(in_codec_, nullptr)) == ESP_CODEC_DEV_OK,
+                  Cleanup::codec_release);
+  if (out_codec_)
+    check_cleanup(audio_codec_delete_codec_if(std::exchange(out_codec_, nullptr)) == ESP_CODEC_DEV_OK,
+                  Cleanup::codec_release);
   if (reset_controlled_) {
-    if (!set_amplifier_reset(true)) cleanup_ok = false;
+    check_cleanup(set_amplifier_reset(true), Cleanup::amplifier_reset);
     reset_controlled_ = false;
   }
   // Codec destruction can itself issue register operations whose errors the
   // SDK drops. Observe before detaching/freeing either original control object.
   const bool controls_ok = !in_control_.faulted() && !out_control_.faulted();
+  if (in_control_.cleanup_faulted() || out_control_.cleanup_faulted())
+    note_speaker_cleanup_failure(Cleanup::codec_control);
   in_control_.detach(); out_control_.detach();
-  if (in_ctrl_ && audio_codec_delete_ctrl_if(std::exchange(in_ctrl_, nullptr)) != ESP_CODEC_DEV_OK)
-    cleanup_ok = false;
-  if (out_ctrl_ && audio_codec_delete_ctrl_if(std::exchange(out_ctrl_, nullptr)) != ESP_CODEC_DEV_OK)
-    cleanup_ok = false;
-  if (gpio_if_ && audio_codec_delete_gpio_if(std::exchange(gpio_if_, nullptr)) != ESP_CODEC_DEV_OK)
-    cleanup_ok = false;
+  if (in_ctrl_)
+    check_cleanup(audio_codec_delete_ctrl_if(std::exchange(in_ctrl_, nullptr)) == ESP_CODEC_DEV_OK,
+                  Cleanup::interface_release);
+  if (out_ctrl_)
+    check_cleanup(audio_codec_delete_ctrl_if(std::exchange(out_ctrl_, nullptr)) == ESP_CODEC_DEV_OK,
+                  Cleanup::interface_release);
+  if (gpio_if_)
+    check_cleanup(audio_codec_delete_gpio_if(std::exchange(gpio_if_, nullptr)) == ESP_CODEC_DEV_OK,
+                  Cleanup::interface_release);
   data_port_.detach();
-  if (data_if_ && audio_codec_delete_data_if(std::exchange(data_if_, nullptr)) != ESP_CODEC_DEV_OK)
-    cleanup_ok = false;
+  if (data_if_)
+    check_cleanup(audio_codec_delete_data_if(std::exchange(data_if_, nullptr)) == ESP_CODEC_DEV_OK,
+                  Cleanup::interface_release);
   if (rx_) {
-    if (!disable_owned_channel(rx_)) cleanup_ok = false;
-    if (i2s_del_channel(rx_) != ESP_OK) cleanup_ok = false;
-    else rx_ = nullptr; // IDF rejects a running channel before freeing it.
+    check_cleanup(disable_owned_channel(rx_), Cleanup::i2s_disable);
+    const bool deleted = i2s_del_channel(rx_) == ESP_OK;
+    check_cleanup(deleted, Cleanup::i2s_release);
+    if (deleted) rx_ = nullptr; // IDF rejects a running channel before freeing it.
   }
   if (tx_) {
     if (tx_tail_registered_) abandon_tx_tail();
-    if (!disable_owned_channel(tx_)) cleanup_ok = false;
-    if (i2s_del_channel(tx_) != ESP_OK) cleanup_ok = false;
-    else {
+    check_cleanup(disable_owned_channel(tx_), Cleanup::i2s_disable);
+    const bool deleted = i2s_del_channel(tx_) == ESP_OK;
+    check_cleanup(deleted, Cleanup::i2s_release);
+    if (deleted) {
       tx_ = nullptr;
       if (tx_tail_registered_) {
         portENTER_CRITICAL(&tx_tail_lock);
@@ -681,15 +704,15 @@ bool K151CodecPort::shutdown() {
       }
     }
   }
-  if (board_device_ && !release_board_device()) cleanup_ok = false;
+  if (board_device_) check_cleanup(release_board_device(), Cleanup::i2c_release);
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
-  if (amp_observer_ &&
-      i2c_master_bus_rm_device(std::exchange(amp_observer_, nullptr)) != ESP_OK)
-    cleanup_ok = false;
+  if (amp_observer_)
+    check_cleanup(i2c_master_bus_rm_device(std::exchange(amp_observer_, nullptr)) == ESP_OK,
+                  Cleanup::i2c_release);
 #endif
   if (i2c_bus_ && !board_device_) {
     if (owns_i2c_bus_) {
-      if (i2c_del_master_bus(i2c_bus_) != ESP_OK) cleanup_ok = false;
+      check_cleanup(i2c_del_master_bus(i2c_bus_) == ESP_OK, Cleanup::i2c_release);
       // Pinned IDF can report pin-deinit error after freeing the bus wrapper.
       // Never retry this ambiguous pointer or assume reclamation after failure.
       owns_i2c_bus_ = false;

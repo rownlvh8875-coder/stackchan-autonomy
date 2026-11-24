@@ -312,3 +312,24 @@ V8 ESP32-S3 컴파일·링크와 이미지 검사가 통과했다. 이번 실물
 [Push CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45376911604)
 · [PR CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45376929218)
 · [ESP32-S3 빌드](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45376929342)
+
+## V9 시작 통과와 종료 확인 실패
+
+검토한 저음량 합성음 이미지를 승인 범위에서 한 번 실행했다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `17600748564dfb26102f57264bb0996fa7beac49`, SHA256 `e92b0537fcd5c83eeb1b0610d5a6aa6e3c17d26ed318225accd1b211e2e37b32` |
+| 설치 | 동일 보드, 원본 백업과 OTA1, 보안과 메타데이터 확인. `ota_1 [0x510000,0x552DA0)` 273,824바이트 쓰기와 독립 검증 통과. 영향 섹터 끝 `0x553000` |
+| 시작 | `settling_uvls=[558,7847]`. `PWDN` 해제 읽기 확인을 기준으로 558µs에 정착 중 저전압 표시를 읽었고, 7,847µs에 보호 해제와 클럭 준비를 확인했다. 시작 단계는 `none`이었다. |
+| 최종 결과 | `cleanup_failed`, `operating_admission=false`. DMA 완료, 음소거 확인, 자원 해제 중 어느 시점에 처음 실패했는지 V9 결과만으로 확정할 수 없다. 실제로 들린 소리는 현장 관찰 전이다. |
+| 출고 복구 | 원본 OTA1 전체 `0x510000`에서 5,177,344바이트를 복구했다. 독립 플래시 해시와 원본 파티션 표·OTA 선택 데이터를 확인하고 출고 재부팅을 요청했다. COM3 복귀를 확인했다. |
+
+감독 실행기는 `preflight_exit=0`, `trial_runner_exit=1`,
+`factory_restore_verified=true`를 기록했다. 쓰기는 OTA1에 한정했다.
+마이크나 유료 API를 사용하지 않았다.
+
+I²S 자원 해제 실패를 합성 시험에 주입하면 시작 단계가 `none`이고
+최종 결과가 `cleanup_failed`라는 점이 같았다. 이 결과는 짧은 쓰기로
+PCM 전송을 중단한 경우와 전송·음소거를 확인한 경우 모두에서 나왔다.
+실제 자원 해제 실패 원인은 추가 관측이 필요하다.
