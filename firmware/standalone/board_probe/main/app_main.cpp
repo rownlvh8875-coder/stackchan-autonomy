@@ -46,23 +46,9 @@ void reader(void*) {
   vTaskDelete(nullptr);
 }
 #ifdef STACKCHAN_K151_POWER_READBACK
-const char* power_sample_name(k151::PowerSample sample) {
-  using Sample = k151::PowerSample;
-  switch (sample) {
-    case Sample::not_seen: return "not_seen";
-    case Sample::id_mismatch: return "id_mismatch";
-    case Sample::disabled: return "disabled";
-    case Sample::powered_down: return "powered_down";
-    case Sample::reset_value: return "reset_value";
-    case Sample::invalid: return "invalid";
-    case Sample::sampled: return "sampled";
-  }
-  return nullptr;
-}
-
 void report(const k151::PowerReadback& e, int64_t) {
-  const char* vsys = power_sample_name(e.pmic_vsys);
-  const char* vdd = power_sample_name(e.amp_vdd);
+  const char* vsys = k151::power_sample_name(e.pmic_vsys);
+  const char* vdd = k151::power_sample_name(e.amp_vdd);
   if (!vsys || !vdd) return;
   const char* uvls = !e.amp_uvls_valid ? "null" : e.amp_uvls ? "true" : "false";
   std::printf("{\"probe\":\"K151_POWER_READBACK_V1\",\"pmic_vsys\":\"%s\","

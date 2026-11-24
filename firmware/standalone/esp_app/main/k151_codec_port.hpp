@@ -97,6 +97,9 @@ class K151CodecPort final {
   i2c_master_bus_handle_t i2c_bus_ = nullptr;
   bool owns_i2c_bus_ = false;
   i2c_master_dev_handle_t board_device_ = nullptr;
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  i2c_master_dev_handle_t amp_vdd_observer_ = nullptr;
+#endif
   i2s_chan_handle_t tx_ = nullptr;
   i2s_chan_handle_t rx_ = nullptr;
   const audio_codec_data_if_t* data_if_ = nullptr;

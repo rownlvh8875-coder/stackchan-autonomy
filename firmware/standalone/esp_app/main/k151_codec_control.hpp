@@ -3,7 +3,9 @@
 #include "k151_speaker_startup_stage.hpp"
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <audio_codec_ctrl_if.h>
 
 namespace stackchan::standalone {
@@ -62,9 +64,9 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
 
   // The caller owns the enabled I2S TX and must close through standby or reset
   // on failure, including revocation detected during the unmute transaction.
-  template <typename Allowed, typename Clock, typename Pause>
+  template <typename Allowed, typename Clock, typename Pause, typename VoltageRead = std::nullptr_t>
   [[nodiscard]] K151SpeakerStartupDiagnostic start_aw88298_low_volume(Allowed allowed, Clock clock,
-                                                                     Pause pause) {
+      Pause pause, VoltageRead read_voltage = nullptr) {
     using Stage = K151SpeakerStartupStage;
     using Exit = K151ClockWaitExit;
     using Sample = K151ClockWaitSample;
@@ -142,12 +144,11 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
       }
       return true;
     };
-    const auto await_stage = [&](bool operating) {
+    const auto await_stage = [&](bool operating, uint16_t& status) {
       const int64_t stage_started = sampled; // Sampled after the stage write/readback.
       const uint16_t expected = kClockLocked | (operating ? kSwitching : 0);
       // The poll count also bounds failure if the injected clock never advances.
       for (int poll = 0; poll < 100; ++poll) {
-        uint16_t status{};
         if (!read_status(status)) return false;
         if (!operating && (status & kSwitching)) {
           wait_exit = Exit::early_switching;
@@ -165,13 +166,38 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     std::array<uint8_t, 2> value{};
     if (!standby_registers_verified(read_live)) return {Stage::standby_readback};
     if (!transition(0x04, kPowerMask, 0x03, kConfiguring)) return {Stage::clock_enable};
-    if (!await_stage(false)) return {Stage::wait_clock, wait_exit, last_status, protection_flags};
+    const auto clock_verified = sampled;
+    uint16_t status{};
+    if (!await_stage(false, status)) {
+      K151SpeakerStartupDiagnostic failure{Stage::wait_clock, wait_exit, last_status, protection_flags};
+      if constexpr (!std::is_same_v<VoltageRead, std::nullptr_t>) {
+        constexpr auto under_voltage = aw88298_protection::undervoltage;
+        constexpr int64_t kVoltageReadReserveUs = 30'000;
+        if (wait_exit == Exit::protection_active && (protection_flags & under_voltage)) {
+          const auto fault_observed = sampled;
+          failure.uvls_after_clock_us = static_cast<int32_t>(fault_observed - clock_verified);
+          failure.vdd = {k151::PowerSample::skipped};
+          // The VDD read cannot change the failure or proceed to amplification.
+          // Keep the existing HW mute and powered-down output stage throughout.
+          if (protection_flags == under_voltage && !(status & kSwitching) && live() &&
+              sampled - started <= kStartupLimitUs - kVoltageReadReserveUs) {
+            const auto reading = read_voltage();
+            if (live()) {
+              failure.vdd = reading;
+              if (reading.state != k151::PowerSample::not_seen)
+                failure.vdd_after_uvls_us = static_cast<int32_t>(sampled - fault_observed);
+            }
+          }
+        }
+      }
+      return failure;
+    }
     if (!read_live(0x05, value) || !(value[1] & kHardMute)) return {Stage::mute_readback};
     if (!transition(0x04, kPowerMask, kConfiguring, kOperating)) return {Stage::amplifier_enable};
-    if (!await_stage(true)) return {Stage::wait_switching, Exit::none, Sample::none, protection_flags};
+    if (!await_stage(true, status))
+      return {Stage::wait_switching, Exit::none, Sample::none, protection_flags};
     if (!read_live(0x0c, value) || value[0] < kMinAttenuation || value[0] > kMaxAttenuation)
       return {Stage::attenuation};
-    uint16_t status{};
     constexpr auto kStatusMask = kClockMask | kSwitching;
     constexpr auto kReady = kClockLocked | kSwitching;
     if (!read_status(status) || (status & kStatusMask) != kReady)

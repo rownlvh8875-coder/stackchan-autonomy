@@ -33,6 +33,12 @@ int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* outpu
   if (standby_request && scenario == "standby_mute_read_fail" && reg == 0x05)
     return ESP_CODEC_DEV_READ_FAIL;
   auto value = registers.at(reg);
+  if (activating && reg == 0x01 && scenario.starts_with("uvls_") &&
+      (registers[0x04] & 0x43) == 0x42) {
+    now_us = scenario == "uvls_no_budget" ? 71'000 : 1200;
+    value = scenario == "uvls_other_protection" ? 0x4019 :
+            scenario == "uvls_switching" ? 0x4111 : 0x4011;
+  }
   if (scenario == "readback_mismatch" && reg == 0x05) value &= ~0x10;
   auto* data = static_cast<uint8_t*>(output);
   data[0] = static_cast<uint8_t>(value >> 8);
@@ -143,6 +149,44 @@ int main(int argc, char** argv) {
     assert(guarded.muted_startup_verified());
     assert((registers[0x04] & 0x43) == 0x03 && (registers[0x05] & 0x10) != 0);
     assert((registers[0x0c] >> 8) >= 0x60);
+    if (scenario.starts_with("uvls_")) {
+      using Stage = K151SpeakerStartupStage;
+      using Power = k151::PowerSample;
+      int reads = 0;
+      registers[0x00] = 0x1852;
+      registers[0x01] = 0;
+      activating = true;
+      const auto result = guarded.start_aw88298_low_volume(
+          [] { return allowed; }, [] { return now_us; }, [] { assert(false); }, [&] {
+            ++reads;
+            assert((registers[0x04] & 0x43) == 0x42 && (registers[0x05] & 0x10));
+            if (scenario == "uvls_stop_during_read") allowed = false;
+            if (scenario == "uvls_clock_deadline") now_us = 100'000;
+            if (scenario == "uvls_clock_regression") --now_us;
+            if (scenario == "uvls_observed") now_us += 700;
+            return k151::VoltageReading{Power::sampled, 2497};
+          });
+      assert(!unmuted && result.stage == Stage::wait_clock);
+      assert(result.clock_wait_exit == K151ClockWaitExit::protection_active);
+      assert((result.protection_flags & 0x4000) != 0);
+      assert(result.uvls_after_clock_us == (scenario == "uvls_no_budget" ? 71'000 : 1200));
+      const bool forbidden = scenario == "uvls_no_budget" || scenario == "uvls_other_protection" ||
+                             scenario == "uvls_switching";
+      assert(reads == (forbidden ? 0 : 1));
+      if (scenario == "uvls_observed") {
+        assert(result.vdd.state == Power::sampled && result.vdd.mv == 2497);
+        assert(result.vdd_after_uvls_us == 700);
+      } else {
+        assert(result.vdd.state == Power::skipped && result.vdd.mv == 0);
+        assert(result.vdd_after_uvls_us == -1);
+      }
+      activating = false;
+      standby_request = true;
+      power_seen = false;
+      assert(guarded.request_aw88298_standby());
+      standby_request = false;
+      assert(guarded.aw88298_standby_verified());
+    }
     if (scenario.starts_with("start_")) {
       registers[0x00] = 0x1852;
       registers[0x01] = 0;

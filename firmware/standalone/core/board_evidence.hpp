@@ -58,7 +58,35 @@ struct ReadOnlyEvidence {
 
 enum class PowerSample : std::uint8_t {
   not_seen, id_mismatch, disabled, powered_down, reset_value, invalid, sampled,
+  not_requested, skipped, read_failed,
 };
+
+struct VoltageReading {
+  PowerSample state = PowerSample::not_requested;
+  std::uint16_t mv = 0;
+};
+
+constexpr VoltageReading decode_aw88298_vdd(unsigned code) {
+  if (!code || code > 0x3ff) return {PowerSample::invalid};
+  if (code == 0x263) return {PowerSample::reset_value};
+  return {PowerSample::sampled, static_cast<std::uint16_t>((code * 6025 + 511) / 1023)};
+}
+
+constexpr const char* power_sample_name(PowerSample sample) {
+  switch (sample) {
+    case PowerSample::not_seen: return "not_seen";
+    case PowerSample::id_mismatch: return "id_mismatch";
+    case PowerSample::disabled: return "disabled";
+    case PowerSample::powered_down: return "powered_down";
+    case PowerSample::reset_value: return "reset_value";
+    case PowerSample::invalid: return "invalid";
+    case PowerSample::sampled: return "sampled";
+    case PowerSample::not_requested: return "not_requested";
+    case PowerSample::skipped: return "skipped";
+    case PowerSample::read_failed: return "read_failed";
+  }
+  return nullptr;
+}
 
 struct PowerReadback {
   PowerSample pmic_vsys = PowerSample::not_seen;

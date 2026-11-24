@@ -143,6 +143,9 @@ def speaker_probe_binary(tmp_path_factory):
         "tx_state",
         "volume",
         "clock_failure",
+        "uvls_sample",
+        "uvls_not_seen",
+        "uvls_read_failed",
         "clock_and_release_failure",
         "paired",
         "release_failure",
@@ -585,7 +588,7 @@ def control_binary(tmp_path_factory):
     assert result.returncode == 0, result.stderr
     binary = folder / "control"
     command = [compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic"]
-    command += includes + ["-I", str(BASE / "esp_app/main")]
+    command += includes + ["-I", str(BASE / "esp_app/main"), "-I", str(BASE / "core")]
     result = subprocess.run(
         command + [str(BASE / "tests/k151_codec_control_test.cpp"), str(obj), "-o", str(binary)],
         capture_output=True,
@@ -646,6 +649,8 @@ def aw88298_startup_binary(tmp_path_factory):
             *includes,
             "-I",
             str(BASE / "esp_app/main"),
+            "-I",
+            str(BASE / "core"),
             str(BASE / "tests/k151_aw88298_muted_startup_test.cpp"),
             *objects,
             "-o",
@@ -723,3 +728,22 @@ def test_real_aw88298_preserves_all_active_protection_bits_without_unmuting(
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "uvls_observed",
+        "uvls_no_budget",
+        "uvls_other_protection",
+        "uvls_switching",
+        "uvls_stop_during_read",
+        "uvls_clock_deadline",
+        "uvls_clock_regression",
+    ],
+)
+def test_aw88298_collects_at_most_one_admitted_vdd_sample(aw88298_startup_binary, mode):
+    run = subprocess.run(
+        [str(aw88298_startup_binary), mode], capture_output=True, text=True, timeout=10
+    )
+    assert run.returncode == 0, run.stderr

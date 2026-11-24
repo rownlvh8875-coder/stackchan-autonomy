@@ -55,15 +55,9 @@ bool read_amp_power(auto read, k151::PowerReadback& result) {
   result.amp_uvls_valid = true;
   result.amp_uvls = (word() & (1 << 14)) != 0;
   if (!read(0x12, data.data(), data.size())) return false;
-  const auto code = word();
-  if (!code || code > 0x3ff) {
-    result.amp_vdd = PowerSample::invalid;
-  } else if (code == 0x263) {
-    result.amp_vdd = PowerSample::reset_value;
-  } else {
-    result.amp_vdd = PowerSample::sampled;
-    result.amp_vdd_mv = static_cast<uint16_t>((code * 6025 + 511) / 1023);
-  }
+  const auto vdd = k151::decode_aw88298_vdd(word());
+  result.amp_vdd = vdd.state;
+  result.amp_vdd_mv = vdd.mv;
   return true;
 }
 

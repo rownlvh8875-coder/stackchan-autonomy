@@ -128,7 +128,8 @@ def test_silent_tx_image_is_distinct_and_has_no_voice_trial(model_fixture):
 
 
 @pytest.mark.parametrize(
-    "protocol", ["K151_SPEAKER_V1", "K151_SPEAKER_V2", "K151_SPEAKER_V3", "K151_SPEAKER_V4"]
+    "protocol",
+    ["K151_SPEAKER_V1", "K151_SPEAKER_V2", "K151_SPEAKER_V3", "K151_SPEAKER_V4", "K151_SPEAKER_V5"],
 )
 def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, protocol):
     from check_mic_wake_image import inspect_image
@@ -144,6 +145,11 @@ def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, prot
             b'WAIT_SPEAKER_PROTECTION_LOCAL_START\0"startup_stage"\0'
             b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
         ),
+        "K151_SPEAKER_V5": (
+            b'WAIT_SPEAKER_VDD_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"uvls_after_clock_us"\0"vdd_after_uvls_us"\0"startup_vdd"\0"startup_vdd_mv"\0'
+        ),
     }[protocol]
     markers = b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0" + challenge + protocol.encode() + b"\0"
     project = b"k151_speaker_probe"
@@ -155,7 +161,7 @@ def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, prot
     assert manifest["tone_peak_pcm16"] == 4096
     assert manifest["install_authorized"] is False
     assert manifest["expected_protocol"] == protocol
-    if protocol == "K151_SPEAKER_V4":
+    if protocol in ("K151_SPEAKER_V4", "K151_SPEAKER_V5"):
         with pytest.raises(ValueError):
             inspect_image(
                 image(markers.replace(b'"protection"\0', b""), project=project),

@@ -31,6 +31,8 @@ i2s_channel_obj tx,rx;
 i2c_master_bus_t bus;
 i2c_master_dev_t pmic{0x34}, expander{0x58};
 i2c_master_dev_t menu_sensor{0x68};
+i2c_master_dev_t amp_monitor{0x36};
+int amp_monitor_reads=0;
 int reset_writes=0, reset_waits=0, expander_removes=0;
 uint8_t output_latch=0xa7;
 bool reset_read_back=false;
@@ -173,6 +175,7 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
       const bool clock_missing = mode == "speaker_probe_clock_failure" ||
                                  mode == "speaker_probe_clock_and_release_failure";
       bytes[1] = tx.enabled && power != 3 && !clock_missing ? 0x11 : 0;
+      if (mode.starts_with("speaker_probe_uvls_") && power == 0x42) bytes[0] |= 0x40;
     }
     return ESP_CODEC_DEV_OK;
   }
@@ -333,7 +336,7 @@ extern "C" esp_err_t i2c_master_get_bus_handle(i2c_port_t port,i2c_master_bus_ha
 }
 extern "C" esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t h){
   assert(h==&bus && h->alive);++h->deletes;
-  if(pmic.open || expander.open || menu_sensor.open)return ESP_ERR_INVALID_STATE;
+  if(pmic.open || expander.open || menu_sensor.open || amp_monitor.open)return ESP_ERR_INVALID_STATE;
   if(mode=="release_bus_live_error")return ESP_ERR_INVALID_STATE;
   h->alive=false;return mode=="release_bus_freed_error"?ESP_FAIL:ESP_OK;
 }
@@ -342,8 +345,12 @@ extern "C" esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t h,
                                                i2c_master_dev_handle_t* out) {
   assert(h==&bus && h->alive && channels_created==bus_created-1);
   assert(cfg->scl_speed_hz==100000 && cfg->dev_addr_length==I2C_ADDR_BIT_LEN_7);
-  assert(cfg->device_address==pmic.address || cfg->device_address==expander.address);
-  auto& dev=cfg->device_address==pmic.address ? pmic : expander;
+  assert(cfg->device_address==pmic.address || cfg->device_address==expander.address ||
+         (speaker_probe() && cfg->device_address==amp_monitor.address));
+  if (cfg->device_address==amp_monitor.address && mode=="speaker_probe_uvls_not_seen")
+    return ESP_FAIL;
+  auto& dev=cfg->device_address==pmic.address ? pmic :
+             cfg->device_address==expander.address ? expander : amp_monitor;
   assert(!dev.open);
   dev.open=true;
   *out=&dev;
@@ -361,6 +368,13 @@ extern "C" esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev) {
 extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
                                                  const uint8_t* reg,size_t n,
                                                  uint8_t* value,size_t bytes,int ms) {
+  if (dev==&amp_monitor) {
+    assert(bus.alive && dev->open && n==1 && *reg==0x12 && bytes==2 && ms==10);
+    assert((amp_registers[0x04][1] & 0x43) == 0x42 && (amp_registers[0x05][1] & 0x10));
+    ++amp_monitor_reads;
+    value[0]=0x01; value[1]=0xa8;
+    return mode=="speaker_probe_uvls_read_failed" ? ESP_FAIL : ESP_OK;
+  }
   if (dev==&menu_sensor) {
     assert(bus.alive && dev->open && n==1 && *reg==0x10 && bytes==1 && ms==100);
     *value=0;
@@ -709,7 +723,8 @@ int main(int argc,char** argv) {
       assert(result==Result::transfer_failed);
     } else if (mode=="speaker_probe_mute_failure") {
       assert(result==Result::mute_confirmation_failed && speaker_eof==7);
-    } else if (mode=="speaker_probe_clock_failure" || mode=="speaker_probe_codec_open" ||
+    } else if (mode=="speaker_probe_clock_failure" || mode.starts_with("speaker_probe_uvls_") ||
+               mode=="speaker_probe_codec_open" ||
                mode=="speaker_probe_tx_state" || mode=="speaker_probe_volume") {
       assert(result==Result::amplifier_start_failed && !speaker_unmuted && calls==0);
       const auto expected =
@@ -731,7 +746,16 @@ int main(int argc,char** argv) {
     if (result!=Result::amplifier_start_failed && mode!="speaker_probe_clock_and_release_failure" &&
         mode!="speaker_probe_codec_ready")
       assert(report.startup.stage==Stage::none);
-    if (report.startup.stage==Stage::wait_clock) {
+    if (mode.starts_with("speaker_probe_uvls_")) {
+      using Power = k151::PowerSample;
+      const auto expected = mode=="speaker_probe_uvls_not_seen" ? Power::not_seen :
+                            mode=="speaker_probe_uvls_read_failed" ? Power::read_failed : Power::sampled;
+      assert(report.startup.clock_wait_exit==K151ClockWaitExit::protection_active);
+      assert(report.startup.clock_wait_last==K151ClockWaitSample::stable);
+      assert(report.startup.uvls_after_clock_us==0 && report.startup.vdd.state==expected);
+      assert(report.startup.vdd.mv==(expected==Power::sampled ? 2497 : 0));
+      assert(amp_monitor_reads==(expected==Power::not_seen ? 0 : 1));
+    } else if (report.startup.stage==Stage::wait_clock) {
       assert(report.startup.clock_wait_exit==K151ClockWaitExit::poll_limit);
       assert(report.startup.clock_wait_last==K151ClockWaitSample::pll_unlocked);
     } else {
@@ -739,6 +763,7 @@ int main(int argc,char** argv) {
       assert(report.startup.clock_wait_last==K151ClockWaitSample::none);
     }
     assert(!rx.enabled && rx.deletes==0 && tdm_inits==0 && gains==0);
+    assert(!amp_monitor.open);
     assert(!tx.enabled && output_latch==0xa3 && !bus.alive);
     assert(created<=1 && created==deleted && legacy_calls==0);
     return 0;

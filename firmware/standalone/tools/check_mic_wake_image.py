@@ -30,6 +30,7 @@ def inspect_image(
             "K151_SPEAKER_V2": b"WAIT_SPEAKER_STARTUP_LOCAL_START\0",
             "K151_SPEAKER_V3": b"WAIT_SPEAKER_CLOCK_LOCAL_START\0",
             "K151_SPEAKER_V4": b"WAIT_SPEAKER_PROTECTION_LOCAL_START\0",
+            "K151_SPEAKER_V5": b"WAIT_SPEAKER_VDD_LOCAL_START\0",
         }
         observed = [protocol for protocol in protocols if protocol.encode() in app]
         forbidden = (
@@ -45,10 +46,24 @@ def inspect_image(
             or any(marker in app for marker in forbidden)
             or (observed[0] != "K151_SPEAKER_V1" and b'"startup_stage"' not in app)
             or (
-                observed[0] in ("K151_SPEAKER_V3", "K151_SPEAKER_V4")
+                observed[0] in ("K151_SPEAKER_V3", "K151_SPEAKER_V4", "K151_SPEAKER_V5")
                 and (b'"clock_wait_exit"' not in app or b'"clock_wait_last"' not in app)
             )
-            or (observed[0] == "K151_SPEAKER_V4" and b'"protection"' not in app)
+            or (
+                observed[0] in ("K151_SPEAKER_V4", "K151_SPEAKER_V5") and b'"protection"' not in app
+            )
+            or (
+                observed[0] == "K151_SPEAKER_V5"
+                and not all(
+                    field in app
+                    for field in (
+                        b'"uvls_after_clock_us"',
+                        b'"vdd_after_uvls_us"',
+                        b'"startup_vdd"',
+                        b'"startup_vdd_mv"',
+                    )
+                )
+            )
         ):
             raise ValueError("Unexpected speaker diagnostic image")
         return {

@@ -190,6 +190,12 @@ bool K151CodecPort::prepare_board() {
   const bool pmic_released = release_board_device();
   if (rails && !pmic_released) prepare_stage_ = K151MicWakeStage::board_release;
   if (!rails || !pmic_released) return false;
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  // This owner task holds the controller and the separate read-only observer
+  // handle. Register it now so the protected failure path only submits a read.
+  if (attach_board_device(k151::kProbeAddresses[k151::index(k151::Device::amp_aw88298)]))
+    amp_vdd_observer_ = std::exchange(board_device_, nullptr);
+#endif
 
   // Preserve every unrelated output bit, GPIO mode and direction.
   prepare_stage_ = K151MicWakeStage::amplifier_reset;
@@ -496,8 +502,23 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
   };
   speaker_startup_.stage = Stage::volume;
   if (!allowed() || esp_codec_dev_set_out_vol(out_dev_, kLowVolume) != 0) return fail();
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  const auto read_voltage = [&]() -> k151::VoltageReading {
+    if (!amp_vdd_observer_) return {k151::PowerSample::not_seen};
+    constexpr int kVddReadTimeoutMs = 10;
+    constexpr uint8_t kVddRegister = 0x12;
+    std::array<uint8_t, 2> word{};
+    if (i2c_master_transmit_receive(amp_vdd_observer_, &kVddRegister, 1, word.data(),
+                                    word.size(), kVddReadTimeoutMs) != ESP_OK)
+      return {k151::PowerSample::read_failed};
+    return k151::decode_aw88298_vdd((unsigned(word[0]) << 8) | word[1]);
+  };
+  speaker_startup_ = out_control_.start_aw88298_low_volume(
+      allowed, esp_timer_get_time, [] { vTaskDelay(1); }, read_voltage);
+#else
   speaker_startup_ =
       out_control_.start_aw88298_low_volume(allowed, esp_timer_get_time, [] { vTaskDelay(1); });
+#endif
   return speaker_startup_.stage == Stage::none ? true : fail();
 }
 
@@ -640,6 +661,11 @@ bool K151CodecPort::shutdown() {
     }
   }
   if (board_device_ && !release_board_device()) cleanup_ok = false;
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  if (amp_vdd_observer_ &&
+      i2c_master_bus_rm_device(std::exchange(amp_vdd_observer_, nullptr)) != ESP_OK)
+    cleanup_ok = false;
+#endif
   if (i2c_bus_ && !board_device_) {
     if (owns_i2c_bus_) {
       if (i2c_del_master_bus(i2c_bus_) != ESP_OK) cleanup_ok = false;

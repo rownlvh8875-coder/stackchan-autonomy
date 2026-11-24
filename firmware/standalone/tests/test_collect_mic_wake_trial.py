@@ -598,6 +598,58 @@ def test_speaker_protection_report_preserves_only_named_flags_from_a_single_star
         assert port.writes == [b"HELLO\n"]
 
 
+def test_speaker_vdd_requires_accepted_uvls_and_rejects_raw_data(receiver):
+    protocol = "K151_SPEAKER_V5"
+    wait = SPEAKER_WAIT | {"mic_trial": "WAIT_SPEAKER_VDD_LOCAL_START"}
+    protection = {
+        "ovp2": False,
+        "undervoltage": True,
+        "boost_overcurrent": False,
+        "ovp": False,
+        "amplifier_overcurrent": False,
+        "overtemperature": False,
+    }
+    report = SPEAKER_REPORT | {
+        "speaker_probe": protocol,
+        "result": "amplifier_start_failed",
+        "startup_stage": "wait_clock",
+        "clock_wait_exit": "protection_active",
+        "clock_wait_last": "stable",
+        "protection": protection,
+        "uvls_after_clock_us": 1200,
+        "vdd_after_uvls_us": 700,
+        "startup_vdd": "sampled",
+        "startup_vdd_mv": 2497,
+    }
+    port = FakeSerial([wait, report, HOLD])
+    assert (
+        receiver.receive_once(port, lambda: None, speaker=True, speaker_protocol=protocol) == report
+    )
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+    for invalid in (
+        report | {"uvls_after_clock_us": 100_000},
+        report | {"uvls_after_clock_us": True},
+        report | {"uvls_after_clock_us": -1},
+        report | {"vdd_after_uvls_us": -1},
+        report | {"vdd_after_uvls_us": 99_000},
+        report | {"startup_vdd_mv": 0},
+        report | {"startup_vdd": "read_failed"},
+        report | {"protection": protection | {"amplifier_overcurrent": True}},
+        report | {"raw_vdd": 0x01A8},
+    ):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(invalid, speaker=True, speaker_protocol=protocol)
+    skipped = report | {
+        "protection": protection | {"amplifier_overcurrent": True},
+        "startup_vdd": "skipped",
+        "vdd_after_uvls_us": -1,
+        "startup_vdd_mv": 0,
+    }
+    assert (
+        receiver.validate_output_report(skipped, speaker=True, speaker_protocol=protocol) == skipped
+    )
+
+
 @pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )
@@ -645,7 +697,14 @@ def test_silent_tx_challenge_cannot_start_the_wrong_image(receiver, challenge, s
 
 @pytest.mark.parametrize(
     "speaker_protocol",
-    [None, "K151_SPEAKER_V1", "K151_SPEAKER_V2", "K151_SPEAKER_V3", "K151_SPEAKER_V4"],
+    [
+        None,
+        "K151_SPEAKER_V1",
+        "K151_SPEAKER_V2",
+        "K151_SPEAKER_V3",
+        "K151_SPEAKER_V4",
+        "K151_SPEAKER_V5",
+    ],
 )
 def test_output_trial_binds_approval_and_install_to_exact_review(
     receiver, tmp_path, speaker_protocol

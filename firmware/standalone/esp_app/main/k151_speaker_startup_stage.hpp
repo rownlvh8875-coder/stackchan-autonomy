@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
+#include "board_evidence.hpp"
 #include <cstdint>
 
 namespace stackchan::standalone {
@@ -38,6 +39,9 @@ struct K151SpeakerStartupDiagnostic {
   K151ClockWaitExit clock_wait_exit = K151ClockWaitExit::none;
   K151ClockWaitSample clock_wait_last = K151ClockWaitSample::none;
   uint16_t protection_flags = 0;
+  int32_t uvls_after_clock_us = -1;
+  int32_t vdd_after_uvls_us = -1;
+  k151::VoltageReading vdd{};
 };
 
 } // namespace stackchan::standalone
