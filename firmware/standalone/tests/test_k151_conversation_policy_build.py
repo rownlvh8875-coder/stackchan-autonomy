@@ -37,14 +37,15 @@ def test_k151_conversation_boot_policy(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("mode", "marker"),
+    ("mode", "first_budget", "marker"),
     [
-        ("hold", None),
-        ("one_paid_turn", b"ONE_PAID_TURN"),
-        ("continuous", b"CONTINUOUS"),
+        ("hold", False, None),
+        ("one_paid_turn", False, b"ONE_PAID_TURN"),
+        ("one_paid_turn", True, b"ONE_PAID_TURN"),
+        ("continuous", False, b"CONTINUOUS"),
     ],
 )
-def test_local_policy_marker_requires_complete_compiled_scope(tmp_path, mode, marker):
+def test_local_policy_marker_requires_complete_compiled_scope(tmp_path, mode, first_budget, marker):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("C++20 compiler required")
@@ -59,14 +60,17 @@ def test_local_policy_marker_requires_complete_compiled_scope(tmp_path, mode, ma
         "int psa_hash_compute(int, const uint8_t*, size_t, uint8_t*, size_t, size_t*);\n"
     )
     # These are compile-only fixtures with a synthetic identity. No firmware is linked.
-    trial_budget = (
-        ",\n.trial_budget_sha256 = K151BudgetDigest{2}" if mode == "one_paid_turn" else ""
-    )
+    trial_budget = ""
+    if first_budget:
+        trial_budget = ",\n.trial_budget_must_be_missing = true"
+    elif mode == "one_paid_turn":
+        trial_budget = ",\n.trial_budget_sha256 = K151BudgetDigest{2}"
     (tmp_path / "k151_private_policy.inc").write_text(
         "{\n.expected_factory_identity = {1},\n"
         ".output = {true, true, true, true, true, true, true},\n"
         ".physical_lcd_verified = true,\n.exclusive_i2s0_verified = true,\n"
         f".paid_scope_approved = true,\n.budget_scope_approved = true,\n"
+        f".allow_first_budget = {str(first_budget).lower()},\n"
         f".mode = K151ConversationBuildMode::{mode}{trial_budget}\n}}\n"
     )
     object_file = tmp_path / "policy.o"
@@ -75,6 +79,10 @@ def test_local_policy_marker_requires_complete_compiled_scope(tmp_path, mode, ma
             compiler,
             "-std=c++20",
             "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pedantic",
             "-DSTACKCHAN_K151_PRIVATE_POLICY=1",
             "-I",
             str(tmp_path),

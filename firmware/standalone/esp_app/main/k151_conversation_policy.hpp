@@ -26,7 +26,7 @@ struct K151ConversationPolicy {
   K151ConversationBuildMode mode = K151ConversationBuildMode::hold;
   // Bind a one-turn deployment to a private snapshot of just sc_gpt/budget.
   // Missing is a separate, explicitly reviewed first-provisioning case.
-  std::optional<K151BudgetDigest> trial_budget_sha256;
+  std::optional<K151BudgetDigest> trial_budget_sha256 = std::nullopt;
   bool trial_budget_must_be_missing = false;
 };
 
