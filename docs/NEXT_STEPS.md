@@ -768,6 +768,18 @@ ESP32-S3 비공개 한 턴 컴파일에서는 이 필드를 생략한 합성 정
 백업 A/B의 NVS는 고정 ESP-IDF 파서로 메모리에서 읽을 수 있었다.
 실제 한 턴 정책에는 승인된 사전 확인에서 얻은 현재 NVS를 사용한다.
 
+`c20da49`의 합성 한 턴 정책으로 Windows에서 ESP32-S3 ELF 링크를
+완료했다. 긴 컴파일 인수 때문에 Windows의 프로세스 시작이 실패한
+경우, CMake의 `-DCMAKE_NINJA_FORCE_RESPONSE_FILE=1`을 적용해 같은
+소스와 고정 IDF로 `k151_conversation_review.elf`를 링크했다. ELF에서
+한 턴 표시, 플래시 DROM의 고정 WakeNet 팩과 SHA256, Realtime 합성
+경로를 확인했다. 설치용 앱 바이너리는 생성하지 않았다.
+
+동일 커밋의 GitHub 검사 9개가 모두 통과했다.
+[PC PR CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45390137464),
+[PC push CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45390125494),
+[ESP32-S3 CI](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45390137430)
+
 ## 2026-11-23 오프라인 후속 — 독립 대화 검토 빌드
 
 기본 앱은 HOLD로 빌드한다. 별도 대화 검토 빌드는 고정 WakeNet 팩을
