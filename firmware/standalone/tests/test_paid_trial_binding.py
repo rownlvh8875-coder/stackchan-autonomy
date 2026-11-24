@@ -2,13 +2,16 @@
 
 import hashlib
 import json
+import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from paid_trial_binding import PaidTrialPaths, run_bound_paid_trial  # noqa: E402
+from paid_trial_binding import PaidTrialPaths  # noqa: E402
+from paid_trial_binding import run_bound_paid_trial as run_bound  # noqa: E402
 from paid_trial_sequence import TrialStep  # noqa: E402
 
 
@@ -16,8 +19,14 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def run_bound_paid_trial(paths, perform, *, port="COM3", recover_only=False):
+    return run_bound(paths, perform, port=port, recover_only=recover_only)
+
+
 @pytest.fixture
-def review(tmp_path):
+def review(tmp_path, monkeypatch):
+    monkeypatch.setattr("paid_trial_binding.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
     paths = PaidTrialPaths(
         review_dir=tmp_path,
         app=tmp_path / "app.bin",
@@ -150,3 +159,155 @@ def test_scope_changed_during_preflight_cannot_be_consumed(review):
     assert result.trial_failure is TrialStep.CLAIM_ONCE
     assert not result.install_attempted
     assert not (paths.review_dir / "install-started.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("interrupt_at", "expected_writes"),
+    [
+        (TrialStep.WRITE_APP, [TrialStep.WRITE_ORIGINAL_OTA1]),
+        (
+            TrialStep.BOOT_AND_RUN_ONE_TURN,
+            [TrialStep.WRITE_ORIGINAL_OTA1, TrialStep.WRITE_PRETRIAL_NVS],
+        ),
+        (TrialStep.REQUEST_FACTORY_BOOT, []),
+    ],
+)
+def test_recovery_uses_only_the_ranges_allowed_at_the_interrupted_phase(
+    review, interrupt_at, expected_writes
+):
+    paths, _, _ = review
+    interrupted = False
+
+    def first_run(step, _inputs):
+        nonlocal interrupted
+        interrupted |= step is interrupt_at
+        return not interrupted
+
+    result = run_bound_paid_trial(paths, first_run)
+    assert result.recovery_failure is not None
+    seen = []
+
+    def restore(step, _inputs):
+        seen.append(step)
+        return True
+
+    result = run_bound_paid_trial(paths, restore, recover_only=True)
+    assert result.factory_boot_requested and result.trial_failure is None
+    assert seen == [
+        TrialStep.REBIND_FOR_RESTORE,
+        *(
+            [TrialStep.WRITE_ORIGINAL_OTA1]
+            if TrialStep.WRITE_ORIGINAL_OTA1 in expected_writes
+            else []
+        ),
+        TrialStep.VERIFY_ORIGINAL_OTA1,
+        *(
+            [TrialStep.WRITE_PRETRIAL_NVS]
+            if TrialStep.WRITE_PRETRIAL_NVS in expected_writes
+            else []
+        ),
+        TrialStep.VERIFY_PRETRIAL_NVS,
+        TrialStep.VERIFY_FACTORY_METADATA,
+        TrialStep.REQUEST_FACTORY_BOOT,
+    ]
+    seen.clear()
+    assert not run_bound_paid_trial(paths, restore, recover_only=True).install_attempted
+    assert seen == []
+
+
+@pytest.mark.parametrize("change", ["missing", "port", "approval", "torn", "in_use", "old"])
+def test_unsafe_resume_stops_before_device_contact(review, change):
+    paths, _, approval = review
+    claim = paths.review_dir / "install-started.json"
+    seen = []
+
+    def restore(step, _inputs):
+        seen.append(step)
+        return True
+
+    def first_run(step, _inputs):
+        if step is TrialStep.BOOT_AND_RUN_ONE_TURN and change == "in_use":
+            assert not run_bound_paid_trial(paths, restore, recover_only=True).install_attempted
+        return step not in (TrialStep.BOOT_AND_RUN_ONE_TURN, TrialStep.REBIND_FOR_RESTORE)
+
+    if change not in ("missing", "old"):
+        assert run_bound_paid_trial(paths, first_run).install_attempted
+    if change == "in_use":
+        assert seen == []
+        return
+    if change == "approval":
+        approval.write_bytes(approval.read_bytes() + b" ")
+    if change == "torn":
+        claim.write_bytes(claim.read_bytes()[:-1])
+    if change == "old":
+        claim.write_text(
+            json.dumps({"review_sha256": digest(review[1].read_bytes())}), encoding="utf-8"
+        )
+    result = run_bound_paid_trial(
+        paths, restore, port="COM4" if change == "port" else "COM3", recover_only=True
+    )
+    assert not result.install_attempted
+    assert seen == []
+
+
+def test_process_exit_releases_lock_and_preserves_trial_boot_intent(review):
+    paths, _, _ = review
+    child = """
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from paid_trial_binding import PaidTrialPaths, run_bound_paid_trial
+from paid_trial_sequence import TrialStep
+
+def interrupt(step, _inputs):
+    if step is TrialStep.BOOT_AND_RUN_ONE_TURN:
+        os._exit(17)
+    return True
+
+run_bound_paid_trial(PaidTrialPaths(*map(Path, sys.argv[2:])), interrupt, port='COM3')
+"""
+    process = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            child,
+            str(Path(__file__).resolve().parents[1] / "tools"),
+            *map(str, (paths.review_dir, paths.app, paths.ota1, paths.nvs, paths.board_reference)),
+        ],
+        check=False,
+        timeout=10,
+    )
+    assert process.returncode == 17
+    seen = []
+
+    def restore(step, _inputs):
+        seen.append(step)
+        return True
+
+    result = run_bound_paid_trial(paths, restore, recover_only=True)
+    assert result.factory_boot_requested
+    assert seen[0] is TrialStep.REBIND_FOR_RESTORE
+    assert seen[-1] is TrialStep.REQUEST_FACTORY_BOOT
+    assert TrialStep.WRITE_PRETRIAL_NVS in seen
+    assert TrialStep.BOOT_AND_RUN_ONE_TURN not in seen
+
+
+def test_another_review_directory_cannot_open_the_same_port_during_a_trial(review):
+    paths, manifest, approval = review
+    alternate = replace(paths, review_dir=paths.review_dir / "other-review")
+    alternate.review_dir.mkdir()
+    for source in (manifest, approval):
+        (alternate.review_dir / source.name).write_bytes(source.read_bytes())
+    observed = []
+
+    def perform(step, _inputs):
+        if step is TrialStep.BOOT_AND_RUN_ONE_TURN:
+            result = run_bound_paid_trial(alternate, lambda nested, _: observed.append(nested))
+            assert result.trial_failure is TrialStep.CLAIM_ONCE
+        return True
+
+    result = run_bound_paid_trial(paths, perform)
+    assert result.trial_failure is None
+    assert observed == []

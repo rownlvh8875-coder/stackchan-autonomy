@@ -15,6 +15,7 @@ class TrialStep(StrEnum):
     CLAIM_ONCE = "claim_once"
     WRITE_APP = "write_app"
     VERIFY_APP = "verify_app"
+    RECORD_TRIAL_BOOT_INTENT = "record_trial_boot_intent"
     BOOT_AND_RUN_ONE_TURN = "boot_and_run_one_turn"
     REBIND_FOR_RESTORE = "rebind_for_restore"
     WRITE_ORIGINAL_OTA1 = "write_original_ota1"
@@ -22,7 +23,9 @@ class TrialStep(StrEnum):
     WRITE_PRETRIAL_NVS = "write_pretrial_nvs"
     VERIFY_PRETRIAL_NVS = "verify_pretrial_nvs"
     VERIFY_FACTORY_METADATA = "verify_factory_metadata"
+    RECORD_FACTORY_BOOT_INTENT = "record_factory_boot_intent"
     REQUEST_FACTORY_BOOT = "request_factory_boot"
+    RECORD_RECOVERY_COMPLETE = "record_recovery_complete"
 
 
 @dataclass(frozen=True)
@@ -51,7 +54,10 @@ class TrialResult:
     @property
     def factory_boot_requested(self) -> bool:
         """The backend confirmed the reset request; the LCD still needs checking."""
-        return self.install_attempted and self.recovery_failure is None
+        return self.install_attempted and self.recovery_failure in (
+            None,
+            TrialStep.RECORD_RECOVERY_COMPLETE,
+        )
 
 
 def _first_failed(
@@ -69,6 +75,46 @@ def _first_failed(
     return None
 
 
+def _restore(
+    perform: Callable[[TrialStep], bool], *, trial_boot_possible: bool, factory_boot_possible: bool
+) -> TrialStep | None:
+    # A factory boot may already have legitimately changed NVS. In that state
+    # allow verification only, even if an original-range comparison now fails.
+    restore_ota = () if factory_boot_possible else (TrialStep.WRITE_ORIGINAL_OTA1,)
+    restore_nvs = (
+        (TrialStep.WRITE_PRETRIAL_NVS,) if trial_boot_possible and not factory_boot_possible else ()
+    )
+    record_factory_boot = () if factory_boot_possible else (TrialStep.RECORD_FACTORY_BOOT_INTENT,)
+    return _first_failed(
+        perform,
+        (
+            TrialStep.REBIND_FOR_RESTORE,
+            *restore_ota,
+            TrialStep.VERIFY_ORIGINAL_OTA1,
+            *restore_nvs,
+            TrialStep.VERIFY_PRETRIAL_NVS,
+            TrialStep.VERIFY_FACTORY_METADATA,
+            *record_factory_boot,
+            TrialStep.REQUEST_FACTORY_BOOT,
+            TrialStep.RECORD_RECOVERY_COMPLETE,
+        ),
+    )
+
+
+def recover_paid_trial(
+    perform: Callable[[TrialStep], bool], *, trial_boot_possible: bool, factory_boot_possible: bool
+) -> TrialResult:
+    """Resume only recovery after the caller validates the durable phase record."""
+    return TrialResult(
+        install_attempted=True,
+        recovery_failure=_restore(
+            perform,
+            trial_boot_possible=trial_boot_possible,
+            factory_boot_possible=factory_boot_possible,
+        ),
+    )
+
+
 def run_paid_trial(scopes: TrialScopes, perform: Callable[[TrialStep], bool]) -> TrialResult:
     """Run once. A failed write may have changed flash, so recover from that point.
 
@@ -84,28 +130,18 @@ def run_paid_trial(scopes: TrialScopes, perform: Callable[[TrialStep], bool]) ->
     if failure is not None:
         return TrialResult(trial_failure=failure)
 
+    trial_boot_possible = False
     try:
         failure = _first_failed(
-            perform, (TrialStep.WRITE_APP, TrialStep.VERIFY_APP, TrialStep.BOOT_AND_RUN_ONE_TURN)
+            perform, (TrialStep.WRITE_APP, TrialStep.VERIFY_APP, TrialStep.RECORD_TRIAL_BOOT_INTENT)
         )
+        if failure is None:
+            # A boot request can take effect even when the transport then fails.
+            trial_boot_possible = True
+            failure = _first_failed(perform, (TrialStep.BOOT_AND_RUN_ONE_TURN,))
     finally:
-        # A boot request can take effect even when the transport then fails.
-        nvs_write = (
-            ()
-            if failure in (TrialStep.WRITE_APP, TrialStep.VERIFY_APP)
-            else (TrialStep.WRITE_PRETRIAL_NVS,)
-        )
-        recovery_failure = _first_failed(
-            perform,
-            (
-                TrialStep.REBIND_FOR_RESTORE,
-                TrialStep.WRITE_ORIGINAL_OTA1,
-                TrialStep.VERIFY_ORIGINAL_OTA1,
-                *nvs_write,
-                TrialStep.VERIFY_PRETRIAL_NVS,
-                TrialStep.VERIFY_FACTORY_METADATA,
-                TrialStep.REQUEST_FACTORY_BOOT,
-            ),
+        recovery_failure = _restore(
+            perform, trial_boot_possible=trial_boot_possible, factory_boot_possible=False
         )
     return TrialResult(
         install_attempted=True, trial_failure=failure, recovery_failure=recovery_failure

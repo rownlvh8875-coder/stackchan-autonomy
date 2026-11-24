@@ -95,7 +95,11 @@ def exercise_one_turn(
 
 
 def run_operator_paid_trial(
-    paths: PaidTrialPaths, port: str, port_available: Callable[[str], bool]
+    paths: PaidTrialPaths,
+    port: str,
+    port_available: Callable[[str], bool],
+    *,
+    recover_only: bool = False,
 ) -> TrialResult:
     """Connect the existing ROM and SCPS tools. The caller checks port occupancy."""
     serial_number = None
@@ -118,7 +122,8 @@ def run_operator_paid_trial(
         if port_available(selected) is not True:
             return False
         # Missing pairing dependencies must be detected before the trial image is written.
-        import_module("scps_reference")
+        if not recover_only:
+            import_module("scps_reference")
         serial_number = observed
         return True
 
@@ -157,7 +162,9 @@ def run_operator_paid_trial(
         paths,
         port,
         available,
-        lambda: exercise_one_turn(
+        None
+        if recover_only
+        else lambda: exercise_one_turn(
             pair,
             present,
             read_key,
@@ -166,12 +173,15 @@ def run_operator_paid_trial(
             time.sleep,
             restore_present=lambda: present(port),
         ),
+        recover_only=recover_only,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--execute", action="store_true", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--execute", action="store_true", help="Run the approved one-turn trial")
+    mode.add_argument("--recover", action="store_true", help="Resume only the approved restoration")
     parser.add_argument("--port", required=True, help="Exact Windows COM port")
     parser.add_argument("--review-dir", type=Path, required=True)
     parser.add_argument("--app", type=Path, required=True)
@@ -188,12 +198,20 @@ def main(argv: list[str] | None = None) -> int:
     if break_signal is not None:
         previous_handler = signal.signal(break_signal, signal.default_int_handler)
     try:
-        result = run_operator_paid_trial(paths, args.port.upper(), _windows_port_available)
+        result = run_operator_paid_trial(
+            paths, args.port.upper(), _windows_port_available, recover_only=args.recover
+        )
     finally:
         if break_signal is not None:
             signal.signal(break_signal, previous_handler)
     print(
-        json.dumps({**asdict(result), "factory_boot_requested": result.factory_boot_requested}),
+        json.dumps(
+            {
+                **asdict(result),
+                "recovery_only": args.recover,
+                "factory_boot_requested": result.factory_boot_requested,
+            }
+        ),
         flush=True,
     )
     if result.recovery_failure is not None:

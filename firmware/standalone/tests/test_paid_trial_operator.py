@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import paid_trial_operator as operator_tool  # noqa: E402
 from paid_trial_sequence import TrialStep  # noqa: E402
 from test_paid_trial_binding import review as review_fixture  # noqa: E402
+from test_paid_trial_binding import run_bound_paid_trial  # noqa: E402
 from test_paid_trial_rom import Chip, Tool  # noqa: E402
 
 review = review_fixture
@@ -55,6 +56,50 @@ def test_cli_needs_explicit_execution_and_all_approvals(review, monkeypatch, cap
     assert report["approval_rejected"]
     assert not report["install_attempted"]
     assert not (paths.review_dir / "install-started.json").exists()
+
+
+@pytest.mark.parametrize("factory_changed_nvs", [False, True])
+def test_cli_recovers_without_writes_or_pairing_after_possible_factory_boot(
+    review, monkeypatch, capsys, factory_changed_nvs
+):
+    paths, _, _ = review
+    result = run_bound_paid_trial(paths, lambda step, _: step is not TrialStep.REQUEST_FACTORY_BOOT)
+    assert result.recovery_failure is TrialStep.REQUEST_FACTORY_BOOT
+    device = Tool(paths)
+    if factory_changed_nvs:
+        device.flash[0x9000] = b"factory wrote a newer value"
+
+    def detect(port, **kwargs):
+        assert port == "COM3"
+        return device.detect("mock-port", **kwargs)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("recovery must not attempt pairing or exercise a conversation")
+
+    tty = SimpleNamespace(isatty=lambda: True)
+    port = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="original")
+    monkeypatch.setattr(
+        operator_tool, "sys", SimpleNamespace(platform="win32", stdin=tty, stdout=tty)
+    )
+    monkeypatch.setattr(
+        operator_tool, "_windows_port_available", lambda selected: selected == "COM3"
+    )
+    monkeypatch.setattr(operator_tool, "import_module", forbidden)
+    monkeypatch.setattr(operator_tool, "exercise_one_turn", forbidden)
+    monkeypatch.setattr(list_ports, "comports", lambda: [port])
+    monkeypatch.setattr("paid_trial_rom._load_esptool", lambda: (detect, Chip, device))
+
+    status = operator_tool.main(["--recover", *trial_args(paths)])
+    report = json.loads(capsys.readouterr().out)
+    assert report["recovery_only"] and report["install_attempted"]
+    assert not any(event[0] == "write" for event in device.events)
+    assert ("verify", 1, 0x510000) in device.events and ("verify", 1, 0x9000) in device.events
+    if factory_changed_nvs:
+        assert status == 3 and report["recovery_failure"] == TrialStep.VERIFY_PRETRIAL_NVS
+        assert not report["factory_boot_requested"] and ("reset", 1) not in device.events
+    else:
+        assert status == 0 and report["factory_boot_requested"]
+        assert device.events[-2:] == [("reset", 1), ("close", 1)]
 
 
 @pytest.mark.parametrize("occupied", [False, True])

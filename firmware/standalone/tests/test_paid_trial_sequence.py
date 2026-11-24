@@ -14,6 +14,7 @@ INSTALL = (
     TrialStep.CLAIM_ONCE,
     TrialStep.WRITE_APP,
     TrialStep.VERIFY_APP,
+    TrialStep.RECORD_TRIAL_BOOT_INTENT,
     TrialStep.BOOT_AND_RUN_ONE_TURN,
 )
 RECOVER = (
@@ -23,7 +24,9 @@ RECOVER = (
     TrialStep.WRITE_PRETRIAL_NVS,
     TrialStep.VERIFY_PRETRIAL_NVS,
     TrialStep.VERIFY_FACTORY_METADATA,
+    TrialStep.RECORD_FACTORY_BOOT_INTENT,
     TrialStep.REQUEST_FACTORY_BOOT,
+    TrialStep.RECORD_RECOVERY_COMPLETE,
 )
 
 
@@ -100,7 +103,8 @@ def test_failed_recovery_never_advances_to_the_next_range_or_boot(failed):
     runner = FakeRunner(TrialStep.BOOT_AND_RUN_ONE_TURN, failed)
     result = run_paid_trial(SCOPES, runner)
     assert result.trial_failure is TrialStep.BOOT_AND_RUN_ONE_TURN
-    assert result.recovery_failure is failed and not result.factory_boot_requested
+    assert result.recovery_failure is failed
+    assert result.factory_boot_requested is (failed is TrialStep.RECORD_RECOVERY_COMPLETE)
     assert runner.steps == [*INSTALL, *RECOVER[: RECOVER.index(failed) + 1]]
 
 

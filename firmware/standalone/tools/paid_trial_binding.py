@@ -9,11 +9,32 @@ import json
 import os
 import re
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import gettempdir
+from typing import BinaryIO
 
 from esp_app_image import NVS_BYTES, NVS_OFFSET, SLOT_BYTES, SLOT_OFFSET
-from paid_trial_sequence import TrialResult, TrialScopes, TrialStep, run_paid_trial
+from paid_trial_sequence import (
+    TrialResult,
+    TrialScopes,
+    TrialStep,
+    recover_paid_trial,
+    run_paid_trial,
+)
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
+_JOURNAL_LIMIT = 4096
+_RECORDED_PHASES = (
+    TrialStep.RECORD_TRIAL_BOOT_INTENT,
+    TrialStep.RECORD_FACTORY_BOOT_INTENT,
+    TrialStep.RECORD_RECOVERY_COMPLETE,
+)
 
 
 @dataclass(frozen=True)
@@ -102,11 +123,43 @@ def _bind_files(paths: PaidTrialPaths, reviewed: dict, approval: dict) -> BoundP
     )
 
 
+def _lock_operator(guard: BinaryIO) -> None:
+    # Closing the handle (including process exit) releases the lock. Keep the
+    # lock file in place so both operators always lock the same file.
+    if os.name == "nt":
+        guard.seek(0)
+        msvcrt.locking(guard.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _record(**fields: str) -> bytes:
+    return (json.dumps(fields, sort_keys=True) + "\n").encode("ascii")
+
+
+def _saved_phases(journal: bytes, header: bytes) -> set[TrialStep]:
+    rows = journal.splitlines(keepends=True)
+    if rows.pop(0) != header:
+        raise ValueError("trial claim differs from the reviewed files or port")
+    phases = set()
+    for phase in _RECORDED_PHASES:
+        if rows and rows[0] == _record(phase=phase):
+            rows.pop(0)
+            phases.add(phase)
+    if rows or TrialStep.RECORD_RECOVERY_COMPLETE in phases:
+        raise ValueError("trial journal is incomplete, invalid or already recovered")
+    return phases
+
+
 def run_bound_paid_trial(
-    paths: PaidTrialPaths, perform: Callable[[TrialStep, BoundPaidTrial], bool]
+    paths: PaidTrialPaths,
+    perform: Callable[[TrialStep, BoundPaidTrial], bool],
+    *,
+    port: str,
+    recover_only: bool = False,
 ) -> TrialResult:
     claim = paths.review_dir / "install-started.json"
-    if claim.exists():
+    if claim.exists() != recover_only:
         return TrialResult(trial_failure=TrialStep.CLAIM_ONCE)
     manifest_path = paths.review_dir / "review-manifest.json"
     approval_path = paths.review_dir / "approval.json"
@@ -131,18 +184,59 @@ def run_bound_paid_trial(
     except (OSError, KeyError, ValueError, TypeError):
         return TrialResult(approval_rejected=True)
 
+    header = _record(
+        review_sha256=review_sha, approval_sha256=_sha256(approval_document), port=port
+    )
+    journal = b""
+
+    def unchanged_review() -> bool:
+        return (
+            _read_bounded(approval_path, 64 * 1024) == approval_document
+            and _read_bounded(manifest_path, 64 * 1024) == document
+        )
+
     def step_for_review(step: TrialStep) -> bool:
+        nonlocal journal
         if step is TrialStep.CLAIM_ONCE:
-            if (
-                _read_bounded(approval_path, 64 * 1024) != approval_document
-                or _read_bounded(manifest_path, 64 * 1024) != document
-            ):
+            if not unchanged_review():
                 return False
-            with claim.open("x", encoding="ascii") as stream:
-                json.dump({"review_sha256": review_sha}, stream)
+            with claim.open("xb") as stream:
+                stream.write(header)
                 stream.flush()
                 os.fsync(stream.fileno())
+            journal = header
+            return True
+        if step in _RECORDED_PHASES:
+            row = _record(phase=step)
+            with claim.open("r+b") as stream:
+                if stream.read(_JOURNAL_LIMIT + 1) != journal:
+                    return False
+                stream.write(row)
+                stream.flush()
+                os.fsync(stream.fileno())
+            journal += row
             return True
         return perform(step, inputs)
 
-    return run_paid_trial(scopes, step_for_review)
+    # The port guard also applies to another review directory while the robot's
+    # USB cable is disconnected and a serial handle cannot protect the trial.
+    port_key = _sha256(port.casefold().encode("utf-8"))
+    with ExitStack() as guards:
+        try:
+            port_guard = Path(gettempdir()) / f"stackchan-paid-trial-{port_key}.lock"
+            for lock_path in (paths.review_dir / "operator.lock", port_guard):
+                _lock_operator(guards.enter_context(lock_path.open("a+b")))
+            if claim.exists() != recover_only or not unchanged_review():
+                return TrialResult(trial_failure=TrialStep.CLAIM_ONCE)
+            if recover_only:
+                journal = _read_bounded(claim, _JOURNAL_LIMIT)
+                phases = _saved_phases(journal, header)
+        except (OSError, ValueError):
+            return TrialResult(trial_failure=TrialStep.CLAIM_ONCE)
+        if recover_only:
+            return recover_paid_trial(
+                step_for_review,
+                trial_boot_possible=TrialStep.RECORD_TRIAL_BOOT_INTENT in phases,
+                factory_boot_possible=TrialStep.RECORD_FACTORY_BOOT_INTENT in phases,
+            )
+        return run_paid_trial(scopes, step_for_review)

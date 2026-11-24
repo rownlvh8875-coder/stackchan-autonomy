@@ -142,7 +142,7 @@ class _RomPaidTrial:
                 case _:
                     return False
         if step is TrialStep.BOOT_AND_RUN_ONE_TURN:
-            return self.exercise_one_turn() is True
+            return self.exercise_one_turn is not None and self.exercise_one_turn() is True
         return True
 
 
@@ -150,11 +150,13 @@ def run_rom_paid_trial(
     paths: PaidTrialPaths,
     port: str,
     port_available: Callable[[str], bool],
-    exercise_one_turn: Callable[[], bool],
+    exercise_one_turn: Callable[[], bool] | None,
+    *,
+    recover_only: bool = False,
 ) -> TrialResult:
     adapter = _RomPaidTrial(port, port_available, exercise_one_turn)
     try:
-        return run_bound_paid_trial(paths, adapter)
+        return run_bound_paid_trial(paths, adapter, port=port, recover_only=recover_only)
     finally:
         with suppress(OSError):
             adapter.close()
