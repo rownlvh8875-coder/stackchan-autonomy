@@ -23,6 +23,7 @@ SPEAKER_CLOCK_PROTOCOL = "K151_SPEAKER_V3"
 SPEAKER_PROTECTION_PROTOCOL = "K151_SPEAKER_V4"
 SPEAKER_VDD_PROTOCOL = "K151_SPEAKER_V5"
 SPEAKER_STANDBY_UVLS_PROTOCOL = "K151_SPEAKER_V6"
+SPEAKER_RESET_UVLS_PROTOCOL = "K151_SPEAKER_V7"
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
     SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
@@ -30,6 +31,7 @@ SPEAKER_CHALLENGES = {
     SPEAKER_PROTECTION_PROTOCOL: "WAIT_SPEAKER_PROTECTION_LOCAL_START",
     SPEAKER_VDD_PROTOCOL: "WAIT_SPEAKER_VDD_LOCAL_START",
     SPEAKER_STANDBY_UVLS_PROTOCOL: "WAIT_SPEAKER_STANDBY_UVLS_LOCAL_START",
+    SPEAKER_RESET_UVLS_PROTOCOL: "WAIT_SPEAKER_RESET_UVLS_LOCAL_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
@@ -38,6 +40,7 @@ SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTECTION_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V4",
     SPEAKER_VDD_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V5",
     SPEAKER_STANDBY_UVLS_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V6",
+    SPEAKER_RESET_UVLS_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V7",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -157,7 +160,8 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
     )
     result = record.get("result")
     expected_fields = {field, "result", "operating_admission"}
-    standby_report = speaker and speaker_protocol == SPEAKER_STANDBY_UVLS_PROTOCOL
+    reset_report = speaker and speaker_protocol == SPEAKER_RESET_UVLS_PROTOCOL
+    standby_report = reset_report or (speaker and speaker_protocol == SPEAKER_STANDBY_UVLS_PROTOCOL)
     vdd_report = standby_report or (speaker and speaker_protocol == SPEAKER_VDD_PROTOCOL)
     protection_report = vdd_report or (speaker and speaker_protocol == SPEAKER_PROTECTION_PROTOCOL)
     clock_report = protection_report or (speaker and speaker_protocol == SPEAKER_CLOCK_PROTOCOL)
@@ -173,6 +177,8 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
         )
     if standby_report:
         expected_fields.add("standby_uvls")
+    if reset_report:
+        expected_fields.add("reset_uvls")
     if (
         set(record) != expected_fields
         or record.get(field) != protocol
@@ -238,6 +244,18 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
             standby_uvls = record["standby_uvls"]
             if (uvls and type(standby_uvls) is not bool) or (not uvls and standby_uvls is not None):
                 raise ValueError("Invalid speaker standby UVLS observation")
+        if reset_report:
+            reset = record["reset_uvls"]
+            if not isinstance(reset, list) or len(reset) != 3:
+                raise ValueError("Invalid speaker reset UVLS observations")
+            before_tx, before_init, after_init = reset
+            if uvls:
+                if (before_tx is not None and type(before_tx) is not bool) or any(
+                    type(sample) is not bool for sample in (before_init, after_init)
+                ):
+                    raise ValueError("Invalid speaker reset UVLS observations")
+            elif any(sample is not None for sample in reset):
+                raise ValueError("Unexpected speaker reset UVLS observations")
         if not uvls:
             if (elapsed, delay, state, mv) != (-1, -1, "not_requested", 0):
                 raise ValueError("Unexpected speaker VDD observation")

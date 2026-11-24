@@ -191,10 +191,9 @@ bool K151CodecPort::prepare_board() {
   if (rails && !pmic_released) prepare_stage_ = K151MicWakeStage::board_release;
   if (!rails || !pmic_released) return false;
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
-  // This owner task holds the controller and the separate read-only observer
-  // handle. Register it now so the protected failure path only submits a read.
+  // Reserve a read-only observer before the reset and protected startup.
   if (attach_board_device(k151::kProbeAddresses[k151::index(k151::Device::amp_aw88298)]))
-    amp_vdd_observer_ = std::exchange(board_device_, nullptr);
+    amp_observer_ = std::exchange(board_device_, nullptr);
 #endif
 
   // Preserve every unrelated output bit, GPIO mode and direction.
@@ -316,6 +315,25 @@ bool K151CodecPort::prepare_output_codec() {
   vTaskDelay(pdMS_TO_TICKS(10) + 1);
   if (!input_allowed() || !set_amplifier_reset(false)) return false;
   vTaskDelay(pdMS_TO_TICKS(50) + 1);
+  std::optional<bool>* before_codec_init = nullptr;
+  std::optional<bool>* after_codec_init = nullptr;
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  before_codec_init = &speaker_reset_observations_.before_codec_init;
+  after_codec_init = &speaker_reset_observations_.after_codec_init;
+  // The diagnostic takes one read-only SYSST sample before driving TX clocks.
+  // The later standby checks validate the chip identity and retain the existing
+  // protection decision. SYSINT is clear-on-read and is never sampled here.
+  if (amp_observer_ && input_allowed()) {
+    constexpr int kStatusReadTimeoutMs = 10;
+    constexpr uint8_t kStatusRegister = 0x01;
+    std::array<uint8_t, 2> word{};
+    if (i2c_master_transmit_receive(amp_observer_, &kStatusRegister, 1, word.data(),
+                                    word.size(), kStatusReadTimeoutMs) == ESP_OK && input_allowed()) {
+      const uint16_t status = (static_cast<uint16_t>(word[0]) << 8) | word[1];
+      speaker_reset_observations_.before_tx = (status & aw88298_protection::undervoltage) != 0;
+    }
+  }
+#endif
   if (!input_allowed() || i2s_channel_enable(tx_) != ESP_OK || !input_allowed()) return false;
 
   audio_codec_i2c_cfg_t i2c_cfg = {};
@@ -325,7 +343,7 @@ bool K151CodecPort::prepare_output_codec() {
   out_ctrl_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
   gpio_if_ = audio_codec_new_gpio();
   if (!out_ctrl_ || !gpio_if_ || !out_control_.attach(out_ctrl_) ||
-      !out_control_.aw88298_standby_verified() || !input_allowed()) return false;
+      !out_control_.aw88298_standby_verified(before_codec_init) || !input_allowed()) return false;
 
   aw88298_codec_cfg_t out_cfg = {};
   out_cfg.ctrl_if = out_control_.interface();
@@ -336,7 +354,7 @@ bool K151CodecPort::prepare_output_codec() {
   out_cfg.hw_gain.pa_gain = 1;
   out_codec_ = aw88298_codec_new(&out_cfg);
   if (!out_codec_ || !out_control_.muted_startup_verified() ||
-      !out_control_.aw88298_standby_verified() || !input_allowed()) return false;
+      !out_control_.aw88298_standby_verified(after_codec_init) || !input_allowed()) return false;
 
   esp_codec_dev_cfg_t dev_cfg = {};
   dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_OUT;
@@ -502,11 +520,11 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
   if (!allowed() || esp_codec_dev_set_out_vol(out_dev_, kLowVolume) != 0) return fail();
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
   const auto read_voltage = [&]() -> k151::VoltageReading {
-    if (!amp_vdd_observer_) return {k151::PowerSample::not_seen};
+    if (!amp_observer_) return {k151::PowerSample::not_seen};
     constexpr int kVddReadTimeoutMs = 10;
     constexpr uint8_t kVddRegister = 0x12;
     std::array<uint8_t, 2> word{};
-    if (i2c_master_transmit_receive(amp_vdd_observer_, &kVddRegister, 1, word.data(),
+    if (i2c_master_transmit_receive(amp_observer_, &kVddRegister, 1, word.data(),
                                     word.size(), kVddReadTimeoutMs) != ESP_OK)
       return {k151::PowerSample::read_failed};
     return k151::decode_aw88298_vdd((unsigned(word[0]) << 8) | word[1]);
@@ -660,8 +678,8 @@ bool K151CodecPort::shutdown() {
   }
   if (board_device_ && !release_board_device()) cleanup_ok = false;
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
-  if (amp_vdd_observer_ &&
-      i2c_master_bus_rm_device(std::exchange(amp_vdd_observer_, nullptr)) != ESP_OK)
+  if (amp_observer_ &&
+      i2c_master_bus_rm_device(std::exchange(amp_observer_, nullptr)) != ESP_OK)
     cleanup_ok = false;
 #endif
   if (i2c_bus_ && !board_device_) {

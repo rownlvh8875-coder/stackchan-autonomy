@@ -80,7 +80,10 @@ QUESTION = {
 
 class FakeSerial:
     def __init__(self, records):
-        self.input = deque(json.dumps(item).encode("ascii") + b"\n" for item in records)
+        self.input = deque(
+            item if isinstance(item, bytes) else json.dumps(item).encode("ascii") + b"\n"
+            for item in records
+        )
         self.writes = []
 
     def read_until(self, expected, size):
@@ -598,9 +601,20 @@ def test_speaker_protection_report_preserves_only_named_flags_from_a_single_star
         assert port.writes == [b"HELLO\n"]
 
 
-@pytest.mark.parametrize("standby_uvls", [None, False, True])
-def test_speaker_vdd_requires_accepted_uvls_and_rejects_raw_data(receiver, standby_uvls):
-    protocol = "K151_SPEAKER_V5" if standby_uvls is None else "K151_SPEAKER_V6"
+@pytest.mark.parametrize(
+    "protocol,standby_uvls,reset_uvls",
+    [
+        ("K151_SPEAKER_V5", None, None),
+        ("K151_SPEAKER_V6", False, None),
+        ("K151_SPEAKER_V6", True, None),
+        ("K151_SPEAKER_V7", False, [True, False, False]),
+        ("K151_SPEAKER_V7", True, [False, True, True]),
+        ("K151_SPEAKER_V7", True, [None, False, True]),
+    ],
+)
+def test_speaker_vdd_requires_accepted_uvls_and_rejects_raw_data(
+    receiver, protocol, standby_uvls, reset_uvls
+):
     wait = SPEAKER_WAIT | {"mic_trial": receiver.SPEAKER_CHALLENGES[protocol]}
     protection = {
         "ovp2": False,
@@ -624,7 +638,11 @@ def test_speaker_vdd_requires_accepted_uvls_and_rejects_raw_data(receiver, stand
     }
     if standby_uvls is not None:
         report["standby_uvls"] = standby_uvls
-    port = FakeSerial([wait, report, HOLD])
+    if reset_uvls is not None:
+        report["reset_uvls"] = reset_uvls
+    wire = json.dumps(report, separators=(",", ":")).encode("ascii") + b"\n"
+    assert len(wire) <= receiver.WIRE_LIMIT
+    port = FakeSerial([wait, wire, HOLD])
     assert (
         receiver.receive_once(port, lambda: None, speaker=True, speaker_protocol=protocol) == report
     )
@@ -671,6 +689,8 @@ def test_speaker_vdd_requires_accepted_uvls_and_rejects_raw_data(receiver, stand
             "startup_vdd_mv": 0,
             "standby_uvls": None,
         }
+        if reset_uvls is not None:
+            failed_readback["reset_uvls"] = [None, None, None]
         assert (
             receiver.validate_output_report(
                 failed_readback, speaker=True, speaker_protocol=protocol
@@ -681,6 +701,20 @@ def test_speaker_vdd_requires_accepted_uvls_and_rejects_raw_data(receiver, stand
             receiver.validate_output_report(
                 failed_readback | {"standby_uvls": False}, speaker=True, speaker_protocol=protocol
             )
+        if reset_uvls is not None:
+            for invalid_reset in (None, [False, False], [0, True, True], [False, None, False]):
+                with pytest.raises(ValueError):
+                    receiver.validate_output_report(
+                        report | {"reset_uvls": invalid_reset},
+                        speaker=True,
+                        speaker_protocol=protocol,
+                    )
+            with pytest.raises(ValueError):
+                receiver.validate_output_report(
+                    failed_readback | {"reset_uvls": reset_uvls},
+                    speaker=True,
+                    speaker_protocol=protocol,
+                )
 
 
 @pytest.mark.parametrize(
@@ -738,6 +772,7 @@ def test_silent_tx_challenge_cannot_start_the_wrong_image(receiver, challenge, s
         "K151_SPEAKER_V4",
         "K151_SPEAKER_V5",
         "K151_SPEAKER_V6",
+        "K151_SPEAKER_V7",
     ],
 )
 def test_output_trial_binds_approval_and_install_to_exact_review(

@@ -44,11 +44,13 @@ K151SpeakerProbeReport run_k151_speaker_probe(const std::atomic_bool& owner,
   K151PcmSpeakerSink sink{codec, stop, owner, owner};
   const auto finish = [&](Result result, K151SpeakerStartupDiagnostic startup = {})
       -> K151SpeakerProbeReport {
+    const auto reset = startup.standby_uvls.has_value() ? codec.speaker_reset_observations()
+                                                       : K151SpeakerResetObservations{};
     if (audio.state() == AudioState::playback) audio.stop();
     const bool released = codec.shutdown();
     if (codec.cleanup_unverified() || (result == Result::observed && !released))
-      return {Result::cleanup_failed, startup};
-    return allowed() ? K151SpeakerProbeReport{result, startup}
+      return {Result::cleanup_failed, startup, reset};
+    return allowed() ? K151SpeakerProbeReport{result, startup, reset}
                      : K151SpeakerProbeReport{Result::stopped};
   };
   if (!audio.initialize(allowed(), evidence.verified())) return finish(Result::codec_prepare_failed);

@@ -46,4 +46,10 @@ struct K151SpeakerStartupDiagnostic {
   std::optional<bool> standby_uvls{};
 };
 
+struct K151SpeakerResetObservations {
+  std::optional<bool> before_tx{};
+  std::optional<bool> before_codec_init{};
+  std::optional<bool> after_codec_init{};
+};
+
 } // namespace stackchan::standalone

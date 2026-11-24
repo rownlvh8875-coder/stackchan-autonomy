@@ -14,6 +14,7 @@ enum class K151SpeakerProbeResult {
 struct K151SpeakerProbeReport {
   K151SpeakerProbeResult result;
   K151SpeakerStartupDiagnostic startup{};
+  K151SpeakerResetObservations reset{};
 };
 
 // This is linked only into the separate TX-only synthetic speaker image.

@@ -62,6 +62,9 @@ class K151CodecPort final {
   }
   K151MicWakeStage prepare_stage() const { return prepare_stage_; }
   K151SpeakerStartupDiagnostic speaker_startup() const { return speaker_startup_; }
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  K151SpeakerResetObservations speaker_reset_observations() const { return speaker_reset_observations_; }
+#endif
   bool cleanup_unverified() const { return cleanup_unverified_; }
 
  private:
@@ -98,7 +101,8 @@ class K151CodecPort final {
   bool owns_i2c_bus_ = false;
   i2c_master_dev_handle_t board_device_ = nullptr;
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
-  i2c_master_dev_handle_t amp_vdd_observer_ = nullptr;
+  i2c_master_dev_handle_t amp_observer_ = nullptr;
+  K151SpeakerResetObservations speaker_reset_observations_{};
 #endif
   i2s_chan_handle_t tx_ = nullptr;
   i2s_chan_handle_t rx_ = nullptr;

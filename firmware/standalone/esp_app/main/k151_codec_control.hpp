@@ -42,11 +42,14 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     return profile_ == Profile::aw88298_muted_startup &&
            verified_ == (kPowerVerified | kMuteVerified | kAttenuationVerified) && healthy();
   }
-  bool aw88298_standby_verified() {
+  bool aw88298_standby_verified(std::optional<bool>* uvls = nullptr) {
     if (profile_ != Profile::aw88298_muted_startup || !healthy()) return false;
-    return standby_registers_verified([&](int reg, std::array<uint8_t, 2>& value) {
+    uint16_t status{};
+    const bool verified = standby_registers_verified([&](int reg, std::array<uint8_t, 2>& value) {
       return read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK;
-    });
+    }, uvls ? &status : nullptr);
+    if (uvls && verified) *uvls = (status & aw88298_protection::undervoltage) != 0;
+    return verified;
   }
   bool request_aw88298_standby() {
     if (profile_ != Profile::aw88298_muted_startup || !opened(this)) return false;

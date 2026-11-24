@@ -33,6 +33,7 @@ i2c_master_dev_t pmic{0x34}, expander{0x58};
 i2c_master_dev_t menu_sensor{0x68};
 i2c_master_dev_t amp_monitor{0x36};
 int amp_monitor_reads=0;
+int amp_pre_tx_reads=0;
 int reset_writes=0, reset_waits=0, expander_removes=0;
 uint8_t output_latch=0xa7;
 bool reset_read_back=false;
@@ -176,6 +177,10 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
                                  mode == "speaker_probe_clock_and_release_failure";
       bytes[1] = tx.enabled && (power & 1) == 0 && !clock_missing ? 0x11 : 0;
       if (mode.starts_with("speaker_probe_uvls_") && power == 0x42) bytes[0] |= 0x40;
+      if (power == 0x03 &&
+          ((phase.empty() && mode=="speaker_probe_uvls_before_codec_init") ||
+           (phase=="init" && mode=="speaker_probe_uvls_after_codec_init")))
+        bytes[0] |= 0x40;
     }
     return ESP_CODEC_DEV_OK;
   }
@@ -370,7 +375,16 @@ extern "C" esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev,
                                                  const uint8_t* reg,size_t n,
                                                  uint8_t* value,size_t bytes,int ms) {
   if (dev==&amp_monitor) {
-    assert(bus.alive && dev->open && n==1 && *reg==0x12 && bytes==2 && ms==10);
+    assert(bus.alive && dev->open && n==1 && bytes==2 && ms==10);
+    if (*reg==0x01) {
+      assert(!tx.enabled && !rx.enabled && (output_latch & 0x04) && reset_waits==2);
+      ++amp_pre_tx_reads;
+      value[0]=mode=="speaker_probe_uvls_before_tx" ? 0x40 : 0;
+      value[1]=0;
+      if (mode=="speaker_probe_stop_on_pre_tx_status") local_stop=true;
+      return mode=="speaker_probe_uvls_pre_tx_read_failed" ? ESP_FAIL : ESP_OK;
+    }
+    assert(*reg==0x12);
     assert((amp_registers[0x04][1] & 0x43) == 0x42 && (amp_registers[0x05][1] & 0x10));
     ++amp_monitor_reads;
     value[0]=0x01; value[1]=0xa8;
@@ -719,9 +733,15 @@ int main(int argc,char** argv) {
       assert(bus_created==0 && channels_created==0 && calls==0);
       return 0;
     }
+    assert(amp_pre_tx_reads==(mode=="speaker_probe_uvls_not_seen" || mode=="speaker_probe_paired"
+                                  ? 0 : 1));
     if (mode=="speaker_probe_ok") {
       assert(result==Result::observed && speaker_peak==4096 && calls==25 && speaker_eof==7);
       assert(run_k151_speaker_probe(local_owner,local_stop,{true,true}).result==Result::denied);
+    } else if (mode=="speaker_probe_stop_on_pre_tx_status") {
+      assert(result==Result::stopped && created==0 && !speaker_unmuted && calls==0);
+      assert(!report.reset.before_tx && !report.reset.before_codec_init &&
+             !report.reset.after_codec_init);
     } else if (mode=="speaker_probe_stop_write") {
       assert(result==Result::stopped && calls==1 && speaker_eof==0);
     } else if (mode=="speaker_probe_write_failure" || mode=="speaker_probe_dma_failure") {
@@ -760,6 +780,12 @@ int main(int argc,char** argv) {
       assert(report.startup.uvls_after_clock_us==0 && report.startup.vdd.state==expected);
       assert(report.startup.vdd.mv==(expected==Power::sampled ? 2497 : 0));
       assert(amp_monitor_reads==(expected==Power::not_seen ? 0 : 1));
+      if (mode=="speaker_probe_uvls_not_seen" || mode=="speaker_probe_uvls_pre_tx_read_failed")
+        assert(!report.reset.before_tx.has_value());
+      else
+        assert(report.reset.before_tx==(mode=="speaker_probe_uvls_before_tx"));
+      assert(report.reset.before_codec_init==(mode=="speaker_probe_uvls_before_codec_init"));
+      assert(report.reset.after_codec_init==(mode=="speaker_probe_uvls_after_codec_init"));
     } else if (report.startup.stage==Stage::wait_clock) {
       assert(report.startup.clock_wait_exit==K151ClockWaitExit::poll_limit);
       assert(report.startup.clock_wait_last==K151ClockWaitSample::pll_unlocked);
