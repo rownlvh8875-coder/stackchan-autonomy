@@ -506,6 +506,38 @@ def test_speaker_startup_report_requires_its_own_challenge_and_fixed_stage(recei
             receiver.validate_output_report(invalid, speaker=True, speaker_protocol=protocol)
 
 
+def test_speaker_clock_report_preserves_exit_and_last_accepted_sample(receiver):
+    protocol = receiver.SPEAKER_CLOCK_PROTOCOL
+    wait = SPEAKER_WAIT | {"mic_trial": receiver.SPEAKER_CHALLENGES[protocol]}
+    report = SPEAKER_REPORT | {
+        "speaker_probe": protocol,
+        "result": "amplifier_start_failed",
+        "startup_stage": "wait_clock",
+        "clock_wait_exit": "startup_deadline",
+        "clock_wait_last": "reference_missing",
+    }
+    port = FakeSerial([wait, report, HOLD])
+    assert (
+        receiver.receive_once(port, lambda: None, speaker=True, speaker_protocol=protocol) == report
+    )
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n"]
+    cleanup_fault = report | {"result": "cleanup_failed"}
+    assert (
+        receiver.validate_output_report(cleanup_fault, speaker=True, speaker_protocol=protocol)
+        == cleanup_fault
+    )
+    for invalid in (
+        report | {"clock_wait_exit": "none"},
+        report | {"clock_wait_last": "none"},
+        report | {"clock_wait_last": "0x1234"},
+        report | {"clock_wait_exit": ["startup_deadline"]},
+        report | {"startup_stage": "codec_open"},
+        {key: value for key, value in report.items() if key != "clock_wait_last"},
+    ):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(invalid, speaker=True, speaker_protocol=protocol)
+
+
 @pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )
@@ -551,7 +583,9 @@ def test_silent_tx_challenge_cannot_start_the_wrong_image(receiver, challenge, s
     assert port.writes == [b"HELLO\n"]
 
 
-@pytest.mark.parametrize("speaker_protocol", [None, "K151_SPEAKER_V1", "K151_SPEAKER_V2"])
+@pytest.mark.parametrize(
+    "speaker_protocol", [None, "K151_SPEAKER_V1", "K151_SPEAKER_V2", "K151_SPEAKER_V3"]
+)
 def test_output_trial_binds_approval_and_install_to_exact_review(
     receiver, tmp_path, speaker_protocol
 ):

@@ -28,6 +28,7 @@ def inspect_image(
         protocols = {
             "K151_SPEAKER_V1": b"WAIT_SPEAKER_LOCAL_START\0",
             "K151_SPEAKER_V2": b"WAIT_SPEAKER_STARTUP_LOCAL_START\0",
+            "K151_SPEAKER_V3": b"WAIT_SPEAKER_CLOCK_LOCAL_START\0",
         }
         observed = [protocol for protocol in protocols if protocol.encode() in app]
         forbidden = (
@@ -41,7 +42,11 @@ def inspect_image(
             or protocols[observed[0]] not in app
             or b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0" not in app
             or any(marker in app for marker in forbidden)
-            or (observed[0] == "K151_SPEAKER_V2" and b'"startup_stage"' not in app)
+            or (observed[0] != "K151_SPEAKER_V1" and b'"startup_stage"' not in app)
+            or (
+                observed[0] == "K151_SPEAKER_V3"
+                and (b'"clock_wait_exit"' not in app or b'"clock_wait_last"' not in app)
+            )
         ):
             raise ValueError("Unexpected speaker diagnostic image")
         return {

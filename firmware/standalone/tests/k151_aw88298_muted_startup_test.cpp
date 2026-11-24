@@ -26,6 +26,9 @@ bool is_open(const audio_codec_ctrl_if_t* h) { return h == &i2c; }
 int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* output, int bytes) {
   assert(h == &i2c && address_bytes == 1 && bytes == 2);
   if (scenario == "read_failure" && reg == 0x05) return ESP_CODEC_DEV_READ_FAIL;
+  if (activating && reg == 0x01 && (registers[0x04] & 0x43) == 0x42 &&
+      scenario == "start_clock_read_failure")
+    return ESP_CODEC_DEV_READ_FAIL;
   if (standby_request && scenario == "standby_mute_read_fail" && reg == 0x05)
     return ESP_CODEC_DEV_READ_FAIL;
   auto value = registers.at(reg);
@@ -47,6 +50,10 @@ int write(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* inpu
       assert((registers[0x04] & 0x43) == 0x03);
       if (scenario != "start_no_clock" && scenario != "start_frozen_clock")
         registers[0x01] = 0x0011;
+      if (scenario == "start_reference_missing") registers[0x01] = 0x0020;
+      if (scenario == "start_clock_unstable") registers[0x01] = 0x0001;
+      if (scenario == "start_clock_protection") registers[0x01] = 0x0019;
+      if (scenario == "start_early_switching") registers[0x01] = 0x0111;
     } else {
       assert((word & 0x43) == 0x40);
       assert((registers[0x04] & 0x43) == 0x42 && (registers[0x01] & 0x31) == 0x11);
@@ -138,18 +145,40 @@ int main(int argc, char** argv) {
       const int before = writes;
       activating = true;
       using Stage = K151SpeakerStartupStage;
-      const auto stage = guarded.start_aw88298_low_volume(
+      using Exit = K151ClockWaitExit;
+      using Sample = K151ClockWaitSample;
+      const auto startup = guarded.start_aw88298_low_volume(
           [] { return allowed; }, [] { return now_us; }, [] {
-            if (scenario != "start_frozen_clock")
-              now_us += scenario == "start_clock_reversed" ? -1 : 1000;
+            if (scenario == "start_clock_reversed") --now_us;
+            else if (scenario != "start_frozen_clock")
+              now_us += scenario == "start_no_clock" ? 1200 : 1000;
             if (scenario == "start_revoked_while_muted") allowed = false;
           });
       activating = false;
       const bool success = scenario == "start_low_volume";
       const bool side_effect = success || scenario == "start_revoked_at_unmute" ||
                                scenario == "start_clock_lost_at_unmute";
+      const auto stage = startup.stage;
       assert((stage == Stage::none) == success && unmuted == side_effect);
-      if (scenario == "start_no_clock") assert(stage == Stage::wait_clock);
+      const auto check_wait = [&](Exit reason, Sample sample) {
+        assert(stage == Stage::wait_clock && startup.clock_wait_exit == reason &&
+               startup.clock_wait_last == sample);
+      };
+      if (scenario == "start_no_clock") check_wait(Exit::startup_deadline, Sample::pll_unlocked);
+      if (scenario == "start_reference_missing")
+        check_wait(Exit::poll_limit, Sample::reference_missing);
+      if (scenario == "start_clock_unstable")
+        check_wait(Exit::poll_limit, Sample::internal_unstable);
+      if (scenario == "start_clock_protection")
+        check_wait(Exit::protection_active, Sample::stable);
+      if (scenario == "start_early_switching") check_wait(Exit::early_switching, Sample::stable);
+      if (scenario == "start_clock_read_failure")
+        check_wait(Exit::status_read_failed, Sample::unobserved);
+      if (scenario == "start_clock_reversed") check_wait(Exit::timer_regressed, Sample::stable);
+      if (scenario == "start_frozen_clock") check_wait(Exit::poll_limit, Sample::pll_unlocked);
+      if (scenario == "start_revoked_while_muted") check_wait(Exit::admission_lost, Sample::stable);
+      if (stage != Stage::wait_clock)
+        assert(startup.clock_wait_exit == Exit::none && startup.clock_wait_last == Sample::none);
       if (scenario == "start_no_switching" || scenario == "start_fault")
         assert(stage == Stage::wait_switching);
       if (scenario == "start_excess_gain") assert(stage == Stage::attenuation);
@@ -164,7 +193,8 @@ int main(int argc, char** argv) {
       standby_request = true;
       assert(guarded.request_aw88298_standby());
       standby_request = false;
-      assert(guarded.aw88298_standby_verified());
+      assert(guarded.aw88298_standby_verified() == (scenario != "start_clock_read_failure"));
+      if (scenario == "start_clock_read_failure") guarded.begin_cleanup();
     }
     if (scenario.starts_with("standby")) {
       // Begin with an emulated active register state. No physical amp is opened.

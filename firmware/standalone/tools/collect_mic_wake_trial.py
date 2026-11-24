@@ -19,13 +19,16 @@ SILENT_TX_PROTOCOL = "K151_SILENT_TX_V1"
 SPEAKER_SCOPE = "ONE_SYNTHETIC_SPEAKER_PROBE_AND_OTA1_RESTORE"
 SPEAKER_PROTOCOL = "K151_SPEAKER_V1"
 SPEAKER_STARTUP_PROTOCOL = "K151_SPEAKER_V2"
+SPEAKER_CLOCK_PROTOCOL = "K151_SPEAKER_V3"
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
     SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
+    SPEAKER_CLOCK_PROTOCOL: "WAIT_SPEAKER_CLOCK_LOCAL_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
     SPEAKER_STARTUP_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V2",
+    SPEAKER_CLOCK_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V3",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -70,6 +73,22 @@ SPEAKER_STARTUP_STAGES = {
     "pre_unmute_status",
     "unmute",
     "post_unmute_status",
+}
+SPEAKER_CLOCK_WAIT_EXITS = {
+    "admission_lost",
+    "timer_regressed",
+    "startup_deadline",
+    "poll_limit",
+    "status_read_failed",
+    "protection_active",
+    "early_switching",
+}
+SPEAKER_CLOCK_WAIT_SAMPLES = {
+    "unobserved",
+    "reference_missing",
+    "pll_unlocked",
+    "internal_unstable",
+    "stable",
 }
 WIRE_LIMIT = 512
 QUESTION_BEFORE_CUE = {"not_run", "memory_denied", "prepare_failed", "open_failed", "quiet_timeout"}
@@ -121,8 +140,11 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
     )
     result = record.get("result")
     expected_fields = {field, "result", "operating_admission"}
-    if speaker and speaker_protocol == SPEAKER_STARTUP_PROTOCOL:
+    clock_report = speaker and speaker_protocol == SPEAKER_CLOCK_PROTOCOL
+    if speaker and speaker_protocol in (SPEAKER_STARTUP_PROTOCOL, SPEAKER_CLOCK_PROTOCOL):
         expected_fields.add("startup_stage")
+    if clock_report:
+        expected_fields.update(("clock_wait_exit", "clock_wait_last"))
     if (
         set(record) != expected_fields
         or record.get(field) != protocol
@@ -143,6 +165,18 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
             allowed = {"none"}
         if stage not in allowed:
             raise ValueError("Invalid speaker startup checkpoint")
+    if clock_report:
+        reason, sample = record["clock_wait_exit"], record["clock_wait_last"]
+        if record["startup_stage"] == "wait_clock":
+            if (
+                not isinstance(reason, str)
+                or reason not in SPEAKER_CLOCK_WAIT_EXITS
+                or not isinstance(sample, str)
+                or sample not in SPEAKER_CLOCK_WAIT_SAMPLES
+            ):
+                raise ValueError("Invalid speaker clock wait diagnostic")
+        elif (reason, sample) != ("none", "none"):
+            raise ValueError("Unexpected speaker clock wait diagnostic")
     return record
 
 
@@ -219,6 +253,7 @@ def receive_once(
                 "WAIT_SILENT_TX_LOCAL_START",
                 "WAIT_SPEAKER_LOCAL_START",
                 "WAIT_SPEAKER_STARTUP_LOCAL_START",
+                "WAIT_SPEAKER_CLOCK_LOCAL_START",
             ):
                 nonce = record.get("nonce")
                 if (

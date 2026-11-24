@@ -127,15 +127,18 @@ def test_silent_tx_image_is_distinct_and_has_no_voice_trial(model_fixture):
         )
 
 
-@pytest.mark.parametrize("protocol", ["K151_SPEAKER_V1", "K151_SPEAKER_V2"])
+@pytest.mark.parametrize("protocol", ["K151_SPEAKER_V1", "K151_SPEAKER_V2", "K151_SPEAKER_V3"])
 def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, protocol):
     from check_mic_wake_image import inspect_image
 
-    challenge = (
-        b"WAIT_SPEAKER_LOCAL_START\0"
-        if protocol == "K151_SPEAKER_V1"
-        else b'WAIT_SPEAKER_STARTUP_LOCAL_START\0"startup_stage"\0'
-    )
+    challenge = {
+        "K151_SPEAKER_V1": b"WAIT_SPEAKER_LOCAL_START\0",
+        "K151_SPEAKER_V2": b'WAIT_SPEAKER_STARTUP_LOCAL_START\0"startup_stage"\0',
+        "K151_SPEAKER_V3": (
+            b'WAIT_SPEAKER_CLOCK_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0'
+        ),
+    }[protocol]
     markers = b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0" + challenge + protocol.encode() + b"\0"
     project = b"k151_speaker_probe"
     manifest = inspect_image(image(markers, project=project), ELF_SHA, SLOT_CSV, speaker=True)

@@ -63,13 +63,18 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
   // The caller owns the enabled I2S TX and must close through standby or reset
   // on failure, including revocation detected during the unmute transaction.
   template <typename Allowed, typename Clock, typename Pause>
-  [[nodiscard]] K151SpeakerStartupStage start_aw88298_low_volume(Allowed allowed, Clock clock,
-                                                                Pause pause) {
+  [[nodiscard]] K151SpeakerStartupDiagnostic start_aw88298_low_volume(Allowed allowed, Clock clock,
+                                                                     Pause pause) {
     using Stage = K151SpeakerStartupStage;
+    using Exit = K151ClockWaitExit;
+    using Sample = K151ClockWaitSample;
     constexpr int64_t kStartupLimitUs = 100'000;
     constexpr int64_t kStageSettleUs = 2'000;
-    constexpr uint16_t kClockMask = 0x0031; // NOCLKS, CLKS, PLLS
-    constexpr uint16_t kClockLocked = 0x0011;
+    constexpr uint16_t kNoReference = 0x0020; // NOCLKS
+    constexpr uint16_t kInternalClock = 0x0010; // CLKS
+    constexpr uint16_t kPllLocked = 0x0001; // PLLS
+    constexpr uint16_t kClockLocked = kInternalClock | kPllLocked;
+    constexpr uint16_t kClockMask = kNoReference | kClockLocked;
     constexpr uint16_t kSwitching = 0x0100;
     constexpr uint16_t kHardFaults = 0xcc0a; // OVP2, UVL, BSTOC, OVP, OCD, OTH
     constexpr uint8_t kPowerMask = 0x43; // I2SEN, AMPPD, PWDN
@@ -77,19 +82,36 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
     constexpr uint8_t kOperating = 0x40;
     constexpr uint8_t kHardMute = 0x10;
 
-    if (!allowed() || !muted_startup_verified()) return Stage::muted_admission;
+    if (!allowed() || !muted_startup_verified()) return {Stage::muted_admission};
     const int64_t started = clock();
-    if (started < 0) return Stage::clock_origin;
+    if (started < 0) return {Stage::clock_origin};
     int64_t sampled = started;
+    auto wait_exit = Exit::none;
+    auto last_status = Sample::unobserved;
     const auto live = [&] {
-      if (!allowed() || !healthy()) return false;
+      if (!allowed() || !healthy()) {
+        wait_exit = Exit::admission_lost;
+        return false;
+      }
       const int64_t observed = clock();
-      if (observed < sampled || observed - started >= kStartupLimitUs) return false;
+      if (observed < sampled) {
+        wait_exit = Exit::timer_regressed;
+        return false;
+      }
+      if (observed - started >= kStartupLimitUs) {
+        wait_exit = Exit::startup_deadline;
+        return false;
+      }
       sampled = observed;
       return true;
     };
     const auto read_live = [&](int reg, std::array<uint8_t, 2>& value) {
-      return live() && read(this, reg, 1, value.data(), value.size()) == ESP_CODEC_DEV_OK && live();
+      if (!live()) return false;
+      if (read(this, reg, 1, value.data(), value.size()) != ESP_CODEC_DEV_OK) {
+        wait_exit = Exit::status_read_failed;
+        return false;
+      }
+      return live();
     };
     const auto transition = [&](int reg, uint8_t mask, uint8_t before, uint8_t after) {
       std::array<uint8_t, 2> value{};
@@ -108,7 +130,15 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
       std::array<uint8_t, 2> value{};
       if (!read_live(0x01, value)) return false; // SYSST is not clear-on-read.
       status = (static_cast<uint16_t>(value[0]) << 8) | value[1];
-      return (status & kHardFaults) == 0;
+      if (status & kNoReference) last_status = Sample::reference_missing;
+      else if (!(status & kPllLocked)) last_status = Sample::pll_unlocked;
+      else if (!(status & kInternalClock)) last_status = Sample::internal_unstable;
+      else last_status = Sample::stable;
+      if (status & kHardFaults) {
+        wait_exit = Exit::protection_active;
+        return false;
+      }
+      return true;
     };
     const auto await_stage = [&](bool operating) {
       const int64_t stage_started = sampled; // Sampled after the stage write/readback.
@@ -116,31 +146,36 @@ class K151CodecControl final : private audio_codec_ctrl_if_t {
       // The poll count also bounds failure if the injected clock never advances.
       for (int poll = 0; poll < 100; ++poll) {
         uint16_t status{};
-        if (!read_status(status) || (!operating && (status & kSwitching))) return false;
+        if (!read_status(status)) return false;
+        if (!operating && (status & kSwitching)) {
+          wait_exit = Exit::early_switching;
+          return false;
+        }
         if (sampled - stage_started >= kStageSettleUs &&
             (status & (kClockMask | kSwitching)) == expected) return true;
         if (!live()) return false;
         pause();
       }
+      wait_exit = Exit::poll_limit;
       return false;
     };
 
     std::array<uint8_t, 2> value{};
-    if (!standby_registers_verified(read_live)) return Stage::standby_readback;
-    if (!transition(0x04, kPowerMask, 0x03, kConfiguring)) return Stage::clock_enable;
-    if (!await_stage(false)) return Stage::wait_clock;
-    if (!read_live(0x05, value) || !(value[1] & kHardMute)) return Stage::mute_readback;
-    if (!transition(0x04, kPowerMask, kConfiguring, kOperating)) return Stage::amplifier_enable;
-    if (!await_stage(true)) return Stage::wait_switching;
+    if (!standby_registers_verified(read_live)) return {Stage::standby_readback};
+    if (!transition(0x04, kPowerMask, 0x03, kConfiguring)) return {Stage::clock_enable};
+    if (!await_stage(false)) return {Stage::wait_clock, wait_exit, last_status};
+    if (!read_live(0x05, value) || !(value[1] & kHardMute)) return {Stage::mute_readback};
+    if (!transition(0x04, kPowerMask, kConfiguring, kOperating)) return {Stage::amplifier_enable};
+    if (!await_stage(true)) return {Stage::wait_switching};
     if (!read_live(0x0c, value) || value[0] < kMinAttenuation || value[0] > kMaxAttenuation)
-      return Stage::attenuation;
+      return {Stage::attenuation};
     uint16_t status{};
     constexpr auto kStatusMask = kClockMask | kSwitching;
     constexpr auto kReady = kClockLocked | kSwitching;
-    if (!read_status(status) || (status & kStatusMask) != kReady) return Stage::pre_unmute_status;
-    if (!transition(0x05, kHardMute, kHardMute, 0)) return Stage::unmute;
-    if (!read_status(status) || (status & kStatusMask) != kReady) return Stage::post_unmute_status;
-    return Stage::none;
+    if (!read_status(status) || (status & kStatusMask) != kReady) return {Stage::pre_unmute_status};
+    if (!transition(0x05, kHardMute, kHardMute, 0)) return {Stage::unmute};
+    if (!read_status(status) || (status & kStatusMask) != kReady) return {Stage::post_unmute_status};
+    return {};
   }
  private:
   static constexpr uint8_t kPowerVerified = 1, kMuteVerified = 2, kAttenuationVerified = 4;

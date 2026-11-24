@@ -716,12 +716,12 @@ int main(int argc,char** argv) {
           mode=="speaker_probe_codec_open"?Stage::codec_open:
           mode=="speaker_probe_tx_state"?Stage::i2s_tx_state:
           mode=="speaker_probe_volume"?Stage::volume:Stage::wait_clock;
-      assert(report.startup_stage==expected);
+      assert(report.startup.stage==expected);
     } else if (mode=="speaker_probe_clock_and_release_failure") {
-      assert(result==Result::cleanup_failed && report.startup_stage==Stage::wait_clock);
+      assert(result==Result::cleanup_failed && report.startup.stage==Stage::wait_clock);
       assert(!speaker_unmuted && calls==0);
     } else if (mode=="speaker_probe_codec_ready") {
-      assert(result==Result::cleanup_failed && report.startup_stage==Stage::codec_ready);
+      assert(result==Result::cleanup_failed && report.startup.stage==Stage::codec_ready);
       assert(!speaker_unmuted && calls==0);
     } else if (mode=="speaker_probe_paired") {
       assert(result==Result::codec_prepare_failed && !speaker_unmuted && calls==0);
@@ -730,7 +730,14 @@ int main(int argc,char** argv) {
     }
     if (result!=Result::amplifier_start_failed && mode!="speaker_probe_clock_and_release_failure" &&
         mode!="speaker_probe_codec_ready")
-      assert(report.startup_stage==Stage::none);
+      assert(report.startup.stage==Stage::none);
+    if (report.startup.stage==Stage::wait_clock) {
+      assert(report.startup.clock_wait_exit==K151ClockWaitExit::poll_limit);
+      assert(report.startup.clock_wait_last==K151ClockWaitSample::pll_unlocked);
+    } else {
+      assert(report.startup.clock_wait_exit==K151ClockWaitExit::none);
+      assert(report.startup.clock_wait_last==K151ClockWaitSample::none);
+    }
     assert(!rx.enabled && rx.deletes==0 && tdm_inits==0 && gains==0);
     assert(!tx.enabled && output_latch==0xa3 && !bus.alive);
     assert(created<=1 && created==deleted && legacy_calls==0);

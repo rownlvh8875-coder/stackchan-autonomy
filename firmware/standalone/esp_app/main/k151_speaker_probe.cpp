@@ -42,17 +42,19 @@ K151SpeakerProbeReport run_k151_speaker_probe(const std::atomic_bool& owner,
   // playback. This image links no cloud client or microphone codec.
   AudioGuard audio{k151_audio_hooks(codec, owner, stop, owner, evidence)};
   K151PcmSpeakerSink sink{codec, stop, owner, owner};
-  const auto finish = [&](Result result, Stage stage = Stage::none) -> K151SpeakerProbeReport {
+  const auto finish = [&](Result result, K151SpeakerStartupDiagnostic startup = {})
+      -> K151SpeakerProbeReport {
     if (audio.state() == AudioState::playback) audio.stop();
     const bool released = codec.shutdown();
     if (codec.cleanup_unverified() || (result == Result::observed && !released))
-      return {Result::cleanup_failed, stage};
-    return allowed() ? K151SpeakerProbeReport{result, stage} : K151SpeakerProbeReport{Result::stopped};
+      return {Result::cleanup_failed, startup};
+    return allowed() ? K151SpeakerProbeReport{result, startup}
+                     : K151SpeakerProbeReport{Result::stopped};
   };
   if (!audio.initialize(allowed(), evidence.verified())) return finish(Result::codec_prepare_failed);
   if (!allowed()) return finish(Result::stopped);
   if (!audio.playback_begin())
-    return finish(Result::amplifier_start_failed, codec.speaker_startup_stage());
+    return finish(Result::amplifier_start_failed, codec.speaker_startup());
   const auto started_us = esp_timer_get_time();
   if (started_us < 0) return finish(Result::clock_fault);
   const auto playback = sink.play_pcm24k(tone, static_cast<uint64_t>(started_us / 1000));
@@ -82,6 +84,34 @@ const char* speaker_startup_stage_name(Stage stage) {
     case Stage::pre_unmute_status: return "pre_unmute_status";
     case Stage::unmute: return "unmute";
     case Stage::post_unmute_status: return "post_unmute_status";
+  }
+  return nullptr;
+}
+
+const char* speaker_clock_wait_exit_name(K151ClockWaitExit reason) {
+  using Exit = K151ClockWaitExit;
+  switch (reason) {
+    case Exit::none: return "none";
+    case Exit::admission_lost: return "admission_lost";
+    case Exit::timer_regressed: return "timer_regressed";
+    case Exit::startup_deadline: return "startup_deadline";
+    case Exit::poll_limit: return "poll_limit";
+    case Exit::status_read_failed: return "status_read_failed";
+    case Exit::protection_active: return "protection_active";
+    case Exit::early_switching: return "early_switching";
+  }
+  return nullptr;
+}
+
+const char* speaker_clock_wait_sample_name(K151ClockWaitSample sample) {
+  using Sample = K151ClockWaitSample;
+  switch (sample) {
+    case Sample::none: return "none";
+    case Sample::unobserved: return "unobserved";
+    case Sample::reference_missing: return "reference_missing";
+    case Sample::pll_unlocked: return "pll_unlocked";
+    case Sample::internal_unstable: return "internal_unstable";
+    case Sample::stable: return "stable";
   }
   return nullptr;
 }

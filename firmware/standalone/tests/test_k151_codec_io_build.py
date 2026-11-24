@@ -689,6 +689,11 @@ def test_real_aw88298_startup_stays_quiet(aw88298_startup_binary, mode):
     [
         "start_low_volume",
         "start_no_clock",
+        "start_reference_missing",
+        "start_clock_unstable",
+        "start_clock_protection",
+        "start_early_switching",
+        "start_clock_read_failure",
         "start_no_switching",
         "start_excess_gain",
         "start_fault",
