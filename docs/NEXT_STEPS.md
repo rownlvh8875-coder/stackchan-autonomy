@@ -1,5 +1,20 @@
 # Next steps
 
+## 2026-11-24 실물 후속 — 대기 전원 상태 확인
+
+전원 전용 진단 1회에서 AXP2101은 대기 상태의 VSYS를 4.443V로
+보고했다. AW88298은 `powered_down`이어서 VDD와 UVLS 표본을
+얻지 않았다. V4의 클럭 활성화 시점에서 발생한 저전압 표시의 원인은
+미확인이다. 원본 OTA1 독립 해시와 OTA 메타데이터를 확인했고,
+출고 재부팅 요청 이후 COM3가 복귀했다.
+[실물 결과와 복구 기록](validation/2026-11-24-k151-speaker-live.md#전원-전용-실물-결과와-출고-복구)
+
+같은 소스의 GitHub CI는 8/9였다. push Windows/Python 3.12의 Mock
+soak는 `lease_renew/sqlite_commit`에서 기한을 넘겨 안전 정지했다.
+Windows에서 커밋 지연을 한 번 주입해 같은 시간 초과 분류와 정지를
+재현했다. GitHub 환경에서 커밋이 지연된 원인은 미확인이다.
+[Windows 실패와 유한 재현 기록](validation/2026-11-24-k151-speaker-live.md#동일-소스의-ci와-windows-모의-재현)
+
 ## 2026-11-24 오프라인 후속 — 전원 전용 읽기 진단
 
 공개 출고 코드의 AXP2101 초기화는 전압 ADC를 켠다. V4의 앰프 준비는

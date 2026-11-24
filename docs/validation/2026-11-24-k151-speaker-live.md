@@ -102,3 +102,46 @@ NVS, assets 및 eFuse는 쓰기 범위에서 제외했다. 마이크 사용, 음
 오프라인 조사에서는 출고 코드와 진단 코드의 전원 초기화 순서를 대조한다.
 [AW88298 데이터시트의 SYSST 표](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=31)
 [M5Stack StackChan 호스트 회로도](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf#page=4)
+
+## 전원 전용 실물 결과와 출고 복구
+
+검토한 전원 전용 이미지를 한 번 실행했다. Windows standalone
+오프라인 회귀 1,455개 통과, 6개 건너뜀과 ESP32-S3 빌드·링크를
+확인한 이미지다.
+
+| 항목 | 결과 |
+|---|---|
+| 소스와 이미지 | `6ac1ed8a25a27b1b2e68400ae0e9d0ea3556d0d9`, SHA256 `d8e6fa2e660f8d7f202711f0bdd29aec79fae5c053b22592c83de9f996142b15` |
+| 쓰기 전 확인 | 원본 A/B와 복구 파일의 길이·해시, 같은 보드, 보안 상태, 기존 파티션 표·OTA 선택 데이터·OTA1 대조 통과 |
+| 진단 쓰기 | `ota_1 [0x510000,0x53D630)` 185,904바이트, 영향 섹터 `[0x510000,0x53E000)`. 독립 검증 통과 |
+| AXP2101 | `pmic_vsys=sampled`, `pmic_vsys_mv=4443` |
+| AW88298 | `amp_vdd=powered_down`, `amp_uvls=null`. VDD 표본 없음 |
+| 종료 | START 1회, `K151_POWER_READBACK_V1` 보고와 HOLD 확인. `operating_admission=false` |
+| 출고 복구 | `ota_1 [0x510000,0xA00000)` 5,177,344바이트. 독립 해시 및 파티션 표·OTA 선택 데이터 일치 |
+| 재부팅 | 출고 펌웨어 부팅 요청과 USB Serial/JTAG의 COM3 복귀 확인. 화면은 현장에서 확인하지 않았다. |
+
+감독 세션은 `preflight_exit=0`, `trial_runner_exit=0`,
+`factory_restore_verified=true`를 기록했다. 전원 설정, 앰프 리셋,
+스피커·마이크 구동, 외부 전송과 API 호출은 없었다. 파티션 표,
+OTA 선택 데이터, NVS, assets와 eFuse는 쓰기 범위에서 제외했다.
+
+VSYS 4.443V는 이 부팅에서 AXP2101의 내부 ADC가 보고한 대기 표본이다.
+V4가 클럭 활성화 단계에서 멈춘 순간의 앰프 VDD와 동시 전원 상태는
+미확인이다.
+
+## 동일 소스의 CI와 Windows 모의 재현
+
+소스 `6ac1ed8`의 PR PC 검사 4개와 ESP32-S3 검사 1개는 통과했다.
+push PC 검사 4개 중 Windows/Python 3.12의 가속 Mock soak만 실패해
+전체는 8/9였다. cycle 744에서 `engine_failure / renew_timeout`으로
+안전 정지했다. 중단 당시 `lease_renew/sqlite_commit` 경과 시간은
+6.627초였다. 전체 기록에서 실행기 대기는 최대 약 4.4ms, 저장소 직렬
+대기는 약 21.6ms, 이벤트 루프 지연은 약 53.9ms였다.
+[실패한 push 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45318478426/job/138190969753)
+
+로컬 Windows에선 임시 SQLite 파일과 가짜 로봇으로 갱신 한 번의
+커밋 진입부에만 지연을 주입했다. 기본 기한에서 `renew_timeout`과
+`lease_renew/sqlite_commit` 중단(6.666초)을 재현했다. 실행기 대기
+최대 5.0ms, 이벤트 루프 지연 최대 12.6ms였고, 갱신은 한 번만
+시도했으며 로봇 명령은 없었다. 관련 회귀 24개 통과를 확인했다.
+GitHub 환경에서 SQLite 커밋이 지연된 원인은 미확인이다.
