@@ -17,7 +17,7 @@ bool K151InstallHold::device_activation_allowed() {
 #endif
 }
 bool K151InstallHold::display_activation_allowed() {
-#ifdef STACKCHAN_K151_PANEL_PROBE
+#if defined(STACKCHAN_K151_PANEL_PROBE) || defined(STACKCHAN_K151_SPEAKER_STOP_PROBE)
   return true;
 #else
   return device_activation_allowed();

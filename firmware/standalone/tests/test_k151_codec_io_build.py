@@ -97,7 +97,11 @@ def _build_port(
             "-I",
             str(BASE / "tests/lcd_io_doubles"),
         ]
-        sources += [app / "k151_speaker_probe.cpp", app / "k151_speaker_stop_probe.cpp"]
+        sources += [
+            app / "k151_speaker_probe.cpp",
+            app / "k151_speaker_stop_probe.cpp",
+            app / "k151_install_hold.cpp",
+        ]
     if conversation:
         command += ["-DSTACKCHAN_K151_CONVERSATION_IMAGE=1"]
     for directory in [

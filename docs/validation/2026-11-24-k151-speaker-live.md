@@ -455,3 +455,22 @@ ELF·바이너리 대조가 통과했다. 이미지 SHA256은
 정책 없음, 설치 비승인을 확인했다. 로컬 한 턴 설정·빌드 검토·
 예산 스냅샷·복구 관련 회귀 106개가 통과했다.
 [ESP32-S3 GitHub 빌드](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45419528005)
+
+## 재생 중 STOP 실물 시도와 화면 권한
+
+2026-11-25 `b1b171e`의 `K151_SPEAKER_STOP_V1`를 한 번 시험했다.
+OTA1 588,704바이트의 설치 검증과 START는 통과했고,
+`preparation_failed`, `sample_to_standby_us=null`을 받았다.
+재생 준비 완료 표지 이전에 중단됐으며 오디오 재생과 STOP 지연은
+관측 대상에 도달하지 않았다.
+
+원본 OTA1 5,177,344바이트를 복구하고 별도 해시 검증을 통과했다.
+파티션 표와 OTA 선택 데이터가 일치했고 출고 재부팅 요청과 COM3
+복귀를 확인했다. 감독 실행기는 `preflight_exit=0`,
+`trial_runner_exit=1`, `factory_restore_verified=true`를 남겼다.
+
+기존 ELF의 `display_activation_allowed()` 경로는 화면 전용 진단의
+빌드 플래그만 허용했다. 결합 앱의 화면 시작은 일반 장치 HOLD에서
+거부된다. 실제 권한 함수를 결합 모의 시험에 링크하자 화면 준비에서
+같은 중단을 재현했다. 화면 활성화 조건에 결합 진단 플래그만 추가했고,
+모의 시험에서 일반 장치 활성화가 계속 거부되는 것도 검사했다.

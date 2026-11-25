@@ -7,6 +7,7 @@
 #include "k151_mic_wake_trial.hpp"
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
 #include "k151_display_stop.hpp"
+#include "k151_install_hold.hpp"
 #include "k151_lcd_panel.hpp"
 #include "k151_speaker_probe.hpp"
 #endif
@@ -841,6 +842,8 @@ namespace stackchan::standalone {
 K151LcdPanel::~K151LcdPanel() = default;
 bool K151LcdPanel::start(i2c_master_bus_handle_t board_bus, bool requested) {
   assert(!display_ && board_bus == &bus && bus.alive && requested && !tx.enabled);
+  assert(!K151InstallHold::device_activation_allowed());
+  if (!K151InstallHold::display_activation_allowed()) return false;
   display_ = &::display;
   return true;
 }
