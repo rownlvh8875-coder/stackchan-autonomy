@@ -60,9 +60,11 @@ class TimingProbe:
             self._stages[stage] = (count + 1, total + max(0, elapsed), max(peak, elapsed))
 
     def interrupt(self, trace):
-        self.note_interruption(trace.label, trace.stage, time.perf_counter() - trace.created)
+        stage, started = trace._phase
+        now = time.perf_counter()
+        self.note_interruption(trace.label, stage, now - trace.created, stage_elapsed=now - started)
 
-    def note_interruption(self, label, stage, elapsed):
+    def note_interruption(self, label, stage, elapsed, *, stage_elapsed=None):
         with self._lock:
             self._interruption_count += 1
             self._interruptions.append(
@@ -70,6 +72,7 @@ class TimingProbe:
                     "operation": label,
                     "stage": stage,
                     "elapsed_s": max(0, elapsed),
+                    "stage_elapsed_s": None if stage_elapsed is None else max(0, stage_elapsed),
                 }
             )
 
@@ -112,15 +115,21 @@ class StorageTrace:
     def __init__(self, probe):
         self.probe = probe
         self.label = _label.get()
-        self.created = self.mark = time.perf_counter()
-        self.stage = "serial_wait"
+        self.created = time.perf_counter()
+        # The executor and event loop observe a single phase/timestamp pair.
+        self._phase = "serial_wait", self.created
         with probe._lock:
             probe._operations[self.label] += 1
 
+    @property
+    def stage(self):
+        return self._phase[0]
+
     def advance(self, stage):
+        previous, started = self._phase
         now = time.perf_counter()
-        self.probe.record("storage_" + self.stage, now - self.mark)
-        self.stage, self.mark = stage, now
+        self._phase = stage, now
+        self.probe.record("storage_" + previous, now - started)
 
     def run(self, operation):
         self.advance("operation")
@@ -153,13 +162,14 @@ def sqlite_timing(stage):
     if stage not in _SQL_STAGES:
         raise ValueError("unknown diagnostic stage")
     trace = _trace.get()
-    previous = trace.stage if trace is not None else None
-    if trace is not None:
-        trace.stage = stage
     started = time.perf_counter()
+    if trace is not None:
+        previous = trace._phase
+        trace._phase = stage, started
     try:
         yield
     finally:
-        probe.record(stage, time.perf_counter() - started)
+        elapsed = time.perf_counter() - started
         if trace is not None:
-            trace.stage = previous
+            trace._phase = previous
+        probe.record(stage, elapsed)

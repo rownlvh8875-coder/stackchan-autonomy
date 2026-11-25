@@ -140,7 +140,10 @@ async def test_cancellation_after_worker_completion_keeps_delivery_stage():
     assert not storage.pending and not storage._slot.locked()
 
 
-async def test_sqlite_writer_contention_is_measured_without_exporting_details(tmp_path):
+@pytest.mark.parametrize("blocked_stage", ["sqlite_begin", "sqlite_commit"])
+async def test_sqlite_lock_contention_is_measured_without_exporting_details(
+    tmp_path, blocked_stage
+):
     from stackchan_autonomy.state_store import SQLiteState, StateUnavailable
     from stackchan_autonomy.timing_diagnostics import TimingProbe
 
@@ -149,12 +152,19 @@ async def test_sqlite_writer_contention_is_measured_without_exporting_details(tm
     with store.transaction():
         pass
     db = sqlite3.connect(path, isolation_level=None)
-    db.execute("BEGIN IMMEDIATE")
+    if blocked_stage == "sqlite_begin":
+        db.execute("BEGIN IMMEDIATE")
+    else:
+        # In the default rollback journal a reader allows BEGIN IMMEDIATE and
+        # writes, but holds the lock that COMMIT needs to publish them.
+        db.execute("BEGIN")
+        assert db.execute("SELECT count(*) FROM autonomy_clock").fetchone() == (0,)
     probe, storage = TimingProbe(), AsyncStorage()
 
     def work():
-        with store.transaction():
-            raise AssertionError("lock should reject before body")
+        with store.transaction() as tx:
+            assert blocked_stage == "sqlite_commit"
+            store.observed_time(tx, "rollback-probe", 1)
 
     try:
         with probe.collect():
@@ -165,10 +175,52 @@ async def test_sqlite_writer_contention_is_measured_without_exporting_details(tm
         db.rollback()
         db.close()
     stats = probe.snapshot()["stages"]
-    assert stats["sqlite_begin"]["max_s"] >= 0.15
-    assert stats["storage_operation"]["max_s"] >= stats["sqlite_begin"]["max_s"]
-    assert "sqlite_commit" not in stats
+    assert stats[blocked_stage]["max_s"] >= 0.15
+    assert stats["storage_operation"]["max_s"] >= stats[blocked_stage]["max_s"]
+    if blocked_stage == "sqlite_begin":
+        assert "sqlite_commit" not in stats
+    with store.transaction() as tx:
+        assert tx.execute("SELECT count(*) FROM autonomy_clock").fetchone() == (0,)
     assert "private-path-secret" not in json.dumps(probe.snapshot())
+
+
+def test_interruption_reports_time_in_the_current_sqlite_stage(monkeypatch):
+    from types import SimpleNamespace
+
+    from stackchan_autonomy import timing_diagnostics as timings
+
+    now = 10
+    monkeypatch.setattr(timings, "time", SimpleNamespace(perf_counter=lambda: now))
+    probe = timings.TimingProbe()
+    with probe.collect(), timings.operation_label("lease_renew"):
+        trace = timings.storage_trace()
+        now = 12
+        trace.advance("executor_wait")
+        now = 15
+
+        def work():
+            nonlocal now
+            now = 16
+            with timings.sqlite_timing("sqlite_commit"):
+                now = 21
+                probe.interrupt(trace)
+            probe.interrupt(trace)
+
+        trace.run(work)
+    assert probe.snapshot()["interruptions"] == [
+        {
+            "operation": "lease_renew",
+            "stage": "sqlite_commit",
+            "elapsed_s": 11,
+            "stage_elapsed_s": 5,
+        },
+        {
+            "operation": "lease_renew",
+            "stage": "operation",
+            "elapsed_s": 11,
+            "stage_elapsed_s": 6,
+        },
+    ]
 
 
 async def test_result_delivery_and_loop_stall_are_measured_separately():
@@ -294,8 +346,8 @@ async def test_measured_slow_lease_worker_still_fails_closed_without_retry(
         if self.label == "lease_check" and stage == "delivery":
             check_ready.set()
 
-    def record_interruption(self, label, stage, elapsed):
-        original_interruption(self, label, stage, elapsed)
+    def record_interruption(self, label, stage, elapsed, **stage_timing):
+        original_interruption(self, label, stage, elapsed, **stage_timing)
         if label == "lease_check":
             check_interrupted.set()
 

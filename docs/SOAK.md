@@ -25,8 +25,13 @@ does not add a live task. perf_counter gives high-resolution diagnostic timing
 on Windows Python3.12; safety deadlines still use the original monotonic clock.
 
 Interruptions identify the phase at cancellation, including queued/late workers.
+Each storage interruption reports the total operation time in `elapsed_s`
+and time since the reported phase started in `stage_elapsed_s`. For example,
+the SQLite COMMIT phase excludes the queue wait and earlier SQLite stages.
+The outer `operation` phase includes any nested SQLite work already completed.
 Pre-submission, post-delivery and expired-observation deadline checks are also
-recorded when delayed loop timers never canceled an await. A canceled atomic
+recorded when delayed loop timers never canceled an await. These checks have no
+active storage phase, so `stage_elapsed_s` is null. A canceled atomic
 worker still owns its storage slot until completion and is drained before cleanup.
 An interruption is evidence, never authorization to accept late ownership.
 
