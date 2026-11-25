@@ -52,7 +52,7 @@ class _RomPaidTrial:
 
     def _open_bound(self, files):
         identities = re.findall(
-            r"^\s*MAC:\s*((?:[0-9a-f]{2}:){5}[0-9a-f]{2})[ \t]*$",
+            r"^[ \t]*MAC:[ \t]*((?:[0-9a-f]{2}:){5}[0-9a-f]{2})[ \t]*\r?$",
             files.board_reference.decode("utf-8-sig"),
             flags=re.IGNORECASE | re.MULTILINE,
         )

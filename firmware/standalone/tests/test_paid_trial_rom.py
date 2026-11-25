@@ -1,5 +1,7 @@
 """Rehearse the reviewed ROM adapter with ESP32-S3 and esptool doubles."""
 
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -105,7 +107,16 @@ def run(review, monkeypatch, command_setup=lambda _tool: None):
     return result, tool, paths
 
 
-def test_verified_ranges_survive_failed_turn_with_usb_closed_during_turn(review, monkeypatch):
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"], ids=["lf", "crlf"])
+def test_verified_ranges_survive_failed_turn_with_usb_closed_during_turn(
+    review, monkeypatch, newline
+):
+    paths, _, approval = review
+    reference = paths.board_reference.read_bytes().replace(b"\n", newline)
+    paths.board_reference.write_bytes(reference)
+    scope = json.loads(approval.read_bytes())
+    scope["board_reference_sha256"] = hashlib.sha256(reference).hexdigest()
+    approval.write_text(json.dumps(scope), encoding="utf-8")
     result, tool, paths = run(review, monkeypatch)
     assert result.trial_failure is TrialStep.BOOT_AND_RUN_ONE_TURN
     assert result.factory_boot_requested
@@ -117,6 +128,24 @@ def test_verified_ranges_survive_failed_turn_with_usb_closed_during_turn(review,
     assert tool.events.index(("verify", 2, 0x510000)) < tool.events.index(("write", 2, 0x9000))
     assert tool.flash[0x9000] == paths.nvs.read_bytes()
     assert tool.events[-2:] == [("reset", 2), ("close", 2)]
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        b"MAC:\n02:00:00:00:00:01\n",
+        b"MAC: 02:00:00:00:00:01\r\nMAC: 02:00:00:00:00:01\r\n",
+    ],
+)
+def test_ambiguous_board_reference_does_not_open_port(review, monkeypatch, reference):
+    paths, _, approval = review
+    paths.board_reference.write_bytes(reference)
+    scope = json.loads(approval.read_bytes())
+    scope["board_reference_sha256"] = hashlib.sha256(reference).hexdigest()
+    approval.write_text(json.dumps(scope), encoding="utf-8")
+    result, tool, _ = run(review, monkeypatch)
+    assert result.trial_failure is TrialStep.PREFLIGHT
+    assert tool.events == []
 
 
 @pytest.mark.parametrize(
