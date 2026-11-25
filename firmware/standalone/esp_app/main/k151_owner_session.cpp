@@ -27,32 +27,44 @@ bool K151OwnerSession::on_owner_task() const {
 }
 
 bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verified) {
-  if (task_ || stop_.load() || !exact_board_verified || !physical_lcd_verified ||
+  if (task_) return false;
+  startup_stage_ = StartupStage::preconditions;
+  if (stop_.load() || !exact_board_verified || !physical_lcd_verified ||
       !kSeparateUartConsole || !K151InstallHold::device_activation_allowed() ||
       lv_is_initialized()) return false;
+  startup_stage_ = StartupStage::owner_task;
   task_ = xTaskGetCurrentTaskHandle();
   if (!task_) return false;
   core_ = xPortGetCoreID();
+  const auto abort = [this] {
+    (void)abort_setup();
+    return false;
+  };
 
-  if (k151::open_board_bus(bus_) && !stop_.load()) {
-    lv_init();
-    owns_lvgl_ = lv_is_initialized();
-    if (owns_lvgl_ && panel_.start(bus_, true) &&
-        view_.attach(panel_, physical_lcd_verified, true, true) &&
-        view_.present(TouchConsentPhase::clear_for_arm, OwnerSetupPhase::hold, false, false, true) &&
-        touch_.attach_for_setup(bus_, exact_board_verified, true)) {
-      const auto now_us = esp_timer_get_time();
-      if (now_us >= 0 && !stop_.load()) {
-        last_sample_ms_ = static_cast<uint64_t>(now_us / 1000);
-        board_verified_ = exact_board_verified;
-        lcd_verified_ = physical_lcd_verified;
-        step_ = Step::head_touch;
-        return true;
-      }
-    }
-  }
-  (void)abort_setup();
-  return false;
+  startup_stage_ = StartupStage::board_bus;
+  if (!k151::open_board_bus(bus_) || stop_.load()) return abort();
+  startup_stage_ = StartupStage::lvgl;
+  lv_init();
+  owns_lvgl_ = lv_is_initialized();
+  if (!owns_lvgl_) return abort();
+  startup_stage_ = StartupStage::panel;
+  if (!panel_.start(bus_, true)) return abort();
+  startup_stage_ = StartupStage::view;
+  if (!view_.attach(panel_, physical_lcd_verified, true, true)) return abort();
+  startup_stage_ = StartupStage::presence_frame;
+  if (!view_.present(TouchConsentPhase::clear_for_arm, OwnerSetupPhase::hold, false, false, true))
+    return abort();
+  startup_stage_ = StartupStage::head;
+  if (!touch_.attach_for_setup(bus_, exact_board_verified, true)) return abort();
+  startup_stage_ = StartupStage::clock;
+  const auto now_us = esp_timer_get_time();
+  if (now_us < 0 || stop_.load()) return abort();
+  last_sample_ms_ = static_cast<uint64_t>(now_us / 1000);
+  board_verified_ = exact_board_verified;
+  lcd_verified_ = physical_lcd_verified;
+  startup_stage_ = StartupStage::ready;
+  step_ = Step::head_touch;
+  return true;
 }
 
 bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budget_scope_approved,

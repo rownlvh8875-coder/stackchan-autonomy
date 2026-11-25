@@ -26,6 +26,10 @@ idf_component_register(
 target_compile_features(${COMPONENT_LIB} PRIVATE cxx_std_20)
 if(k151_review)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE STACKCHAN_K151_CONVERSATION_IMAGE=1)
+    idf_build_get_property(k151_setup_probe K151_CONVERSATION_SETUP_PROBE)
+    if(k151_setup_probe)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE STACKCHAN_K151_CONVERSATION_SETUP_PROBE=1)
+    endif()
     if(K151_CONVERSATION_PRIVATE_POLICY)
         configure_file("${K151_CONVERSATION_PRIVATE_POLICY}"
                        "${CMAKE_CURRENT_BINARY_DIR}/k151_private_policy.inc" COPYONLY)

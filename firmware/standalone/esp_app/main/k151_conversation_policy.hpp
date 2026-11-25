@@ -11,6 +11,10 @@
 namespace stackchan::standalone {
 
 enum class K151ConversationBuildMode { hold, one_paid_turn, continuous };
+enum class K151ConversationBootStage : unsigned {
+  policy = 0, chip = 1, identity = 2, slot = 3, psram = 4,
+  security = 5, flash = 6, nvs = 7, ready = 8
+};
 using K151BudgetDigest = std::array<std::uint8_t, 32>;
 
 struct K151OneTurnDeviceEvidence {
@@ -92,15 +96,25 @@ inline constexpr bool local_conversation_scope_complete(const K151ConversationPo
          std::ranges::any_of(policy.expected_factory_identity, [](auto value) { return value != 0; });
 }
 
+inline K151ConversationBootStage conversation_boot_stage(
+    const K151ConversationPolicy& policy, const K151ConversationBootFacts& boot) {
+  using Stage = K151ConversationBootStage;
+  if (!local_conversation_scope_complete(policy)) return Stage::policy;
+  if (!boot.esp32s3 || boot.chip_revision != 2) return Stage::chip;
+  if (policy.expected_factory_identity != boot.factory_identity_sha256) return Stage::identity;
+  if (!boot.ota1 || !k151::board_probe_location_allowed(boot.slot_offset, boot.slot_bytes,
+                                                       boot.esp32s3, boot.chip_revision))
+    return Stage::slot;
+  if (!boot.psram_ready) return Stage::psram;
+  if (boot.nvs_offset != 0x9000 || boot.nvs_bytes != 0x4000) return Stage::nvs;
+  if (!boot.security_matches) return Stage::security;
+  if (boot.flash_bytes != 16 * 1024 * 1024) return Stage::flash;
+  return Stage::ready;
+}
+
 inline std::optional<K151AdmittedConversation> admit_conversation_boot(
     const K151ConversationPolicy& policy, const K151ConversationBootFacts& boot) {
-  if (!local_conversation_scope_complete(policy) ||
-      policy.expected_factory_identity != boot.factory_identity_sha256 ||
-      !boot.ota1 || !boot.psram_ready || !boot.security_matches ||
-      !k151::board_probe_location_allowed(boot.slot_offset, boot.slot_bytes,
-                                         boot.esp32s3, boot.chip_revision) ||
-      boot.flash_bytes != 16 * 1024 * 1024 || boot.nvs_offset != 0x9000 ||
-      boot.nvs_bytes != 0x4000)
+  if (conversation_boot_stage(policy, boot) != K151ConversationBootStage::ready)
     return std::nullopt;
   return K151AdmittedConversation{
       {policy.output.exact_board_revision_verified, policy.exclusive_i2s0_verified},

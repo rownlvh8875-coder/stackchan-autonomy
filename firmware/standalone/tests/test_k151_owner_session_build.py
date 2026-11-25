@@ -62,6 +62,7 @@ def owner_binary(tmp_path_factory):
         "bus_failed",
         "panel_failed",
         "view_failed",
+        "presence_frame_failed",
         "head_failed",
         "no_head_touch",
         "head_read_error",

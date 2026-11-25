@@ -72,6 +72,8 @@ bool K151SetupLvgl::attach(K151LcdPanel&, bool verified, bool lock, bool local) 
 bool K151SetupLvgl::present(TouchConsentPhase phase, OwnerSetupPhase ready,
                            bool input, bool error, bool lock) {
   assert(lock && view && !error);
+  if (scenario == "presence_frame_failed" && phase == TouchConsentPhase::clear_for_arm)
+    return false;
   if (phase == TouchConsentPhase::owner_window) assert(usb && input);
   if (ready == OwnerSetupPhase::ready) {
     assert(phase == TouchConsentPhase::consumed && usb && pairing_complete && input);
@@ -165,22 +167,31 @@ int main(int argc, char* argv[]) {
   if (scenario == "existing_lvgl") lvgl = true;
   if (scenario == "existing_bus") i2c = true;
   const auto started = session.start(scenario != "wrong_board", scenario != "unverified_lcd");
+  using Startup = K151OwnerSession::StartupStage;
   if (scenario == "hold" || scenario == "wrong_board" || scenario == "unverified_lcd" ||
       scenario == "existing_lvgl" || scenario == "existing_bus") {
     assert(!started && activations == (scenario == "existing_bus" ? 1U : 0U) &&
            !session.handoff());
+    assert(session.startup_stage() ==
+           (scenario == "existing_bus" ? Startup::board_bus : Startup::preconditions));
     assert(session.shutdown());
     assert(lvgl == (scenario == "existing_lvgl") && i2c == (scenario == "existing_bus"));
     return 0;
   }
   assert(activations == 1);
-  if (scenario == "bus_failed" || scenario == "panel_failed" || scenario == "view_failed" ||
-      scenario == "head_failed") {
+  const auto failed_stage = scenario == "bus_failed" ? Startup::board_bus :
+      scenario == "panel_failed" ? Startup::panel :
+      scenario == "view_failed" ? Startup::view :
+      scenario == "presence_frame_failed" ? Startup::presence_frame :
+      scenario == "head_failed" ? Startup::head : Startup::ready;
+  if (failed_stage != Startup::ready) {
     assert(!started && !i2c && !lvgl && !session.handoff());
+    assert(session.startup_stage() == failed_stage);
     return 0;
   }
   assert(started && i2c && lvgl && head && !usb);
   assert(!session.start(true, true));
+  assert(session.startup_stage() == Startup::ready);
   using Step = K151OwnerSession::Step;
   assert(!session.request_voice_review(true, true, true));
   if (scenario == "wrong_task" || scenario == "wrong_core") {

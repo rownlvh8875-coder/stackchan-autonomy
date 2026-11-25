@@ -15,6 +15,8 @@ int main() {
   facts.nvs_bytes = 0x4000;
   facts.chip_revision = 2;
   facts.esp32s3 = facts.ota1 = facts.psram_ready = facts.security_matches = true;
+  using Boot = K151ConversationBootStage;
+  assert(conversation_boot_stage(policy, facts) == Boot::policy);
   assert(!admit_conversation_boot(policy, facts));
 
   policy.expected_factory_identity = facts.factory_identity_sha256;
@@ -29,6 +31,30 @@ int main() {
   policy.trial_budget_sha256 = facts.factory_identity_sha256; // Synthetic fixture.
   const auto trial = admit_conversation_boot(policy, facts);
   assert(trial && trial->audio.verified() && trial->mode == K151ConversationBuildMode::one_paid_turn);
+  assert(conversation_boot_stage(policy, facts) == Boot::ready);
+  {
+    auto rejected = facts;
+    rejected.esp32s3 = false;
+    assert(conversation_boot_stage(policy, rejected) == Boot::chip);
+    rejected = facts;
+    rejected.factory_identity_sha256 = {};
+    assert(conversation_boot_stage(policy, rejected) == Boot::identity);
+    rejected = facts;
+    rejected.slot_offset = 0;
+    assert(conversation_boot_stage(policy, rejected) == Boot::slot);
+    rejected = facts;
+    rejected.psram_ready = false;
+    assert(conversation_boot_stage(policy, rejected) == Boot::psram);
+    rejected = facts;
+    rejected.security_matches = false;
+    assert(conversation_boot_stage(policy, rejected) == Boot::security);
+    rejected = facts;
+    rejected.flash_bytes = 0;
+    assert(conversation_boot_stage(policy, rejected) == Boot::flash);
+    rejected = facts;
+    rejected.nvs_bytes = 0;
+    assert(conversation_boot_stage(policy, rejected) == Boot::nvs);
+  }
   assert(!trial->allow_first_budget);
   assert(matches_reviewed_trial_budget(policy, false, facts.factory_identity_sha256));
   assert(!matches_reviewed_trial_budget(policy, false, K151BudgetDigest{}));

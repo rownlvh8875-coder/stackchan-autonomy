@@ -19,6 +19,10 @@ namespace stackchan::standalone {
 class K151OwnerSession final {
  public:
   enum class Step { idle, head_touch, pairing, ready, voice_review, voice_ready, stopped, fault };
+  enum class StartupStage : unsigned {
+    idle = 0, preconditions = 1, owner_task = 2, board_bus = 3, lvgl = 4,
+    panel = 5, view = 6, presence_frame = 7, head = 8, clock = 9, ready = 10
+  };
 
   K151OwnerSession();
   ~K151OwnerSession();
@@ -28,6 +32,7 @@ class K151OwnerSession final {
   // Both inputs are independently established for this board before start.
   // A successful SPI transfer alone cannot attest the physical screen.
   bool start(bool exact_board_verified, bool physical_lcd_verified);
+  StartupStage startup_stage() const { return startup_stage_; }
   // Called by the pinned owner task with the approved deployment scope, only
   // after the encrypted USB session closed. The local display is the sole
   // gesture input for enabling paid voice and budget writes.
@@ -67,6 +72,7 @@ class K151OwnerSession final {
   bool one_paid_turn_ = false;
   bool bus_release_unverified_ = false;
   Step step_ = Step::idle;
+  StartupStage startup_stage_ = StartupStage::idle;
 };
 
 }  // namespace stackchan::standalone
