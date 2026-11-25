@@ -102,6 +102,8 @@ def run_operator_paid_trial(
     recover_only: bool = False,
 ) -> TrialResult:
     """Connect the existing ROM and SCPS tools. The caller checks port occupancy."""
+    # The ROM adapter suppresses its output while invoking the port check.
+    interactive_console = sys.platform == "win32" and sys.stdin.isatty() and sys.stdout.isatty()
     serial_number = None
 
     def k151_ports():
@@ -111,7 +113,7 @@ def run_operator_paid_trial(
 
     def available(selected):
         nonlocal serial_number
-        if sys.platform != "win32" or not sys.stdin.isatty() or not sys.stdout.isatty():
+        if not interactive_console:
             return False
         matches = [item for item in k151_ports() if item.device.casefold() == selected.casefold()]
         if len(matches) != 1 or not matches[0].serial_number:

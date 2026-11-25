@@ -28,14 +28,19 @@ def run_pairing(
     text_input: OperatorInputs = input,
     hidden_input: OperatorInputs = getpass.getpass,
     say: Callable[[str], None] = print,
+    on_phase: Callable[[str], None] = lambda _phase: None,
 ) -> bool:
     """One single attempt, no auto-retry, no recording of submitted secrets."""
     try:
+        on_phase("device_hello")
         hello = expect(port, Op.DEVICE_HELLO, 20)
+        on_phase("pc_hello")
         pc = PcSession(hello.payload)
         write_one(port, Frame(Op.PC_HELLO, pc.pc_hello))
+        on_phase("display_ready")
         expect(port, Op.DISPLAY_READY, 20)
 
+        on_phase("local_credentials")
         say("PC pairing code: " + pc.sas)
         say("Compare all eight digits with the K151's trusted physical LCD.")
         observed = text_input("Type the 8 digits shown on the K151 LCD: ").strip()
@@ -53,8 +58,10 @@ def run_pairing(
         # The device requires its own on-screen comparison and final head hold.
         sealed = pc.seal(ssid, password, api_key, observed, reviewed_locally=True)
         write_one(port, Frame(Op.SEALED, sealed))
+        on_phase("pending_touch")
         expect(port, Op.PENDING_TOUCH, 20)
 
+        on_phase("owner_confirmation")
         say("If all 8 digits match, hold the K151 screen for 1 second and release.")
         say("At FINAL APPROVAL, lightly touch the top of the head for 3 seconds, then lift.")
         expect(port, Op.COMPLETED, 120)
@@ -88,6 +95,13 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError as exc:
         parser.error("pyserial is required")
         raise AssertionError("unreachable") from exc
+
+    phase = "serial_open"
+
+    def set_phase(current: str) -> None:
+        nonlocal phase
+        phase = current
+
     try:
         port = serial.Serial(port=None, baudrate=115200, timeout=0.25, write_timeout=2)
         port.port = args.port
@@ -98,10 +112,10 @@ def main(argv: list[str] | None = None) -> int:
                 "3초 대고 완전히 떼세요.",
                 flush=True,
             )
-            run_pairing(port)
+            run_pairing(port, on_phase=set_phase)
     except (ScpsWireError, ValueError, OSError, serial.SerialException):
         # Do not print sensitive exception parameters or serial payloads.
-        print("Pairing failed; local device must be restarted before retry.")
+        print(f"Pairing failed at {phase}. Restart the local device before retry.")
         return 1
     return 0
 

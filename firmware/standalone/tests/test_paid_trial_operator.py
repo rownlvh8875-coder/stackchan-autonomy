@@ -270,10 +270,21 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
         return SimpleNamespace(returncode=0)
 
     tty = SimpleNamespace(isatty=lambda: True)
-    console = SimpleNamespace(platform="win32", stdin=tty, stdout=tty, executable=sys.executable)
+    console_stdout = sys.stdout
+
+    class Console:
+        platform = "win32"
+        stdin = tty
+        executable = sys.executable
+
+        @property
+        def stdout(self):
+            # ROM log suppression replaces the live stream during port binding.
+            return tty if sys.stdout is console_stdout else sys.stdout
+
     clock = SimpleNamespace(monotonic=lambda: operator.seconds, sleep=operator.advance)
     keyboard = SimpleNamespace(kbhit=lambda: operator.seconds >= 3, getwch=lambda: "y")
-    monkeypatch.setattr(operator_tool, "sys", console)
+    monkeypatch.setattr(operator_tool, "sys", Console())
     monkeypatch.setattr(operator_tool, "time", clock)
     monkeypatch.setattr(operator_tool.subprocess, "run", run_pairing)
     monkeypatch.setattr(list_ports, "comports", ports)

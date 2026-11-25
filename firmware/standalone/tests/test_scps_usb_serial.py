@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import io
 import sys
+from itertools import count
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ pytest.importorskip("cryptography")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import scps_usb_cli as cli  # noqa: E402
+import scps_usb_wire as wire  # noqa: E402
 from scps_reference import OfflineDeviceEmulator  # noqa: E402
 from scps_usb_cli import run_pairing  # noqa: E402
 from scps_usb_wire import Frame, Op, ScpsWireError, decode, encode, read_one, write_one  # noqa: E402
@@ -224,7 +226,7 @@ def test_cli_cues_head_touch_only_after_opening_without_reset(monkeypatch, open_
                 events.append(("touch",))
                 wire.rx.extend(hello)  # The device sends its hello only once.
 
-    def receive(port):
+    def receive(port, **_kwargs):
         assert port.is_open
         assert wire.rx, "the PC missed the device's only initial hello"
         assert read_one(wire).op is Op.DEVICE_HELLO
@@ -237,3 +239,46 @@ def test_cli_cues_head_touch_only_after_opening_without_reset(monkeypatch, open_
     monkeypatch.setattr(cli, "run_pairing", receive)
     assert cli.main(["--port", "COM3", "--interactive"]) == int(open_fails)
     assert events == ([] if open_fails else [("open", "COM3", False, False), ("touch",)])
+
+
+@pytest.mark.parametrize(
+    ("hello_failure", "stage", "sent"),
+    [
+        ("timeout", "device_hello", [Op.STOP]),
+        ("io_error", "device_hello", [Op.STOP]),
+        (None, "display_ready", [Op.PC_HELLO, Op.STOP]),
+    ],
+)
+def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
+    monkeypatch, capsys, hello_failure, stage, sent
+):
+    class Serial(FakePort):
+        def __init__(self, **_settings):
+            super().__init__(wrong_ack=True)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def read(self, size):
+            if hello_failure == "timeout":
+                return b""
+            if hello_failure == "io_error":
+                raise OSError("internal test detail")
+            return super().read(size)
+
+    port = Serial()
+    monkeypatch.setitem(
+        sys.modules, "serial", SimpleNamespace(Serial=lambda **_: port, SerialException=OSError)
+    )
+    clock = count()
+    monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=clock.__next__))
+
+    assert cli.main(["--port", "COM3", "--interactive"]) == 1
+    output = capsys.readouterr().out
+    assert f"Pairing failed at {stage}." in output
+    assert "internal test detail" not in output
+    assert "PC pairing code" not in output
+    assert [frame.op for frame in port.writes] == sent
