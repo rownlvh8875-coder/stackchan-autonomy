@@ -34,6 +34,50 @@ int main() {
   assert(!matches_reviewed_trial_budget(policy, false, K151BudgetDigest{}));
   assert(!matches_reviewed_trial_budget(policy, false, std::nullopt));
   assert(!matches_reviewed_trial_budget(policy, true, std::nullopt));
+  auto observed_trial = policy;
+  observed_trial.output = {true, true, false, false, false, false, true};
+  assert(!admit_conversation_boot(observed_trial, facts));
+  const K151OneTurnDeviceEvidence observations{{1}, {2}, {3}};
+  observed_trial.one_turn_device_evidence = observations;
+  const auto observed = admit_conversation_boot(observed_trial, facts);
+  assert(observed && observed->mode == K151ConversationBuildMode::one_paid_turn);
+  assert(matches_reviewed_trial_budget(observed_trial, false, facts.factory_identity_sha256));
+  assert(!matches_reviewed_trial_budget(observed_trial, false, K151BudgetDigest{99}));
+  for (auto field : {&K151OneTurnDeviceEvidence::normal_playback,
+                     &K151OneTurnDeviceEvidence::usb_stop,
+                     &K151OneTurnDeviceEvidence::panel_stop}) {
+    auto denied = observed_trial;
+    denied.one_turn_device_evidence.value().*field = {};
+    assert(!admit_conversation_boot(denied, facts));
+  }
+  auto duplicate = observed_trial;
+  duplicate.one_turn_device_evidence->panel_stop = observations.usb_stop;
+  assert(!admit_conversation_boot(duplicate, facts));
+  for (auto field : {&K151OutputEvidence::exact_board_revision_verified,
+                     &K151OutputEvidence::exclusive_i2c_ownership_verified,
+                     &K151OutputEvidence::dma_tx_empty_and_codec_idle_observable}) {
+    auto denied = observed_trial;
+    denied.output.*field = false;
+    assert(!admit_conversation_boot(denied, facts));
+  }
+  for (auto field : {&K151ConversationPolicy::physical_lcd_verified,
+                     &K151ConversationPolicy::exclusive_i2s0_verified,
+                     &K151ConversationPolicy::paid_scope_approved,
+                     &K151ConversationPolicy::budget_scope_approved}) {
+    auto denied = observed_trial;
+    denied.*field = false;
+    assert(!admit_conversation_boot(denied, facts));
+  }
+  auto wrong_board = facts;
+  wrong_board.factory_identity_sha256[0] = 0x42;
+  assert(!admit_conversation_boot(observed_trial, wrong_board));
+  auto continuous_from_trial = observed_trial;
+  continuous_from_trial.mode = K151ConversationBuildMode::continuous;
+  continuous_from_trial.trial_budget_sha256.reset();
+  assert(!admit_conversation_boot(continuous_from_trial, facts));
+  continuous_from_trial.output = policy.output;
+  assert(!admit_conversation_boot(continuous_from_trial, facts));
+
   policy.trial_budget_sha256.reset();
   policy.trial_budget_must_be_missing = true;
   assert(!admit_conversation_boot(policy, facts)); // First write needs its own scope.

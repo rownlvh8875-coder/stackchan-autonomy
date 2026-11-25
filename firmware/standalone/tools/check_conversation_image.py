@@ -14,6 +14,7 @@ from offline_factory_recovery import Rejected, verify_trial_restore
 PUBLIC_MARKER = b"K151_CONVERSATION_REVIEW_NO_RELEASE"
 PRIVATE_MARKER = b"K151_CONVERSATION_LOCAL_RELEASE"
 ONE_TURN_MARKER = PRIVATE_MARKER + b"_ONE_PAID_TURN\0"
+DEVICE_OBSERVED_MARKER = PRIVATE_MARKER + b"_ONE_PAID_TURN_DEVICE_OBSERVED\0"
 CONTINUOUS_MARKER = PRIVATE_MARKER + b"_CONTINUOUS"
 
 
@@ -41,13 +42,16 @@ def inspect_image(
 ) -> dict:
     envelope = inspect_model_image(app, elf_sha256, b"k151_conversation_review")
     if local_one_turn:
-        if PUBLIC_MARKER in app or CONTINUOUS_MARKER in app:
+        measured = ONE_TURN_MARKER in app
+        device_observed = DEVICE_OBSERVED_MARKER in app
+        if PUBLIC_MARKER in app or CONTINUOUS_MARKER in app or measured == device_observed:
             raise ValueError("mixed or incompatible conversation image")
     elif PRIVATE_MARKER in app:
         raise ValueError("private release marker in public conversation image")
-    markers = (
+    elif PUBLIC_MARKER not in app:
         # ESP_LOGW wraps this marker in its format string, including a newline.
-        ONE_TURN_MARKER if local_one_turn else PUBLIC_MARKER,
+        raise ValueError("missing public conversation marker")
+    markers = (
         b"Say Hi StackChan\0",
         b"Standby verified. Trial ended.\0",
     )
@@ -55,7 +59,7 @@ def inspect_image(
         if marker not in app:
             raise ValueError(f"missing expected conversation marker {marker!r}")
     verify_realtime_transport(app)
-    return {
+    result = {
         **envelope,
         **validate_slot(
             partition_csv, SLOT_OFFSET, envelope["erase_span_bytes"], require_nvs=local_one_turn
@@ -68,6 +72,11 @@ def inspect_image(
         "paid_api_called": False,
         "physical_output_or_stop_proven": False,
     }
+    if local_one_turn:
+        result["one_turn_output_basis"] = (
+            "device_diagnostics" if device_observed else "electrical_measurement"
+        )
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -19,7 +19,9 @@ const K151ConversationPolicy& k151_local_conversation_policy() { return policy; 
 
 #ifdef STACKCHAN_K151_PRIVATE_POLICY
 const char* k151_local_release_marker() {
-  if constexpr (policy.mode == K151ConversationBuildMode::one_paid_turn)
+  if constexpr (policy.one_turn_device_evidence.has_value())
+    return "K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN_DEVICE_OBSERVED";
+  else if constexpr (policy.mode == K151ConversationBuildMode::one_paid_turn)
     return "K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN";
   else
     return "K151_CONVERSATION_LOCAL_RELEASE_CONTINUOUS";

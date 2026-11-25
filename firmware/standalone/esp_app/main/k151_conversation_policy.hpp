@@ -13,7 +13,22 @@ namespace stackchan::standalone {
 enum class K151ConversationBuildMode { hold, one_paid_turn, continuous };
 using K151BudgetDigest = std::array<std::uint8_t, 32>;
 
-// A private deployment record supplies measurements and scoped approval.
+struct K151OneTurnDeviceEvidence {
+  // SHA256 of the three separately reviewed reports from the same board.
+  std::array<std::uint8_t, 32> normal_playback{};
+  std::array<std::uint8_t, 32> usb_stop{};
+  std::array<std::uint8_t, 32> panel_stop{};
+
+  constexpr bool complete() const {
+    const auto present = [](const auto& digest) {
+      return std::ranges::any_of(digest, [](auto value) { return value != 0; });
+    };
+    return present(normal_playback) && present(usb_stop) && present(panel_stop) &&
+           normal_playback != usb_stop && normal_playback != panel_stop && usb_stop != panel_stop;
+  }
+};
+
+// A private deployment record supplies reviewed evidence and scoped approval.
 // Installation authorization is checked separately against the finished image.
 struct K151ConversationPolicy {
   std::array<std::uint8_t, 32> expected_factory_identity{};
@@ -28,6 +43,7 @@ struct K151ConversationPolicy {
   // Missing is a separate, explicitly reviewed first-provisioning case.
   std::optional<K151BudgetDigest> trial_budget_sha256 = std::nullopt;
   bool trial_budget_must_be_missing = false;
+  std::optional<K151OneTurnDeviceEvidence> one_turn_device_evidence = std::nullopt;
 };
 
 // Read-only, observed on each approved boot. Empty fields fail closed.
@@ -63,10 +79,15 @@ inline constexpr bool local_conversation_scope_complete(const K151ConversationPo
       ? first_budget || existing_budget
       : policy.mode == K151ConversationBuildMode::continuous &&
         !policy.trial_budget_must_be_missing && !policy.trial_budget_sha256;
-  // This final HOLD verdict means the preceding measured-output checks passed.
-  const bool measured =
-      assess_k151_output(policy.output) == OutputBlock::hold_image_never_enables_audio;
-  return scoped && measured && policy.physical_lcd_verified && policy.exclusive_i2s0_verified &&
+  // Device observations are a separate output basis for a single paid turn.
+  // The final HOLD verdict on the other path means its measured-output checks passed.
+  const bool output_reviewed = policy.one_turn_device_evidence
+      ? policy.mode == K151ConversationBuildMode::one_paid_turn &&
+        policy.one_turn_device_evidence->complete() && policy.output.exact_board_revision_verified &&
+        policy.output.exclusive_i2c_ownership_verified &&
+        policy.output.dma_tx_empty_and_codec_idle_observable
+      : assess_k151_output(policy.output) == OutputBlock::hold_image_never_enables_audio;
+  return scoped && output_reviewed && policy.physical_lcd_verified && policy.exclusive_i2s0_verified &&
          policy.paid_scope_approved && policy.budget_scope_approved &&
          std::ranges::any_of(policy.expected_factory_identity, [](auto value) { return value != 0; });
 }

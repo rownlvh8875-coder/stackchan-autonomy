@@ -16,6 +16,7 @@ pinned_pack = resource_pack
 PROJECT = b"k151_conversation_review"
 REVIEW = b"W (%lu) %s: K151_CONVERSATION_REVIEW_NO_RELEASE\n\0"
 ONE_TURN = b"K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN\0"
+DEVICE_OBSERVED = b"K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN_DEVICE_OBSERVED\0"
 CONTINUOUS = b"K151_CONVERSATION_LOCAL_RELEASE_CONTINUOUS\0"
 STATUS = b"Say Hi StackChan\0Standby verified. Trial ended.\0"
 ROUTE = b"/v1/realtime?model=gpt-realtime-2.1-mini\0"
@@ -49,16 +50,27 @@ def test_refuse_missing_paths_private_policy_and_unsafe_logging(pinned_pack, pay
         inspect_image(image(pinned_pack + payload, project=PROJECT), ELF_SHA, TABLE)
 
 
-def test_private_review_requires_one_turn_marker_and_keeps_approval_unset(pinned_pack):
-    fixture = image(pinned_pack + ONE_TURN + STATUS + ROUTE, project=PROJECT)
+@pytest.mark.parametrize(
+    ("marker", "basis"),
+    [(ONE_TURN, "electrical_measurement"), (DEVICE_OBSERVED, "device_diagnostics")],
+)
+def test_private_review_requires_one_turn_marker_and_keeps_approval_unset(
+    pinned_pack, marker, basis
+):
+    fixture = image(pinned_pack + marker + STATUS + ROUTE, project=PROJECT)
     report = inspect_image(fixture, ELF_SHA, PRIVATE_TABLE, local_one_turn=True)
     assert report["private_board_policy_embedded"] is True
     assert report["install_authorized"] is False and report["paid_api_called"] is False
+    assert report["one_turn_output_basis"] == basis
+    assert report["physical_output_or_stop_proven"] is False
     with pytest.raises(ValueError, match="NVS"):
         inspect_image(fixture, ELF_SHA, TABLE, local_one_turn=True)
 
 
-@pytest.mark.parametrize("markers", [REVIEW, CONTINUOUS, ONE_TURN + CONTINUOUS, ONE_TURN + REVIEW])
+@pytest.mark.parametrize(
+    "markers",
+    [REVIEW, CONTINUOUS, ONE_TURN + CONTINUOUS, ONE_TURN + REVIEW, ONE_TURN + DEVICE_OBSERVED],
+)
 def test_private_review_rejects_other_build_modes(pinned_pack, markers):
     fixture = image(pinned_pack + markers + STATUS + ROUTE, project=PROJECT)
     with pytest.raises(ValueError):

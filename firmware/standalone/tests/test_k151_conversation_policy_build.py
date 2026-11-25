@@ -37,15 +37,20 @@ def test_k151_conversation_boot_policy(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("mode", "first_budget", "marker"),
+    ("mode", "first_budget", "device_observed", "marker"),
     [
-        ("hold", False, None),
-        ("one_paid_turn", False, b"ONE_PAID_TURN"),
-        ("one_paid_turn", True, b"ONE_PAID_TURN"),
-        ("continuous", False, b"CONTINUOUS"),
+        ("hold", False, False, None),
+        ("one_paid_turn", False, False, b"ONE_PAID_TURN"),
+        ("one_paid_turn", True, False, b"ONE_PAID_TURN"),
+        ("one_paid_turn", False, True, b"ONE_PAID_TURN_DEVICE_OBSERVED"),
+        ("one_paid_turn", True, True, b"ONE_PAID_TURN_DEVICE_OBSERVED"),
+        ("continuous", False, False, b"CONTINUOUS"),
+        ("continuous", False, True, None),
     ],
 )
-def test_local_policy_marker_requires_complete_compiled_scope(tmp_path, mode, first_budget, marker):
+def test_local_policy_marker_requires_complete_compiled_scope(
+    tmp_path, mode, first_budget, device_observed, marker
+):
     compiler = shutil.which("g++")
     if not compiler:
         pytest.skip("C++20 compiler required")
@@ -65,13 +70,23 @@ def test_local_policy_marker_requires_complete_compiled_scope(tmp_path, mode, fi
         trial_budget = ",\n.trial_budget_must_be_missing = true"
     elif mode == "one_paid_turn":
         trial_budget = ",\n.trial_budget_sha256 = K151BudgetDigest{2}"
+    output = (
+        "{true, true, false, false, false, false, true}"
+        if device_observed
+        else ("{true, true, true, true, true, true, true}")
+    )
+    observed = (
+        ",\n.one_turn_device_evidence = K151OneTurnDeviceEvidence{{1}, {2}, {3}}"
+        if device_observed
+        else ""
+    )
     (tmp_path / "k151_private_policy.inc").write_text(
         "{\n.expected_factory_identity = {1},\n"
-        ".output = {true, true, true, true, true, true, true},\n"
+        f".output = {output},\n"
         ".physical_lcd_verified = true,\n.exclusive_i2s0_verified = true,\n"
         f".paid_scope_approved = true,\n.budget_scope_approved = true,\n"
         f".allow_first_budget = {str(first_budget).lower()},\n"
-        f".mode = K151ConversationBuildMode::{mode}{trial_budget}\n}}\n"
+        f".mode = K151ConversationBuildMode::{mode}{trial_budget}{observed}\n}}\n"
     )
     object_file = tmp_path / "policy.o"
     result = subprocess.run(
@@ -104,7 +119,7 @@ def test_local_policy_marker_requires_complete_compiled_scope(tmp_path, mode, fi
     else:
         assert result.returncode == 0, result.stderr
         data = object_file.read_bytes()
-        for suffix in (b"ONE_PAID_TURN", b"CONTINUOUS"):
+        for suffix in (b"ONE_PAID_TURN", b"ONE_PAID_TURN_DEVICE_OBSERVED", b"CONTINUOUS"):
             assert (b"K151_CONVERSATION_LOCAL_RELEASE_" + suffix + b"\0" in data) == (
                 suffix == marker
             )
