@@ -45,7 +45,19 @@ class SerialLike(Protocol):
 
 
 class ScpsWireError(ValueError):
-    pass
+    diagnostic = "setup_rejected"
+
+
+class ScpsResponseTimeout(ScpsWireError):
+    diagnostic = "response_timeout"
+
+
+class ScpsInvalidFrame(ScpsWireError):
+    diagnostic = "invalid_frame"
+
+
+class ScpsDeviceDenied(ScpsWireError):
+    diagnostic = "device_denied"
 
 
 def _length_allowed(op: Op, length: int) -> bool:
@@ -85,10 +97,10 @@ def _read_exact(port: SerialLike, length: int, expires_at: float) -> bytes:
     chunks = bytearray()
     while len(chunks) < length:
         if time.monotonic() >= expires_at:
-            raise ScpsWireError("USB read deadline expired")
+            raise ScpsResponseTimeout("USB read deadline expired")
         part = port.read(min(96, length - len(chunks)))
         if not isinstance(part, bytes) or len(part) > length - len(chunks):
-            raise ScpsWireError("invalid serial read")
+            raise ScpsInvalidFrame("invalid serial read")
         chunks.extend(part)
     return bytes(chunks)
 
@@ -99,12 +111,16 @@ def read_one(port: SerialLike, deadline_seconds: float = 20.0) -> Frame:
     cutoff = time.monotonic() + deadline_seconds
     header = _read_exact(port, HEADER_BYTES, cutoff)
     if header[:4] != MAGIC or header[4] != VERSION or not 1 <= header[5] <= 8:
-        raise ScpsWireError("invalid framing header")
+        raise ScpsInvalidFrame("invalid framing header")
     op = Op(header[5])
     payload_size = int.from_bytes(header[6:], "little")
     if not _length_allowed(op, payload_size):
-        raise ScpsWireError("invalid declared length")
-    return decode(header + _read_exact(port, payload_size + CRC_BYTES, cutoff))
+        raise ScpsInvalidFrame("invalid declared length")
+    trailer = _read_exact(port, payload_size + CRC_BYTES, cutoff)
+    try:
+        return decode(header + trailer)
+    except ScpsWireError as exc:
+        raise ScpsInvalidFrame("invalid frame body") from exc
 
 
 def write_one(port: SerialLike, frame: Frame) -> None:
@@ -117,6 +133,8 @@ def write_one(port: SerialLike, frame: Frame) -> None:
 
 def expect(port: SerialLike, expected: Op, seconds: float) -> Frame:
     frame = read_one(port, seconds)
+    if frame.op is Op.DENIED:
+        raise ScpsDeviceDenied("unexpected pairing state")
     if frame.op != expected:
         raise ScpsWireError("unexpected pairing state")
     return frame

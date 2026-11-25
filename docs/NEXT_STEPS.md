@@ -1,5 +1,32 @@
 # Next steps
 
+## 2026-11-26 기존 PC 설정 재사용과 USB 오류 구분
+
+한 턴 실행기의 `--reuse-openai-env`와 `--reuse-connected-wifi`는 각각
+명시한 로컬 설정 파일의 OpenAI 키와 현재 연결된 Windows Wi-Fi
+프로필을 사용한다. 두 옵션은 독립적이다. 기기 화면의 8자리와
+Windows 코드가 일치한 뒤에만 소스를 읽고 기존 암호화 USB 교환을
+거친다. 화면 확인과 최종 머리 터치, 이후 Cloud 사용 동의는 그대로다.
+Windows가 개인용 Wi-Fi 키 읽기를 허용하지 않으면 해당 정보만 로컬에서
+입력한다. 값 자체를 명령줄, 출력, 로그 또는 새 파일에 넣지 않는다.
+[Windows 프로필 읽기 권한](https://learn.microsoft.com/windows/win32/api/wlanapi/nf-wlanapi-wlangetprofile)
+
+노트북에서 현재 연결의 개인용 Wi-Fi 프로필과 보호된 키 항목을
+확인했다. 이번 조회는 평문 키를 요청하지 않았다. 모의 설정에서
+두 소스 재사용, 코드 불일치 시 소스 읽기 차단, Wi-Fi만 수동
+입력하는 경우 및 기존 출고 복구를 검증했다.
+
+USB 진단은 `response_timeout`, `serial_io`, `invalid_frame`,
+`device_denied`를 기존 실패 단계와 함께 표시한다. 각 경우를
+모의 시리얼에서 재현했으며 기존 기한, STOP, 승인 범위를 유지했다.
+오프라인 설정·설치 실행기 회귀 112개와 C++·HOLD 검사 45개가
+통과했다.
+지난 실패의 화면 미표시 원인은 여전히 미확정이다. 이번 작업에서
+기기 쓰기, 실음성 수집 및 유료 요청은 0회다.
+
+이전 커밋 `1ecfccf`의 GitHub 검사 9개가 모두 통과했다.
+[실제 ESP32-S3 컴파일·링크](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/45700125468)
+
 ## 2026-11-26 독립 대화 1회 설치, 설정 중단 및 출고 복구
 
 첫 실행은 Windows 대화형 콘솔을 판정할 때 ROM 출력 가리기에 사용한
@@ -861,6 +888,11 @@ uv run --offline --frozen --with esptool==5.6.0 --with cryptography==46.0.4 pyth
   --review-dir $Review --app $App --factory-ota1 $FactoryOta1 `
   --pretrial-nvs $PretrialNvs --board-reference $BoardReference
 ~~~
+
+이전에 PC에서 쓰던 설정을 재사용하려면 위 실행 명령 끝에
+`--reuse-openai-env $ExistingEnv --reuse-connected-wifi`를 추가한다.
+`$ExistingEnv`에는 기존 로컬 설정 파일의 경로만 넣는다. 둘 중
+한 옵션만 사용할 수도 있다.
 
 실행기는 승인과 이미지·복구 파일을 확인한 뒤, 같은 USB 장치인지
 대조하고 독점 핸들로 포트 점유를 확인한다. 기기 설정을 바꾸는

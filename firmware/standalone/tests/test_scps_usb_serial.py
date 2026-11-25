@@ -117,6 +117,81 @@ def test_full_encrypted_pairing_and_no_secret_echo():
     assert screen < head
 
 
+@pytest.mark.parametrize("matches", [True, False])
+def test_saved_sources_run_only_after_matching_local_code(matches):
+    port = FakePort()
+    messages = []
+    reads = []
+    wifi = (b"synthetic-network", "synthetic-passphrase")
+    key = "synthetic-openai-key"
+
+    def local_code(prompt):
+        assert "8 digits" in prompt
+        assert not reads
+        assert port.sas is not None
+        return port.sas if matches else "invalid"
+
+    def read_wifi():
+        reads.append("wifi")
+        return wifi
+
+    def read_key():
+        reads.append("api")
+        return key
+
+    def manual_secret(_):
+        pytest.fail("saved entries should not ask for manual input")
+
+    def pair():
+        return run_pairing(
+            port,
+            text_input=local_code,
+            hidden_input=manual_secret,
+            say=messages.append,
+            load_wifi=read_wifi,
+            load_api_key=read_key,
+        )
+
+    if not matches:
+        with pytest.raises(ScpsWireError, match="pairing codes do not match"):
+            pair()
+        assert reads == []
+        assert [frame.op for frame in port.writes] == [Op.PC_HELLO, Op.STOP]
+        return
+
+    assert pair()
+    assert reads == ["wifi", "api"]
+    assert (port.credentials.ssid, port.credentials.password, port.credentials.api_key) == (
+        *wifi,
+        key,
+    )
+    assert [frame.op for frame in port.writes] == [Op.PC_HELLO, Op.SEALED]
+    assert all(secret not in "\n".join(messages) for secret in (wifi[0].decode(), wifi[1], key))
+
+
+def test_unavailable_saved_wifi_uses_manual_wifi_and_keeps_saved_key():
+    port = FakePort()
+    key = "synthetic-openai-key"
+
+    def visible(prompt):
+        return port.sas if "8 digits" in prompt else "synthetic-network"
+
+    def hidden(prompt):
+        assert "Wi-Fi password" in prompt
+        return "synthetic-password"
+
+    assert run_pairing(
+        port,
+        text_input=visible,
+        hidden_input=hidden,
+        say=lambda _: None,
+        load_wifi=lambda: None,
+        load_api_key=lambda: key,
+    )
+    assert port.credentials.ssid == b"synthetic-network"
+    assert port.credentials.api_key == key
+
+
 @pytest.mark.parametrize("unavailable_at", ["Wi-Fi password", "OpenAI API key"])
 def test_unavailable_hidden_input_aborts_before_echoing_or_sending_secrets(
     monkeypatch, unavailable_at
@@ -242,15 +317,16 @@ def test_cli_cues_head_touch_only_after_opening_without_reset(monkeypatch, open_
 
 
 @pytest.mark.parametrize(
-    ("hello_failure", "stage", "sent"),
+    ("hello_failure", "stage", "reason", "sent"),
     [
-        ("timeout", "device_hello", [Op.STOP]),
-        ("io_error", "device_hello", [Op.STOP]),
-        (None, "display_ready", [Op.PC_HELLO, Op.STOP]),
+        ("timeout", "device_hello", "response_timeout", [Op.STOP]),
+        ("io_error", "device_hello", "serial_io", [Op.STOP]),
+        ("invalid_frame", "device_hello", "invalid_frame", [Op.STOP]),
+        (None, "display_ready", "device_denied", [Op.PC_HELLO, Op.STOP]),
     ],
 )
 def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
-    monkeypatch, capsys, hello_failure, stage, sent
+    monkeypatch, capsys, hello_failure, stage, reason, sent
 ):
     class Serial(FakePort):
         def __init__(self, **_settings):
@@ -270,6 +346,8 @@ def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
             return super().read(size)
 
     port = Serial()
+    if hello_failure == "invalid_frame":
+        port.rx = bytearray(b"invalid\x01")
     monkeypatch.setitem(
         sys.modules, "serial", SimpleNamespace(Serial=lambda **_: port, SerialException=OSError)
     )
@@ -278,7 +356,7 @@ def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
 
     assert cli.main(["--port", "COM3", "--interactive"]) == 1
     output = capsys.readouterr().out
-    assert f"Pairing failed at {stage}." in output
+    assert f"Pairing failed at {stage} ({reason})." in output
     assert "internal test detail" not in output
     assert "PC pairing code" not in output
     assert [frame.op for frame in port.writes] == sent

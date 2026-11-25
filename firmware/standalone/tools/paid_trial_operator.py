@@ -100,6 +100,8 @@ def run_operator_paid_trial(
     port_available: Callable[[str], bool],
     *,
     recover_only: bool = False,
+    reuse_openai_env: Path | None = None,
+    reuse_connected_wifi: bool = False,
 ) -> TrialResult:
     """Connect the existing ROM and SCPS tools. The caller checks port occupancy."""
     # The ROM adapter suppresses its output while invoking the port check.
@@ -140,20 +142,18 @@ def run_operator_paid_trial(
     def pair():
         if not _wait_for(lambda: present(port), 15, time.monotonic, time.sleep):
             return False
-        return (
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(Path(__file__).with_name("scps_usb_cli.py")),
-                    "--port",
-                    port,
-                    "--interactive",
-                ],
-                timeout=145,
-                check=False,
-            ).returncode
-            == 0
-        )
+        command = [
+            sys.executable,
+            str(Path(__file__).with_name("scps_usb_cli.py")),
+            "--port",
+            port,
+            "--interactive",
+        ]
+        if reuse_openai_env is not None:
+            command.extend(["--reuse-openai-env", str(reuse_openai_env)])
+        if reuse_connected_wifi:
+            command.append("--reuse-connected-wifi")
+        return subprocess.run(command, timeout=145, check=False).returncode == 0
 
     def read_key():
         import msvcrt
@@ -190,7 +190,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--factory-ota1", type=Path, required=True)
     parser.add_argument("--pretrial-nvs", type=Path, required=True)
     parser.add_argument("--board-reference", type=Path, required=True)
+    parser.add_argument(
+        "--reuse-openai-env", type=Path, help="Read the API key from this local .env"
+    )
+    parser.add_argument(
+        "--reuse-connected-wifi",
+        action="store_true",
+        help="Use the connected Windows Wi-Fi profile",
+    )
     args = parser.parse_args(argv)
+    if args.recover and (args.reuse_openai_env is not None or args.reuse_connected_wifi):
+        parser.error("saved setup options apply only to --execute")
     if re.fullmatch(r"COM[1-9][0-9]*", args.port, re.IGNORECASE) is None:
         parser.error("the port must be a Windows COM name")
     paths = PaidTrialPaths(
@@ -201,7 +211,12 @@ def main(argv: list[str] | None = None) -> int:
         previous_handler = signal.signal(break_signal, signal.default_int_handler)
     try:
         result = run_operator_paid_trial(
-            paths, args.port.upper(), _windows_port_available, recover_only=args.recover
+            paths,
+            args.port.upper(),
+            _windows_port_available,
+            recover_only=args.recover,
+            reuse_openai_env=args.reuse_openai_env,
+            reuse_connected_wifi=args.reuse_connected_wifi,
         )
     finally:
         if break_signal is not None:

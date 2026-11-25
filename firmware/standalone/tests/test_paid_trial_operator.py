@@ -212,7 +212,8 @@ def test_missing_observation_or_attachment_cannot_report_a_successful_turn(setti
 
 
 @pytest.mark.parametrize(
-    "outcome", ["ready", "renumbered", "wrong_port", "replacement", "occupied", "ctrl_break"]
+    "outcome",
+    ["ready", "saved_setup", "renumbered", "wrong_port", "replacement", "occupied", "ctrl_break"],
 )
 def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
     review, monkeypatch, capsys, outcome
@@ -224,6 +225,11 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
     changed_port = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM4", serial_number="original")
     other = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="other")
     checks = []
+    source_options = (
+        ["--reuse-openai-env", str(paths.review_dir / "synthetic.env"), "--reuse-connected-wifi"]
+        if outcome == "saved_setup"
+        else []
+    )
     break_signal = 21
     handlers = {break_signal: signal.SIG_DFL}
     delivered = []
@@ -257,7 +263,7 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
         assert device.events[-1] == ("close", 1)
         assert operator.seconds >= 1
         assert Path(arguments[1]).name == "scps_usb_cli.py"
-        assert arguments[2:] == ["--port", "COM3", "--interactive"]
+        assert arguments[2:] == ["--port", "COM3", "--interactive", *source_options]
         assert 0 < timeout <= 145 and check is False
         operator.unplug_at, operator.reconnect_at = 2, 5
         device.events.append(("trial", 1))
@@ -302,7 +308,7 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
     monkeypatch.setattr("paid_trial_rom._load_esptool", lambda: (detect, Chip, device))
     monkeypatch.setattr(operator_tool, "_windows_port_available", available, raising=False)
 
-    status = operator_tool.main(["--execute", *trial_args(paths)])
+    status = operator_tool.main(["--execute", *trial_args(paths), *source_options])
     result = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert handlers[break_signal] is signal.SIG_DFL
     if outcome == "occupied":
