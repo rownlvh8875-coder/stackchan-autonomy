@@ -206,6 +206,17 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
       if (power==0x03 && speaker_unmuted && local_stop &&
           mode.starts_with("speaker_probe_screen_stop_sticky_sws"))
         bytes[0] = 1; // Shutdown status is still switching with the codec powered down.
+      if (speaker_unmuted && mode.starts_with("speaker_probe_screen_stop_host_switch_")) {
+        if (power==0x42 && tx.enabled) {
+          assert(!local_owner && !local_stop && !rx.enabled && (amp_registers[0x05][1] & 0x10));
+          ++switching_samples_before_tx_stop;
+          if (mode=="speaker_probe_screen_stop_host_switch_read_failure") return ESP_CODEC_DEV_DRV_ERR;
+          if (mode=="speaker_probe_screen_stop_host_switch_settles" &&
+              switching_samples_before_tx_stop == 3)
+            switch_off_seen_with_codec_clock = true;
+        }
+        bytes[0] = switch_off_seen_with_codec_clock ? 0 : 1;
+      }
       if (power==0x42 && speaker_unmuted && tx.enabled &&
           mode=="speaker_probe_standby_read_delivered_late") {
         ++switching_samples_before_tx_stop;
@@ -248,9 +259,10 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
     auto& stored = amp_registers[reg];
     if (write) {
       if (reg == 0x04 && (bytes[1] & 0x43) != 0x03) {
-        assert(exercise_playback() && tx.enabled && !rx.enabled && !local_stop);
-        assert((amp_registers[0x05][1] & 0x10) != 0);
         const auto power = bytes[1] & 0x43;
+        const bool turning_off = power == 0x42 && (stored[1] & 0x43) == 0x40;
+        assert(exercise_playback() && tx.enabled && !rx.enabled && (!local_stop || turning_off));
+        assert((amp_registers[0x05][1] & 0x10) != 0);
         assert((power == 0x43 && (stored[1] & 0x43) == 0x03) ||
                (power == 0x42 && ((stored[1] & 0x43) == 0x43 ||
                                   (speaker_unmuted && (stored[1] & 0x43) == 0x40))) ||
@@ -752,7 +764,9 @@ extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void* data,size
       stop_cue.sent=mode!="speaker_probe_screen_stop_cue_not_sent";
     }
 #endif
-    if (screen_stop_probe() && playback_writes==3) {
+    const bool host_switch = mode.starts_with("speaker_probe_screen_stop_host_switch_");
+    if (host_switch && playback_writes==5) local_owner=false;
+    if (screen_stop_probe() && !host_switch && playback_writes==3) {
       if (mode=="speaker_probe_screen_stop_host") local_owner=false;
       else if (mode!="speaker_probe_screen_stop_no_touch") {
         sampled_display_stop=speaker_clock_us+5'000;
@@ -897,9 +911,14 @@ int main(int argc,char** argv) {
     report_k151_speaker_stop_probe(local_owner, {true, true}, stop_cue);
     if (mode=="speaker_probe_screen_stop_early") assert(playback_writes==0);
     else if (mode=="speaker_probe_screen_stop_no_touch") assert(playback_writes==250);
+    else if (mode.starts_with("speaker_probe_screen_stop_host_switch_")) assert(playback_writes==5);
     else assert(playback_writes==3);
+    if (mode=="speaker_probe_screen_stop_host_switch_settles") assert(switching_samples_before_tx_stop==3);
+    if (mode=="speaker_probe_screen_stop_host_switch_timeout") assert(switching_samples_before_tx_stop==8);
+    if (mode=="speaker_probe_screen_stop_host_switch_read_failure") assert(switching_samples_before_tx_stop==1);
     assert(!tx.enabled && !rx.enabled);
-    assert(bus.alive==(mode=="speaker_probe_screen_stop_cleanup"));
+    assert(bus.alive==(mode=="speaker_probe_screen_stop_cleanup" ||
+                       mode=="speaker_probe_screen_stop_host_switch_read_failure"));
     return 0;
   }
 #endif

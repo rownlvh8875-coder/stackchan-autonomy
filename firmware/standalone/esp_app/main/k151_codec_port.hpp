@@ -87,7 +87,8 @@ class K151CodecPort final {
     return owner_ ? owner_->load() && !stop_->load() : !attempted_;
   }
   bool fail();
-  K151SpeakerCleanupStage wait_for_standby_switch_off(const std::atomic_bool& consent);
+  K151SpeakerCleanupStage wait_for_standby_switch_off(const std::atomic_bool* consent,
+                                                     bool stopping);
   void note_speaker_cleanup_failure(K151SpeakerCleanupStage stage) {
     if constexpr (speaker_probe_build()) {
       if (speaker_cleanup_stage_ == K151SpeakerCleanupStage::none) speaker_cleanup_stage_ = stage;

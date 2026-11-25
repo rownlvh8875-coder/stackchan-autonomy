@@ -182,10 +182,40 @@ def test_combined_speaker_stop_and_standby(speaker_probe_binary, case, outcome):
     assert report["stop_diagnostic"] == {
         "screen_stop_sampled": case not in {"host", "no_touch"},
         "pcm_write_rejected": case == "write_fault",
-        "cleanup_stage": 20 if case.startswith("sticky_sws") else 0,
+        "cleanup_stage": {"sticky_sws": 20, "sticky_sws_tx_active": 2}.get(case, 0),
         "reset_latch_verified": case.startswith("sticky_sws"),
         "tx_idle_observed": case not in {"early", "sticky_sws_tx_active"},
         "sample_to_reset_idle_us": 5_000 if case == "sticky_sws" else None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("case", "stage"),
+    [("settles", 0), ("timeout", 23), ("read_failure", 24)],
+)
+def test_host_stop_checks_switching_before_closing_i2s(speaker_probe_binary, case, stage):
+    import json
+
+    process = subprocess.run(
+        [str(speaker_probe_binary), f"speaker_probe_screen_stop_host_switch_{case}"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert process.returncode == 0, process.stderr
+    report = json.loads(process.stdout.splitlines()[-1])
+    assert report["result"] == ("cleanup_failed" if stage else "host_stopped")
+    assert report["pcm_blocks"] == 5
+    assert report["dma_complete"] is False
+    assert report["standby_confirmed"] is (stage == 0)
+    assert report["sample_to_standby_us"] is None
+    assert report["stop_diagnostic"] == {
+        "screen_stop_sampled": False,
+        "pcm_write_rejected": False,
+        "cleanup_stage": stage,
+        "reset_latch_verified": stage != 0,
+        "tx_idle_observed": True,
+        "sample_to_reset_idle_us": None,
     }
 
 
