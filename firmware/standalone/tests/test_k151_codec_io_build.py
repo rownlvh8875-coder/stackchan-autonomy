@@ -145,9 +145,10 @@ def speaker_probe_binary(tmp_path_factory):
     ("case", "outcome"),
     [
         ("playing", "screen_stop_and_standby_observed"),
-        ("early", "no_playing_stop"),
-        ("host", "no_playing_stop"),
-        ("no_touch", "no_playing_stop"),
+        ("early", "screen_stop_before_playing"),
+        ("host", "host_stopped"),
+        ("no_touch", "completed_no_stop"),
+        ("cue_not_sent", "screen_stop_timing_unverified"),
         ("write_fault", "cleanup_failed"),
         ("cleanup", "cleanup_failed"),
     ],
@@ -164,6 +165,12 @@ def test_combined_speaker_stop_and_standby(speaker_probe_binary, case, outcome):
     assert process.returncode == 0, process.stderr
     report = json.loads(process.stdout.splitlines()[-1])
     assert report["result"] == outcome
+    assert report["speaker_probe"] == "K151_SPEAKER_STOP_V2"
+    assert report["pcm_blocks"] == {"early": 0, "no_touch": 250, "write_fault": 2}.get(case, 3)
+    assert report["dma_complete"] is (case == "no_touch")
+    assert report["standby_confirmed"] is (
+        case in {"playing", "host", "no_touch", "cue_not_sent", "cleanup"}
+    )
     if case == "playing":
         assert report["sample_to_standby_us"] == 5_000
     else:

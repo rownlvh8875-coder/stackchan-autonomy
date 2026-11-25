@@ -31,21 +31,43 @@ def test_receive_only_scope(model_fixture):
     assert manifest["install_authorized"] is False
 
 
-def test_speaker_stop_requires_its_own_app_and_marker(model_fixture):
+@pytest.mark.parametrize(
+    ("protocol", "challenge", "progress"),
+    [
+        ("K151_SPEAKER_STOP_V1", b"WAIT_SPEAKER_SCREEN_STOP_START\0", b""),
+        (
+            "K151_SPEAKER_STOP_V2",
+            b"WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START\0",
+            b'"SPEAKER_STOP_PLAYING"\0"pcm_blocks"\0"dma_complete"\0"standby_confirmed"\0',
+        ),
+    ],
+)
+def test_speaker_stop_requires_its_own_app_and_marker(model_fixture, protocol, challenge, progress):
     from check_mic_wake_image import inspect_image
 
     project = b"k151_speaker_stop_probe"
     markers = (
-        b"K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL\0WAIT_SPEAKER_SCREEN_STOP_START\0"
-        b'K151_SPEAKER_STOP_V1"\0"SPEAKER_STOP_ARMED"\0"sample_to_standby_us"\0'
+        b"K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL\0"
+        + challenge
+        + protocol.encode()
+        + b'"\0"SPEAKER_STOP_ARMED"\0"sample_to_standby_us"\0'
+        + progress
     )
     app = image(markers, project=project)
     proof = inspect_image(app, ELF_SHA, SLOT_CSV, speaker_stop=True)
-    assert proof["expected_protocol"] == "K151_SPEAKER_STOP_V1"
+    assert proof["expected_protocol"] == protocol
     assert proof["tone_samples"] == 60_000
     assert proof["electrical_stop_mute_verified"] is proof["install_authorized"] is False
     with pytest.raises(ValueError):
         inspect_image(app, ELF_SHA, SLOT_CSV, speaker=True)
+    if progress:
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers[: -len(progress)], project=project),
+                ELF_SHA,
+                SLOT_CSV,
+                speaker_stop=True,
+            )
     for foreign in (model_fixture, b"api.openai.com\0", b"K151_SPEAKER_V13"):
         with pytest.raises(ValueError):
             inspect_image(

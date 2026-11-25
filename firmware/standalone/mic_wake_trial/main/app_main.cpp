@@ -3,6 +3,8 @@
 #include "board_evidence.hpp"
 #if defined(STACKCHAN_K151_SILENT_TX_PROBE)
 #include "k151_silent_tx_probe.hpp"
+#elif defined(STACKCHAN_K151_SPEAKER_STOP_PROBE)
+#include "k151_speaker_stop_probe.hpp"
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 #include "k151_speaker_probe.hpp"
 #elif defined(STACKCHAN_K151_QUESTION_ONLY)
@@ -25,12 +27,6 @@
     !defined(STACKCHAN_K151_SPEAKER_PROBE)
 namespace stackchan::standalone {
 std::span<const uint8_t> linked_mic_trial_model();
-}
-#endif
-
-#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
-namespace stackchan::standalone {
-void report_k151_speaker_stop_probe(const std::atomic_bool& owner, K151AudioBoardEvidence evidence);
 }
 #endif
 
@@ -61,7 +57,8 @@ const char* tx_result_name(K151SilentTxResult result) {
 }
 #elif defined(STACKCHAN_K151_SPEAKER_STOP_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_SPEAKER_SCREEN_STOP_START";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START";
+K151SpeakerStopCue speaker_stop_cue;
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";
 constexpr char kChallengeMarker[] = "WAIT_SPEAKER_AMP_OFF_LOCAL_START";
@@ -162,6 +159,13 @@ void reader(void*) {
       gate.tick(now);
     }
     if (gate.running()) owner = true;
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+    if (gate.running() && speaker_stop_cue.pending.exchange(false)) {
+      if (std::puts("{\"mic_trial\":\"SPEAKER_STOP_PLAYING\",\"operating_admission\":false}") >= 0 &&
+          std::fflush(stdout) == 0)
+        speaker_stop_cue.sent.store(true);
+    }
+#endif
   }
   owner = false;
   stop = true;
@@ -208,7 +212,7 @@ extern "C" void app_main() {
                   "\"operating_admission\":false}\n", result);
     }
 #elif defined(STACKCHAN_K151_SPEAKER_STOP_PROBE)
-    report_k151_speaker_stop_probe(owner, {expected_location, true});
+    report_k151_speaker_stop_probe(owner, {expected_location, true}, speaker_stop_cue);
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
     const K151AudioBoardEvidence evidence{expected_location, true};
     const auto report = run_k151_speaker_probe(owner, stop, evidence);

@@ -10,6 +10,7 @@
 #include "k151_install_hold.hpp"
 #include "k151_lcd_panel.hpp"
 #include "k151_speaker_probe.hpp"
+#include "k151_speaker_stop_probe.hpp"
 #endif
 #ifdef STACKCHAN_K151_CONVERSATION_IMAGE
 #include "k151_pcm_speaker_sink.hpp"
@@ -36,6 +37,9 @@ namespace {
 std::string mode;
 bool screen_stop_probe() { return mode.starts_with("speaker_probe_screen_stop_"); }
 int64_t sampled_display_stop = -1;
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+K151SpeakerStopCue stop_cue;
+#endif
 i2s_channel_obj tx,rx;
 i2c_master_bus_t bus;
 i2c_master_dev_t pmic{0x34}, expander{0x58};
@@ -738,6 +742,12 @@ extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void* data,size
     for (size_t i=0;i<n/2;++i) speaker_peak=std::max(speaker_peak, std::abs(int(pcm[i])));
     if (playback_writes % 25==1) assert(pcm[0]==0);
     if (playback_writes % 25==0) assert(pcm[239]==0);
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+    if (screen_stop_probe() && playback_writes==2) {
+      assert(stop_cue.pending.exchange(false)); // First completed PCM write queued the PC cue.
+      stop_cue.sent=mode!="speaker_probe_screen_stop_cue_not_sent";
+    }
+#endif
     if (screen_stop_probe() && playback_writes==3) {
       if (mode=="speaker_probe_screen_stop_host") local_owner=false;
       else if (mode!="speaker_probe_screen_stop_no_touch") {
@@ -836,7 +846,7 @@ extern "C" lv_obj_t* lv_display_get_screen_active(lv_display_t* object) {
 extern "C" lv_obj_t* lv_label_create(lv_obj_t* parent) { assert(parent == &label); return &label; }
 extern "C" void lv_obj_center(lv_obj_t* object) { assert(object == &label); }
 extern "C" void lv_label_set_text(lv_obj_t* object, const char* text) {
-  assert(object == &label && std::string_view(text) == "Tap screen during tone");
+  assert(object == &label && std::string_view(text) == "Wait for PC, then tap screen");
 }
 namespace stackchan::standalone {
 K151LcdPanel::~K151LcdPanel() = default;
@@ -863,7 +873,6 @@ bool K151DisplayStop::disarm() {
   stop_armed = false;
   return true;
 }
-void report_k151_speaker_stop_probe(const std::atomic_bool&, K151AudioBoardEvidence);
 } // namespace stackchan::standalone
 #endif
 #ifdef STACKCHAN_TEST_EMBEDDED_MIC_TRIAL
@@ -881,7 +890,7 @@ int main(int argc,char** argv) {
   assert(argc==2 || (argc==3 && std::string_view(argv[2])=="--report"));mode=argv[1];
 #ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
   if (screen_stop_probe()) {
-    report_k151_speaker_stop_probe(local_owner, {true, true});
+    report_k151_speaker_stop_probe(local_owner, {true, true}, stop_cue);
     if (mode=="speaker_probe_screen_stop_early") assert(playback_writes==0);
     else if (mode=="speaker_probe_screen_stop_no_touch") assert(playback_writes==250);
     else assert(playback_writes==3);

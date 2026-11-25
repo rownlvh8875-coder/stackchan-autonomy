@@ -26,10 +26,19 @@ def inspect_image(
         raise ValueError("Select a single trial image")
     if speaker_stop:
         envelope, _ = inspect_envelope(app, elf_sha256, b"k151_speaker_stop_probe")
+        protocols = {
+            "K151_SPEAKER_STOP_V1": (b"WAIT_SPEAKER_SCREEN_STOP_START\0",),
+            "K151_SPEAKER_STOP_V2": (
+                b"WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START\0",
+                b'"SPEAKER_STOP_PLAYING"',
+                b'"pcm_blocks"',
+                b'"dma_complete"',
+                b'"standby_confirmed"',
+            ),
+        }
+        observed = [protocol for protocol in protocols if protocol.encode() + b'"' in app]
         required = (
             b"K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL\0",
-            b"WAIT_SPEAKER_SCREEN_STOP_START\0",
-            b'K151_SPEAKER_STOP_V1"',
             b'"SPEAKER_STOP_ARMED"',
             b'"sample_to_standby_us"',
         )
@@ -40,15 +49,17 @@ def inspect_image(
             b"api.openai.com\0",
             b"K151_SPEAKER_V13",
         )
-        if not all(marker in app for marker in required) or any(
-            marker in app for marker in forbidden
+        if (
+            len(observed) != 1
+            or not all(marker in app for marker in required + protocols[observed[0]])
+            or any(marker in app for marker in forbidden)
         ):
             raise ValueError("Unexpected speaker STOP diagnostic image")
         return {
             **envelope,
             **validate_slot(partition_csv, SLOT_OFFSET, envelope["erase_span_bytes"]),
             "kind": "SYNTHETIC_SPEAKER_SCREEN_STOP_NOT_OPERATIONAL",
-            "expected_protocol": "K151_SPEAKER_STOP_V1",
+            "expected_protocol": observed[0],
             "local_nonce_start_required": True,
             "combined_start_window_ms": 10_000,
             "tone_samples": 60_000,

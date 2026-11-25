@@ -928,6 +928,45 @@ def test_stopped_speaker_wire_report_requires_an_armed_window_and_strict_timing(
         )
 
 
+def test_speaker_stop_progress_waits_for_first_pcm_before_prompting(receiver):
+    protocol = "K151_SPEAKER_STOP_V2"
+    start = SPEAKER_WAIT | {"mic_trial": "WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START"}
+    armed = {"mic_trial": "SPEAKER_STOP_ARMED", "operating_admission": False}
+    playing = armed | {"mic_trial": "SPEAKER_STOP_PLAYING"}
+    report = {
+        "speaker_probe": protocol,
+        "result": "completed_no_stop",
+        "pcm_blocks": 250,
+        "dma_complete": True,
+        "standby_confirmed": True,
+        "sample_to_standby_us": None,
+        "operating_admission": False,
+    }
+    cues = []
+    for records, expected in (
+        ([start, armed, playing, report, HOLD], [True]),
+        ([start, armed, report, playing, HOLD], []),
+    ):
+        cues.clear()
+        assert (
+            receiver.receive_once(
+                FakeSerial(records),
+                lambda: cues.append(True),
+                speaker=True,
+                speaker_protocol=protocol,
+            )
+            == report
+        )
+        assert cues == expected
+    for invalid in (
+        report | {"pcm_blocks": 249},
+        report | {"dma_complete": False},
+        report | {"standby_confirmed": False},
+    ):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(invalid, speaker=True, speaker_protocol=protocol)
+
+
 @pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )

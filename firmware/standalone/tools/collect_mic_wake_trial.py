@@ -31,9 +31,12 @@ SPEAKER_STANDBY_CHECK_PROTOCOL = "K151_SPEAKER_V11"
 SPEAKER_MUTE_SETTLE_PROTOCOL = "K151_SPEAKER_V12"
 SPEAKER_AMP_OFF_PROTOCOL = "K151_SPEAKER_V13"
 SPEAKER_STOP_PROTOCOL = "K151_SPEAKER_STOP_V1"
+SPEAKER_STOP_PROGRESS_PROTOCOL = "K151_SPEAKER_STOP_V2"
+SPEAKER_STOP_PROTOCOLS = {SPEAKER_STOP_PROTOCOL, SPEAKER_STOP_PROGRESS_PROTOCOL}
 SPEAKER_STOP_SCOPE = "ONE_SYNTHETIC_SPEAKER_SCREEN_STOP_AND_OTA1_RESTORE"
 SPEAKER_STOP_MODE = "SYNTHETIC_SPEAKER_SCREEN_STOP"
 SPEAKER_STOP_CUE = "SPEAKER_STOP_ARMED"
+SPEAKER_STOP_PROGRESS_CUE = "SPEAKER_STOP_PLAYING"
 SPEAKER_STOP_OK = "screen_stop_and_standby_observed"
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
@@ -50,6 +53,7 @@ SPEAKER_CHALLENGES = {
     SPEAKER_MUTE_SETTLE_PROTOCOL: "WAIT_SPEAKER_MUTE_SETTLE_LOCAL_START",
     SPEAKER_AMP_OFF_PROTOCOL: "WAIT_SPEAKER_AMP_OFF_LOCAL_START",
     SPEAKER_STOP_PROTOCOL: "WAIT_SPEAKER_SCREEN_STOP_START",
+    SPEAKER_STOP_PROGRESS_PROTOCOL: "WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
@@ -66,6 +70,7 @@ SPEAKER_REVIEW_KINDS = {
     SPEAKER_MUTE_SETTLE_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V12",
     SPEAKER_AMP_OFF_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V13",
     SPEAKER_STOP_PROTOCOL: "REVIEW_ONLY_SPEAKER_STOP_V1",
+    SPEAKER_STOP_PROGRESS_PROTOCOL: "REVIEW_ONLY_SPEAKER_STOP_V2",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -188,6 +193,59 @@ def validate_question_report(record, *, cue_seen, wake=None):
 
 
 def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL):
+    if speaker and speaker_protocol == SPEAKER_STOP_PROGRESS_PROTOCOL:
+        fields = {
+            "speaker_probe",
+            "result",
+            "pcm_blocks",
+            "dma_complete",
+            "standby_confirmed",
+            "sample_to_standby_us",
+            "operating_admission",
+        }
+        result = record.get("result")
+        blocks = record.get("pcm_blocks")
+        dma = record.get("dma_complete")
+        quiet = record.get("standby_confirmed")
+        delta = record.get("sample_to_standby_us")
+        if (
+            set(record) != fields
+            or record.get("speaker_probe") != speaker_protocol
+            or record.get("operating_admission") is not False
+            or type(blocks) is not int
+            or not 0 <= blocks <= 250
+            or type(dma) is not bool
+            or type(quiet) is not bool
+            or (dma and blocks != 250)
+            or result
+            not in (
+                SPEAKER_STOP_OK,
+                "completed_no_stop",
+                "screen_stop_before_playing",
+                "screen_stop_after_queue",
+                "screen_stop_timing_unverified",
+                "host_stopped",
+                "clock_fault",
+                "preparation_failed",
+                "amplifier_start_failed",
+                "transfer_failed",
+                "cleanup_failed",
+            )
+            or (result == "completed_no_stop" and not (dma and quiet))
+            or (
+                result == SPEAKER_STOP_OK
+                and (
+                    blocks == 0
+                    or dma
+                    or not quiet
+                    or type(delta) is not int
+                    or not 0 <= delta <= 10_000_000
+                )
+            )
+            or (result != SPEAKER_STOP_OK and delta is not None)
+        ):
+            raise ValueError("Invalid speaker STOP progress")
+        return record
     if speaker and speaker_protocol == SPEAKER_STOP_PROTOCOL:
         result = record.get("result")
         delta = record.get("sample_to_standby_us")
@@ -460,7 +518,7 @@ def receive_once(
     accepted_nonce = None
     started = listening = complete = False
     report = question_report = None
-    question_cued = speaker_stop_cued = False
+    question_cued = speaker_stop_armed = speaker_stop_cued = False
     pending = bytearray()
     try:
         while clock() < deadline:
@@ -532,16 +590,32 @@ def receive_once(
             elif marker == SPEAKER_STOP_CUE:
                 if (
                     not speaker
-                    or speaker_protocol != SPEAKER_STOP_PROTOCOL
+                    or speaker_protocol not in SPEAKER_STOP_PROTOCOLS
                     or not started
-                    or speaker_stop_cued
+                    or speaker_stop_armed
                     or report is not None
                     or set(record) != {"mic_trial", "operating_admission"}
                     or record["operating_admission"] is not False
                 ):
                     raise ValueError("Unexpected speaker STOP cue")
+                speaker_stop_armed = True
+                if speaker_protocol == SPEAKER_STOP_PROTOCOL:
+                    speaker_stop_cued = True
+                    announce()
+            elif marker == SPEAKER_STOP_PROGRESS_CUE:
+                if (
+                    not speaker
+                    or speaker_protocol != SPEAKER_STOP_PROGRESS_PROTOCOL
+                    or not speaker_stop_armed
+                    or speaker_stop_cued
+                    or set(record) != {"mic_trial", "operating_admission"}
+                    or record["operating_admission"] is not False
+                ):
+                    raise ValueError("Unexpected speaker STOP playback cue")
                 speaker_stop_cued = True
-                announce()
+                # A USB task cue can complete after the output task's failure report.
+                if report is None:
+                    announce()
             elif marker in ("QUESTION_NOW", "QUIET_OBSERVATION_NOW", "QUESTION_ONLY_NOW"):
                 if (
                     not question_mode
@@ -627,7 +701,7 @@ def verified_port(
     protocol = QUESTION_ONLY_PROTOCOL if question_only else QUESTION_PROTOCOL
     if silent_tx or speaker:
         if speaker:
-            speaker_stop = speaker_protocol == SPEAKER_STOP_PROTOCOL
+            speaker_stop = speaker_protocol in SPEAKER_STOP_PROTOCOLS
             scope = SPEAKER_STOP_SCOPE if speaker_stop else SPEAKER_SCOPE
             operator_mode = SPEAKER_STOP_MODE if speaker_stop else "SYNTHETIC_SPEAKER_ONLY"
             protocol = speaker_protocol
@@ -732,11 +806,10 @@ def main():
             print("SPEAKER_PREPARE", flush=True)
         port = open_port(serial, port_name)
         try:
-            cue = (
-                SPEAKER_STOP_CUE
-                if args.speaker_protocol == SPEAKER_STOP_PROTOCOL
-                else "지금 Hi StackChan을 한 번 말해 주세요."
-            )
+            cue = {
+                SPEAKER_STOP_PROTOCOL: SPEAKER_STOP_CUE,
+                SPEAKER_STOP_PROGRESS_PROTOCOL: SPEAKER_STOP_PROGRESS_CUE,
+            }.get(args.speaker_protocol, "지금 Hi StackChan을 한 번 말해 주세요.")
             report = receive_once(
                 port,
                 lambda: print(cue, flush=True),
@@ -766,7 +839,7 @@ def main():
         return 1
     expected = (
         SPEAKER_STOP_OK
-        if args.speaker_protocol == SPEAKER_STOP_PROTOCOL
+        if args.speaker_protocol in SPEAKER_STOP_PROTOCOLS
         else "dma_and_mute_observed"
     )
     return int(args.speaker and report["result"] != expected)
