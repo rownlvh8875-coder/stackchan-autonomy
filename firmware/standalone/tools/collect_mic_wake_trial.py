@@ -37,9 +37,13 @@ SPEAKER_STOP_PROGRESS_PROTOCOLS = {SPEAKER_STOP_PROGRESS_PROTOCOL, SPEAKER_STOP_
 SPEAKER_STOP_PROTOCOLS = {SPEAKER_STOP_PROTOCOL, *SPEAKER_STOP_PROGRESS_PROTOCOLS}
 SPEAKER_STOP_SCOPE = "ONE_SYNTHETIC_SPEAKER_SCREEN_STOP_AND_OTA1_RESTORE"
 SPEAKER_STOP_MODE = "SYNTHETIC_SPEAKER_SCREEN_STOP"
+SPEAKER_AUTO_STOP_SCOPE = "ONE_SYNTHETIC_SPEAKER_AUTOMATIC_STOP_AND_OTA1_RESTORE"
+SPEAKER_AUTO_STOP_MODE = "SYNTHETIC_SPEAKER_AUTOMATIC_STOP"
+SPEAKER_AUTO_STOP_KIND = "REVIEW_ONLY_SPEAKER_AUTO_STOP_V3"
 SPEAKER_STOP_CUE = "SPEAKER_STOP_ARMED"
 SPEAKER_STOP_PROGRESS_CUE = "SPEAKER_STOP_PLAYING"
 SPEAKER_STOP_OK = "screen_stop_and_standby_observed"
+SPEAKER_STOP_BLOCKS = 250
 SPEAKER_CHALLENGES = {
     SPEAKER_PROTOCOL: "WAIT_SPEAKER_LOCAL_START",
     SPEAKER_STARTUP_PROTOCOL: "WAIT_SPEAKER_STARTUP_LOCAL_START",
@@ -264,10 +268,10 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
             or record.get("speaker_probe") != speaker_protocol
             or record.get("operating_admission") is not False
             or type(blocks) is not int
-            or not 0 <= blocks <= 250
+            or not 0 <= blocks <= SPEAKER_STOP_BLOCKS
             or type(dma) is not bool
             or type(quiet) is not bool
-            or (dma and blocks != 250)
+            or (dma and blocks != SPEAKER_STOP_BLOCKS)
             or result
             not in (
                 SPEAKER_STOP_OK,
@@ -531,6 +535,11 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
     return record
 
 
+def _validate_auto_stop_mode(auto_stop, speaker, speaker_protocol):
+    if auto_stop and not (speaker and speaker_protocol == SPEAKER_STOP_SHUTDOWN_PROTOCOL):
+        raise ValueError("Automatic STOP requires the V3 speaker STOP diagnostic")
+
+
 def receive_once(
     port,
     announce,
@@ -541,9 +550,11 @@ def receive_once(
     silent_tx=False,
     speaker=False,
     speaker_protocol=SPEAKER_PROTOCOL,
+    auto_stop=False,
     before_start=lambda: None,
     clock=time.monotonic,
 ):
+    _validate_auto_stop_mode(auto_stop, speaker, speaker_protocol)
     question_mode = announce_question is not None
     output_only = silent_tx or speaker
     if (wake_only_control or question_only) and not question_mode:
@@ -572,6 +583,7 @@ def receive_once(
     started = listening = complete = False
     report = question_report = None
     question_cued = speaker_stop_armed = speaker_stop_cued = False
+    auto_stop_attempted = auto_stop_sent = False
     pending = bytearray()
     try:
         while clock() < deadline:
@@ -668,7 +680,13 @@ def receive_once(
                 speaker_stop_cued = True
                 # A USB task cue can complete after the output task's failure report.
                 if report is None:
-                    announce()
+                    if auto_stop:
+                        auto_stop_attempted = True
+                        if port.write(b"STOP\n") != len(b"STOP\n"):
+                            raise ValueError("Incomplete automatic STOP")
+                        auto_stop_sent = True
+                    else:
+                        announce()
             elif marker in ("QUESTION_NOW", "QUIET_OBSERVATION_NOW", "QUESTION_ONLY_NOW"):
                 if (
                     not question_mode
@@ -720,10 +738,12 @@ def receive_once(
                 complete = True
                 if question_only:
                     return question_report
+                if auto_stop:
+                    return report | {"automatic_stop_sent": auto_stop_sent}
                 return {"wake": report, "question": question_report} if question_mode else report
         raise TimeoutError("Trial deadline elapsed")
     finally:
-        if started and not complete:
+        if started and not complete and not auto_stop_attempted:
             try:
                 port.write(b"STOP\n")
             except OSError:
@@ -739,7 +759,9 @@ def verified_port(
     silent_tx=False,
     speaker=False,
     speaker_protocol=SPEAKER_PROTOCOL,
+    auto_stop=False,
 ):
+    _validate_auto_stop_mode(auto_stop, speaker, speaker_protocol)
     if sum((question, wake_only_control, question_only, silent_tx, speaker)) > 1:
         raise ValueError("Select a single trial mode")
 
@@ -759,6 +781,10 @@ def verified_port(
             operator_mode = SPEAKER_STOP_MODE if speaker_stop else "SYNTHETIC_SPEAKER_ONLY"
             protocol = speaker_protocol
             expected_kind = SPEAKER_REVIEW_KINDS[protocol]
+            if auto_stop:
+                scope = SPEAKER_AUTO_STOP_SCOPE
+                operator_mode = SPEAKER_AUTO_STOP_MODE
+                expected_kind = SPEAKER_AUTO_STOP_KIND
             if any(item.get("operator_mode") != operator_mode for item in (manifest, approved)):
                 raise ValueError("Synthetic speaker mode must be explicitly scoped")
         else:
@@ -816,6 +842,22 @@ def open_port(serial, name, *, clock=time.monotonic, wait=time.sleep):
     raise TimeoutError("USB port did not return")
 
 
+def _auto_stop_passed(report):
+    detail = report["stop_diagnostic"]
+    return (
+        report["automatic_stop_sent"]
+        and report["result"] == "host_stopped"
+        and 0 < report["pcm_blocks"] < SPEAKER_STOP_BLOCKS
+        and not report["dma_complete"]
+        and report["standby_confirmed"]
+        and not detail["screen_stop_sampled"]
+        and not detail["pcm_write_rejected"]
+        and detail["cleanup_stage"] == 0
+        and not detail["reset_latch_verified"]
+        and detail["tx_idle_observed"]
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review-dir", required=True, type=Path)
@@ -826,6 +868,7 @@ def main():
     mode.add_argument("--silent-tx", action="store_true")
     mode.add_argument("--speaker", action="store_true")
     parser.add_argument("--speaker-protocol", choices=SPEAKER_CHALLENGES, default=SPEAKER_PROTOCOL)
+    parser.add_argument("--auto-stop", action="store_true")
     args = parser.parse_args()
     if not args.speaker and args.speaker_protocol != SPEAKER_PROTOCOL:
         parser.error("--speaker-protocol requires --speaker")
@@ -838,6 +881,7 @@ def main():
             silent_tx=args.silent_tx,
             speaker=args.speaker,
             speaker_protocol=args.speaker_protocol,
+            auto_stop=args.auto_stop,
         )
         intent = args.review_dir / "mic-receive-intent.json"
         if intent.exists():
@@ -878,10 +922,13 @@ def main():
                 silent_tx=args.silent_tx,
                 speaker=args.speaker,
                 speaker_protocol=args.speaker_protocol,
+                auto_stop=args.auto_stop,
             )
         finally:
             port.close()
-        if args.speaker:
+        if args.auto_stop:
+            result_file = "speaker-auto-stop-result.json"
+        elif args.speaker:
             result_file = "speaker-result.json"
         else:
             result_file = "tx-dma-result.json" if args.silent_tx else "mic-result.json"
@@ -891,6 +938,8 @@ def main():
     except (OSError, ValueError, KeyError, TypeError, AttributeError, KeyboardInterrupt):
         print("Diagnostic stopped or denied. Check the reviewed restore procedure.")
         return 1
+    if args.auto_stop:
+        return int(not _auto_stop_passed(report))
     expected = (
         SPEAKER_STOP_OK
         if args.speaker_protocol in SPEAKER_STOP_PROTOCOLS

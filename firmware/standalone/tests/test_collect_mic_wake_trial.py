@@ -1005,6 +1005,126 @@ def test_stop_fallback_evidence_preserves_the_cleanup_failure(receiver):
             )
 
 
+AUTO_STOP_WAIT = WAIT | {"mic_trial": "WAIT_SPEAKER_SCREEN_STOP_SHUTDOWN_START"}
+AUTO_STOP_ARMED = HOLD | {"mic_trial": "SPEAKER_STOP_ARMED"}
+AUTO_STOP_PLAYING = HOLD | {"mic_trial": "SPEAKER_STOP_PLAYING"}
+AUTO_STOP_REPORT = {
+    "speaker_probe": "K151_SPEAKER_STOP_V3",
+    "result": "host_stopped",
+    "pcm_blocks": 3,
+    "dma_complete": False,
+    "standby_confirmed": True,
+    "sample_to_standby_us": None,
+    "operating_admission": False,
+    "stop_diagnostic": {
+        "screen_stop_sampled": False,
+        "pcm_write_rejected": False,
+        "cleanup_stage": 0,
+        "reset_latch_verified": False,
+        "tx_idle_observed": True,
+        "sample_to_reset_idle_us": None,
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("changes", "late_cue", "passed"),
+    [
+        ({}, False, True),
+        ({"result": "cleanup_failed", "standby_confirmed": False}, False, False),
+        ({"result": "completed_no_stop", "pcm_blocks": 250, "dma_complete": True}, True, False),
+        ({"pcm_blocks": 250}, False, False),
+        (
+            {"stop_diagnostic": AUTO_STOP_REPORT["stop_diagnostic"] | {"tx_idle_observed": False}},
+            False,
+            False,
+        ),
+    ],
+)
+def test_auto_stop_collects_first_pcm_cutoff_and_reports_outcome(
+    receiver, monkeypatch, tmp_path, capsys, changes, late_cue, passed
+):
+    protocol = AUTO_STOP_REPORT["speaker_probe"]
+    report = AUTO_STOP_REPORT | changes
+    middle = [report, AUTO_STOP_PLAYING] if late_cue else [AUTO_STOP_PLAYING, report]
+    port = FakeSerial([AUTO_STOP_WAIT, AUTO_STOP_ARMED, *middle, HOLD])
+    port.close = lambda: None
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "collector",
+            "--review-dir",
+            str(tmp_path),
+            "--speaker",
+            "--speaker-protocol",
+            protocol,
+            "--auto-stop",
+        ],
+    )
+    monkeypatch.setattr(receiver, "verified_port", lambda *args, **kwargs: ("COM3", "a" * 64))
+    monkeypatch.setattr(receiver, "open_port", lambda *args: port)
+    assert receiver.main() == (0 if passed else 1)
+    expected = [b"HELLO\n", b"START 1234ABCD\n"]
+    if not late_cue:
+        expected.append(b"STOP\n")
+    assert port.writes == expected
+    assert "SPEAKER_STOP_PLAYING" not in capsys.readouterr().out
+    assert json.loads((tmp_path / "speaker-auto-stop-result.json").read_bytes()) == (
+        report | {"automatic_stop_sent": not late_cue}
+    )
+
+
+def test_auto_stop_does_not_retry_a_partial_stop(receiver):
+    class PartialStop(FakeSerial):
+        def write(self, value):
+            size = super().write(value)
+            return size - 1 if value == b"STOP\n" else size
+
+    port = PartialStop([AUTO_STOP_WAIT, AUTO_STOP_ARMED, AUTO_STOP_PLAYING])
+    with pytest.raises(ValueError, match="Incomplete automatic STOP"):
+        receiver.receive_once(
+            port,
+            lambda: pytest.fail("Automatic trial has no touch prompt"),
+            speaker=True,
+            speaker_protocol=AUTO_STOP_REPORT["speaker_probe"],
+            auto_stop=True,
+        )
+    assert port.writes == [b"HELLO\n", b"START 1234ABCD\n", b"STOP\n"]
+
+
+def test_auto_stop_requires_distinct_approval_for_the_same_image(receiver, tmp_path):
+    protocol = AUTO_STOP_REPORT["speaker_probe"]
+    selection = {"speaker": True, "speaker_protocol": protocol}
+    shared = {"review_id": tmp_path.name, "image_sha256": "a" * 64}
+    installed = shared | {"offset": 0x510000, "port": "COM3", "independent_verify_passed": True}
+    (tmp_path / "install-verified.json").write_text(json.dumps(installed))
+    for automatic, scope, mode, kind in (
+        (
+            False,
+            "ONE_SYNTHETIC_SPEAKER_SCREEN_STOP_AND_OTA1_RESTORE",
+            "SYNTHETIC_SPEAKER_SCREEN_STOP",
+            "REVIEW_ONLY_SPEAKER_STOP_V3",
+        ),
+        (
+            True,
+            "ONE_SYNTHETIC_SPEAKER_AUTOMATIC_STOP_AND_OTA1_RESTORE",
+            "SYNTHETIC_SPEAKER_AUTOMATIC_STOP",
+            "REVIEW_ONLY_SPEAKER_AUTO_STOP_V3",
+        ),
+    ):
+        scoped = shared | {"scope": scope, "operator_mode": mode}
+        manifest = scoped | {"kind": kind, "expected_protocol": protocol, "port": "COM3"}
+        (tmp_path / "review-manifest.json").write_text(json.dumps(manifest))
+        (tmp_path / "approval.json").write_text(json.dumps(scoped | {"approved": True}))
+        assert receiver.verified_port(tmp_path, **selection, auto_stop=automatic) == (
+            "COM3",
+            "a" * 64,
+        )
+        with pytest.raises(ValueError):
+            receiver.verified_port(tmp_path, **selection, auto_stop=not automatic)
+
+
 @pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )
