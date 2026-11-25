@@ -133,6 +133,7 @@ bool K151HeadTouchOwner::restore_pads() {
 }
 
 TouchConsentEvent K151HeadTouchOwner::poll_once(uint64_t monotonic_ms) {
+  last_read_failed_ = false;
   if (stop_.load()) {
     (void)detach();
     return TouchConsentEvent::invalidated;
@@ -141,6 +142,7 @@ TouchConsentEvent K151HeadTouchOwner::poll_once(uint64_t monotonic_ms) {
   uint8_t packed = 0;
   const esp_err_t result = i2c_master_transmit_receive(
       dev_, &kTouchResultRegister, 1, &packed, 1, kI2cTimeoutMs);
+  last_read_failed_ = result != ESP_OK;
   const std::array<uint8_t,3> pads = {
       static_cast<uint8_t>(packed & 0x03U),
       static_cast<uint8_t>((packed >> 2U) & 0x03U),

@@ -106,7 +106,8 @@ bool K151HeadTouchOwner::attach_for_setup(i2c_master_bus_handle_t bus, bool exac
 TouchConsentEvent K151HeadTouchOwner::poll_once(uint64_t now) {
   assert(head && i2c && now == ms);
   ++touches;
-  if (scenario == "head_read_error" || now - head_started >= 30000U)
+  last_read_failed_ = scenario == "head_read_error";
+  if (last_read_failed_ || now - head_started >= 30000U)
     return TouchConsentEvent::invalidated;
   if (!head_window && scenario != "no_head_touch" && now - head_started >= 3050U) {
     owner_mode_ = true;
@@ -193,6 +194,7 @@ int main(int argc, char* argv[]) {
   assert(!session.start(true, true));
   assert(session.startup_stage() == Startup::ready);
   using Step = K151OwnerSession::Step;
+  using Failure = scpswire::SetupFailure;
   assert(!session.request_voice_review(true, true, true));
   if (scenario == "wrong_task" || scenario == "wrong_core") {
     if (scenario == "wrong_task") current_task = &other_task;
@@ -207,6 +209,8 @@ int main(int argc, char* argv[]) {
   if (scenario == "clock_backward" || scenario == "clock_gap") {
     ms = scenario == "clock_backward" ? 999 : 1251;
     assert(session.poll() == Step::fault && !touches && !i2c);
+    assert(session.early_setup_failure() ==
+           (scenario == "clock_backward" ? Failure::clock_backwards : Failure::sample_gap));
     return 0;
   }
   Step terminal = Step::idle;
@@ -266,6 +270,15 @@ int main(int argc, char* argv[]) {
   } else {
     const bool requested = scenario == "usb_stop" || scenario == "stop_while_draining";
     assert(terminal == (requested ? Step::stopped : Step::fault) && !session.handoff());
+    if (scenario == "head_read_error") {
+      assert(touches == 1 && !receive_calls && session.early_setup_failure() == Failure::sensor_read);
+    } else if (scenario == "no_head_touch") {
+      assert(!receive_calls && session.early_setup_failure() == Failure::head_input);
+    } else if (scenario == "usb_failed") {
+      assert(touches > 1 && !receive_calls && session.early_setup_failure() == Failure::usb_start);
+    } else {
+      assert(!session.early_setup_failure());
+    }
   }
   assert(!i2c && !lvgl && !lcd && !head && !usb);
 }

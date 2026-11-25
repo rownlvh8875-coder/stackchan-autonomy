@@ -263,7 +263,14 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
         assert device.events[-1] == ("close", 1)
         assert operator.seconds >= 1
         assert Path(arguments[1]).name == "scps_usb_cli.py"
-        assert arguments[2:] == ["--port", "COM3", "--interactive", *source_options]
+        assert arguments[2:] == [
+            "--port",
+            "COM3",
+            "--interactive",
+            "--failure-receipt",
+            str(paths.review_dir / "setup-failure.json"),
+            *source_options,
+        ]
         assert 0 < timeout <= 145 and check is False
         operator.unplug_at, operator.reconnect_at = 2, 5
         device.events.append(("trial", 1))

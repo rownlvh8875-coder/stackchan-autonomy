@@ -148,6 +148,8 @@ def run_operator_paid_trial(
             "--port",
             port,
             "--interactive",
+            "--failure-receipt",
+            str(paths.review_dir / "setup-failure.json"),
         ]
         if reuse_openai_env is not None:
             command.extend(["--reuse-openai-env", str(reuse_openai_env)])

@@ -90,6 +90,7 @@ bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budge
 }
 
 K151OwnerSession::Step K151OwnerSession::poll() {
+  using Failure = scpswire::SetupFailure;
   if (!task_) return Step::idle;
   if (!on_owner_task()) return Step::fault;
   if (step_ == Step::stopped || step_ == Step::fault) return step_;
@@ -105,10 +106,11 @@ K151OwnerSession::Step K151OwnerSession::poll() {
   // the display STOP input, and setup timeouts no longer govern the session.
   if (step_ == Step::ready || step_ == Step::voice_ready) return step_;
   const auto now_us = esp_timer_get_time();
-  if (now_us < 0) return abort_setup();
+  if (now_us < 0) return abort_setup(Failure::clock_invalid);
   const auto now = static_cast<uint64_t>(now_us / 1000);
-  if (now < last_sample_ms_ || now - last_sample_ms_ > HeadTouchConsent::kMaxSampleGapMs)
-    return abort_setup();
+  if (now < last_sample_ms_) return abort_setup(Failure::clock_backwards);
+  if (now - last_sample_ms_ > HeadTouchConsent::kMaxSampleGapMs)
+    return abort_setup(Failure::sample_gap);
   if (now - last_sample_ms_ < kPollIntervalMs) return step_;
   last_sample_ms_ = now;
 
@@ -126,15 +128,17 @@ K151OwnerSession::Step K151OwnerSession::poll() {
   }
 
   const auto event = touch_.poll_once(now);
-  if (stop_.load() || event == TouchConsentEvent::invalidated) return abort_setup();
+  if (stop_.load()) return abort_setup();
+  if (event == TouchConsentEvent::invalidated)
+    return abort_setup(touch_.last_read_failed() ? Failure::sensor_read : Failure::head_input);
   if (step_ == Step::head_touch && event == TouchConsentEvent::owner_window_open) {
     // Admission was verified before start. The USB port independently checks
     // the current head window, shared latches, LCD and unclaimed driver.
     if (!usb_.start(now, board_verified_, lcd_verified_, kSeparateUartConsole, true))
-      return abort_setup();
+      return abort_setup(Failure::usb_start);
     setup_input_.store(true);
     if (!view_.present(TouchConsentPhase::owner_window, OwnerSetupPhase::hold, true, false, true))
-      return abort_setup();
+      return abort_setup(Failure::pairing_display);
     step_ = Step::pairing;
   } else if (step_ == Step::pairing) {
     if (!usb_.poll_once(now, true)) return abort_setup();
@@ -180,9 +184,13 @@ bool K151OwnerSession::shutdown() {
   return !bus_release_unverified_;
 }
 
-K151OwnerSession::Step K151OwnerSession::abort_setup() {
+K151OwnerSession::Step K151OwnerSession::abort_setup(
+    std::optional<scpswire::SetupFailure> diagnosis) {
+  const bool early = step_ == Step::head_touch;
   const bool released = shutdown();
-  step_ = stop_.load() && released ? Step::stopped : Step::fault;
+  const bool stopped = stop_.load();
+  if (early && !stopped) early_setup_failure_ = diagnosis;
+  step_ = stopped && released ? Step::stopped : Step::fault;
   return step_;
 }
 

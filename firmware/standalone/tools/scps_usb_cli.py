@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import warnings
 from collections.abc import Callable
 from functools import partial
@@ -109,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Use the connected Windows Wi-Fi profile",
     )
+    parser.add_argument(
+        "--failure-receipt", type=Path, help="Save only the fixed failure stage and reason locally"
+    )
     args = parser.parse_args(argv)
     if not args.interactive:
         parser.error("--interactive is required; no automatic serial connection")
@@ -152,6 +156,12 @@ def main(argv: list[str] | None = None) -> int:
             reason = exc.diagnostic
         elif isinstance(exc, (OSError, serial.SerialException)):
             reason = "serial_io"
+        if args.failure_receipt is not None:
+            try:
+                with args.failure_receipt.open("x", encoding="utf-8") as receipt:
+                    json.dump({"stage": phase, "reason": reason}, receipt)
+            except OSError:
+                print("Setup failure receipt could not be saved.")
         print(f"Pairing failed at {phase} ({reason}). Restart the local device before retry.")
         return 1
     return 0

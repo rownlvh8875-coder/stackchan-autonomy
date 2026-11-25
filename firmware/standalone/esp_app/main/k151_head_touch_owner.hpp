@@ -40,6 +40,7 @@ class K151HeadTouchOwner final {
                         bool board_identity_verified,
                         bool exclusive_bus_control);
   TouchConsentEvent poll_once(uint64_t monotonic_ms);
+  bool last_read_failed() const { return last_read_failed_; }
   // Device-local owner UI and head touch evidence are both required.
   bool begin_owner_setup(K151LocalOwnerSetup& setup, bool trusted_local_ui,
                          uint64_t monotonic_ms);
@@ -84,6 +85,7 @@ class K151HeadTouchOwner final {
   std::array<bool, kPadFields.size()> changed_{};
   i2c_master_dev_handle_t dev_ = nullptr;
   bool attempted_ = false;
+  bool last_read_failed_ = false;
   bool faulted_ = false;
 };
 

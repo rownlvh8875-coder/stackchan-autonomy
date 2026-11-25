@@ -30,6 +30,9 @@ int main(){
   for(Op kind:{Op::display_ready,Op::pending_touch,Op::completed,Op::denied,Op::stop}){
     assert(round_trip(kind,{}).payload.empty());
   }
+  assert(round_trip(Op::local_setup_fault, {4}).payload.front() == 4);
+  assert(!encode(Op::local_setup_fault, {}));
+  assert(!encode(Op::local_setup_fault, std::array<uint8_t, 1>{255}));
   assert(!encode(Op::pc_hello,{}));
   assert(!encode(Op::sealed_credentials,std::vector<uint8_t>(34,0x31)));
   assert(!encode(Op::sealed_credentials,std::vector<uint8_t>(360,0x31)));

@@ -31,6 +31,9 @@ class K151ConversationOwner final {
                      bool allow_first_budget, K151VoiceMode mode);
   Progress poll();
   bool shutdown();
+  std::optional<scpswire::SetupFailure> early_setup_failure() const {
+    return setup_.early_setup_failure();
+  }
   static const char* compiled_link_marker();
 
  private:

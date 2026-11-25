@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import getpass
 import io
+import json
 import sys
+import zlib
 from itertools import count
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,6 +69,8 @@ def test_wire_all_opcode_shapes_and_crc():
             payload = bytes(range(86))
         elif op is Op.SEALED:
             payload = bytes(range(100))
+        elif op is Op.LOCAL_SETUP_FAULT:
+            payload = b"\x04"
         else:
             payload = b""
         assert decode(encode(Frame(op, payload))) == Frame(op, payload)
@@ -78,6 +82,14 @@ def test_wire_all_opcode_shapes_and_crc():
         decode(bytes(corrupted))
     with pytest.raises(ScpsWireError):
         encode(Frame(Op.SEALED, bytes(360)))
+
+
+def test_local_fault_report_cannot_advance_setup():
+    port = FakePort()
+    port.rx[:] = encode(Frame(Op.LOCAL_SETUP_FAULT, b"\x07"))
+    with pytest.raises(wire.ScpsInvalidFrame):
+        wire.expect(port, Op.PENDING_TOUCH, 20)
+    assert not port.writes
 
 
 def test_full_encrypted_pairing_and_no_secret_echo():
@@ -322,11 +334,14 @@ def test_cli_cues_head_touch_only_after_opening_without_reset(monkeypatch, open_
         ("timeout", "device_hello", "response_timeout", [Op.STOP]),
         ("io_error", "device_hello", "serial_io", [Op.STOP]),
         ("invalid_frame", "device_hello", "invalid_frame", [Op.STOP]),
+        ("sensor_read", "device_hello", "device_sensor_read", [Op.STOP]),
+        ("usb_start", "device_hello", "device_usb_start", [Op.STOP]),
+        ("bad_fault_code", "device_hello", "invalid_frame", [Op.STOP]),
         (None, "display_ready", "device_denied", [Op.PC_HELLO, Op.STOP]),
     ],
 )
 def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
-    monkeypatch, capsys, hello_failure, stage, reason, sent
+    monkeypatch, capsys, tmp_path, hello_failure, stage, reason, sent
 ):
     class Serial(FakePort):
         def __init__(self, **_settings):
@@ -348,15 +363,21 @@ def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
     port = Serial()
     if hello_failure == "invalid_frame":
         port.rx = bytearray(b"invalid\x01")
+    elif hello_failure in ("sensor_read", "usb_start", "bad_fault_code"):
+        reason_byte = {"sensor_read": 4, "usb_start": 6, "bad_fault_code": 255}[hello_failure]
+        packet = b"SCPW\x01\x09\x01\x00" + bytes([reason_byte])
+        port.rx = bytearray(packet + zlib.crc32(packet).to_bytes(4, "little"))
     monkeypatch.setitem(
         sys.modules, "serial", SimpleNamespace(Serial=lambda **_: port, SerialException=OSError)
     )
     clock = count()
     monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=clock.__next__))
 
-    assert cli.main(["--port", "COM3", "--interactive"]) == 1
+    receipt = tmp_path / "setup-failure.json"
+    assert cli.main(["--port", "COM3", "--interactive", "--failure-receipt", str(receipt)]) == 1
     output = capsys.readouterr().out
     assert f"Pairing failed at {stage} ({reason})." in output
     assert "internal test detail" not in output
     assert "PC pairing code" not in output
+    assert json.loads(receipt.read_text(encoding="utf-8")) == {"stage": stage, "reason": reason}
     assert [frame.op for frame in port.writes] == sent

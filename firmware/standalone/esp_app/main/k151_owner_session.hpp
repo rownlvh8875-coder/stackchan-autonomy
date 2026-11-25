@@ -33,6 +33,7 @@ class K151OwnerSession final {
   // A successful SPI transfer alone cannot attest the physical screen.
   bool start(bool exact_board_verified, bool physical_lcd_verified);
   StartupStage startup_stage() const { return startup_stage_; }
+  std::optional<scpswire::SetupFailure> early_setup_failure() const { return early_setup_failure_; }
   // Called by the pinned owner task with the approved deployment scope, only
   // after the encrypted USB session closed. The local display is the sole
   // gesture input for enabling paid voice and budget writes.
@@ -47,7 +48,7 @@ class K151OwnerSession final {
 
  private:
   bool on_owner_task() const;
-  Step abort_setup();
+  Step abort_setup(std::optional<scpswire::SetupFailure> diagnosis = std::nullopt);
 
   const std::atomic_bool& stop_;
   std::atomic_bool owner_{false};
@@ -73,6 +74,7 @@ class K151OwnerSession final {
   bool bus_release_unverified_ = false;
   Step step_ = Step::idle;
   StartupStage startup_stage_ = StartupStage::idle;
+  std::optional<scpswire::SetupFailure> early_setup_failure_;
 };
 
 }  // namespace stackchan::standalone

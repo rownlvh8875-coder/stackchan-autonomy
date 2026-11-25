@@ -24,4 +24,5 @@ int main() {
   emit(Op::sealed_credentials,sealed);
   emit(Op::completed,{});
   emit(Op::stop,{});
+  emit(Op::local_setup_fault,{static_cast<uint8_t>(SetupFailure::sensor_read)});
 }

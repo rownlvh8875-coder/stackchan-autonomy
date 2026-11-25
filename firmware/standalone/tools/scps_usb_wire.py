@@ -31,6 +31,18 @@ class Op(IntEnum):
     COMPLETED = 6
     DENIED = 7
     STOP = 8
+    LOCAL_SETUP_FAULT = 9
+
+
+_SETUP_FAILURES = {
+    1: "device_clock_invalid",
+    2: "device_clock_backwards",
+    3: "device_sample_gap",
+    4: "device_sensor_read",
+    5: "device_head_input",
+    6: "device_usb_start",
+    7: "device_pairing_display",
+}
 
 
 @dataclass(frozen=True)
@@ -60,17 +72,31 @@ class ScpsDeviceDenied(ScpsWireError):
     diagnostic = "device_denied"
 
 
+class ScpsLocalSetupFailure(ScpsWireError):
+    def __init__(self, code: int):
+        self.diagnostic = _SETUP_FAILURES[code]
+        super().__init__("device stopped before credential setup")
+
+
 def _length_allowed(op: Op, length: int) -> bool:
     if op in (Op.DEVICE_HELLO, Op.PC_HELLO):
         return length == 86
     if op is Op.SEALED:
         return 35 <= length <= MAX_SEALED
+    if op is Op.LOCAL_SETUP_FAULT:
+        return length == 1
     return length == 0
+
+
+def _check_setup_failure_code(op: Op, payload: bytes) -> None:
+    if op is Op.LOCAL_SETUP_FAULT and payload[0] not in _SETUP_FAILURES:
+        raise ScpsInvalidFrame("invalid local setup fault code")
 
 
 def encode(frame: Frame) -> bytes:
     if not _length_allowed(frame.op, len(frame.payload)):
         raise ScpsWireError("invalid frame size")
+    _check_setup_failure_code(frame.op, frame.payload)
     header = MAGIC + bytes((VERSION, frame.op)) + len(frame.payload).to_bytes(2, "little")
     framed = header + frame.payload
     return framed + struct.pack("<I", zlib.crc32(framed))
@@ -90,7 +116,9 @@ def decode(wire: bytes) -> Frame:
         raise ScpsWireError("invalid payload length")
     if int.from_bytes(wire[-4:], "little") != zlib.crc32(wire[:-4]):
         raise ScpsWireError("frame integrity check failed")
-    return Frame(op, wire[8:-4])
+    payload = wire[8:-4]
+    _check_setup_failure_code(op, payload)
+    return Frame(op, payload)
 
 
 def _read_exact(port: SerialLike, length: int, expires_at: float) -> bytes:
@@ -110,7 +138,7 @@ def read_one(port: SerialLike, deadline_seconds: float = 20.0) -> Frame:
         raise ScpsWireError("invalid read deadline")
     cutoff = time.monotonic() + deadline_seconds
     header = _read_exact(port, HEADER_BYTES, cutoff)
-    if header[:4] != MAGIC or header[4] != VERSION or not 1 <= header[5] <= 8:
+    if header[:4] != MAGIC or header[4] != VERSION or not 1 <= header[5] <= Op.LOCAL_SETUP_FAULT:
         raise ScpsInvalidFrame("invalid framing header")
     op = Op(header[5])
     payload_size = int.from_bytes(header[6:], "little")
@@ -135,6 +163,10 @@ def expect(port: SerialLike, expected: Op, seconds: float) -> Frame:
     frame = read_one(port, seconds)
     if frame.op is Op.DENIED:
         raise ScpsDeviceDenied("unexpected pairing state")
+    if frame.op is Op.LOCAL_SETUP_FAULT:
+        if expected in (Op.DEVICE_HELLO, Op.DISPLAY_READY):
+            raise ScpsLocalSetupFailure(frame.payload[0])
+        raise ScpsInvalidFrame("local setup fault outside initial exchange")
     if frame.op != expected:
         raise ScpsWireError("unexpected pairing state")
     return frame

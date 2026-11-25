@@ -4,6 +4,7 @@
 #include "k151_conversation_policy.hpp"
 #include "audio_wipe.hpp"
 
+#include <driver/usb_serial_jtag.h>
 #include <esp_chip_info.h>
 #include <esp_flash.h>
 #include <esp_flash_encrypt.h>
@@ -17,7 +18,6 @@
 
 #ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
 #include <cstdio>
-#include <driver/usb_serial_jtag.h>
 #else
 extern const std::uint8_t model_start[] asm("_binary_srmodels_bin_start");
 extern const std::uint8_t model_end[] asm("_binary_srmodels_bin_end");
@@ -69,29 +69,38 @@ K151ConversationBootFacts observe_boot() {
   return facts;
 }
 
-#ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
-void report_setup_startup(K151ConversationBootStage boot, K151OwnerSession::StartupStage setup,
-                          bool released) {
-  // Setup has finished and released its resources. The probe only transmits a
-  // fixed-size verdict and never accepts a host command or a setup gesture.
+void report_terminal_usb(const void* data, size_t size) {
+  // Only publish the same fixed verdict so the PC can open the port after boot.
+  // This driver never reads, sends a handshake, or accesses credentials.
   usb_serial_jtag_driver_config_t config{};
   config.rx_buffer_size = 128;
   config.tx_buffer_size = 256;
   if (usb_serial_jtag_is_driver_installed() || usb_serial_jtag_driver_install(&config) != ESP_OK)
     return;
+  for (unsigned repeat = 0; repeat < 40; ++repeat) {
+    const int written = usb_serial_jtag_write_bytes(data, size, pdMS_TO_TICKS(25));
+    if (written != 0 && written != static_cast<int>(size)) break;
+    vTaskDelay(pdMS_TO_TICKS(250));
+  }
+  (void)usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(25));
+  (void)usb_serial_jtag_driver_uninstall();
+}
+
+#ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
+void report_setup_startup(K151ConversationBootStage boot, K151OwnerSession::StartupStage setup,
+                          bool released) {
   char line[96];
   const int size = std::snprintf(line, sizeof(line), "K151_SETUP_STARTUP_PROBE_V1 %u %u %u\n",
                                  unsigned(boot), unsigned(setup), unsigned(released));
-  if (size > 0 && size < int(sizeof(line))) {
-    for (unsigned repeat = 0; repeat < 40; ++repeat) {
-      (void)usb_serial_jtag_write_bytes(line, size, pdMS_TO_TICKS(25));
-      vTaskDelay(pdMS_TO_TICKS(250));
-    }
-    (void)usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(25));
-  }
-  (void)usb_serial_jtag_driver_uninstall();
+  if (size > 0 && size < int(sizeof(line))) report_terminal_usb(line, size);
 }
 #else
+void report_early_setup_failure(scpswire::SetupFailure failure) {
+  const std::array code{static_cast<uint8_t>(failure)};
+  const auto frame = scpswire::encode(scpswire::Op::local_setup_fault, code);
+  if (frame) report_terminal_usb(frame->data(), frame->size());
+}
+
 bool run_conversation(const K151AdmittedConversation& approval) {
   const auto bytes = reinterpret_cast<std::uintptr_t>(model_end) -
                      reinterpret_cast<std::uintptr_t>(model_start);
@@ -170,6 +179,10 @@ extern "C" void app_main() {
   armed = true;
   const bool released = run_conversation(*approval);
   armed = false;
+  if (released) {
+    const auto failure = K151ConversationOwner::instance().early_setup_failure();
+    if (failure) report_early_setup_failure(*failure);
+  }
   if (!released) {
     ESP_LOGE(kTag, "K151 operating cleanup requires reset");
     for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
