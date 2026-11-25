@@ -228,7 +228,9 @@ def conversation_audio_binary(tmp_path_factory):
     return _build_port(compiler, binary, BASE / "esp_app/main", conversation=True)
 
 
-@pytest.mark.parametrize("case", ["transient_uvls", "persistent_uvls", "unarmed"])
+@pytest.mark.parametrize(
+    "case", ["transient_uvls", "persistent_uvls", "unarmed", "stop_during_reply"]
+)
 def test_conversation_audio_capture_playback_and_return(conversation_audio_binary, case):
     result = subprocess.run(
         [str(conversation_audio_binary), f"conversation_audio_{case}"],

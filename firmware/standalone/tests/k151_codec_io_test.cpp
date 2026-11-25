@@ -13,6 +13,7 @@
 #include "k151_speaker_stop_probe.hpp"
 #endif
 #ifdef STACKCHAN_K151_CONVERSATION_IMAGE
+#include "guarded_voice_speaker.hpp"
 #include "k151_pcm_speaker_sink.hpp"
 #endif
 #include "native_wake_input.hpp"
@@ -194,7 +195,8 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
       const auto power = amp_registers[0x04][1] & 0x43;
       bytes[0] = power == 0x40 ||
                  (speaker_unmuted && mode == "speaker_probe_mute_failure") ? 1 : 0;
-      if (speaker_unmuted && mode=="speaker_probe_switch_retained_without_codec_clock") {
+      if (speaker_unmuted && (mode=="speaker_probe_switch_retained_without_codec_clock" ||
+                              mode=="conversation_audio_stop_during_reply")) {
         if (power == 0x42 && tx.enabled) {
           assert((amp_registers[0x05][1] & 0x10) && !rx.enabled);
           switch_off_seen_with_codec_clock = true;
@@ -775,7 +777,8 @@ extern "C" esp_err_t i2s_channel_write(i2s_chan_handle_t h,const void* data,size
       if (mode=="speaker_probe_screen_stop_write_fault") *bytes-=2;
     }
     speaker_clock_us+=10'000;
-    if (mode=="speaker_probe_stop_write") local_stop=true;
+    if (mode=="speaker_probe_stop_write" ||
+        (mode=="conversation_audio_stop_during_reply" && playback_writes==5)) local_stop=true;
     if (mode=="speaker_probe_write_failure" || mode=="speaker_probe_write_and_release_failure")
       *bytes-=2;
   }
@@ -1382,6 +1385,23 @@ int main(int argc,char** argv) {
     for (const auto sample : pcm) assert(sample == 284);
     assert(audio.capture_end() && !rx.enabled && !tx.enabled);
 
+    std::array<int16_t, 6000> reply{};
+    reply.fill(2048);
+    reply.front() = reply.back() = 0;
+    K151PcmSpeakerSink sink{port, local_stop, consent, local_owner};
+    if (mode == "conversation_audio_stop_during_reply") {
+      std::atomic_bool busy{false};
+      GuardedVoiceSpeaker speaker{audio, sink, local_stop, consent, busy};
+      assert(!speaker.play_pcm24k(reply, speaker_clock_us / 1000).complete);
+      assert(local_stop && playback_writes == 5 && speaker_eof == 0);
+      assert(speaker.latched() && busy && audio.state() == AudioState::stopped);
+      assert(!audio.capture_begin() && !tx.enabled && !rx.enabled);
+      assert(switch_off_seen_with_codec_clock && !port.faulted() && (output_latch & 0x04));
+      assert((amp_registers[0x04][1] & 0x43) == 0x03 && (amp_registers[0x05][1] & 0x10));
+      assert(port.shutdown() && !rx.alive && !tx.alive && !bus.alive);
+      return 0;
+    }
+
     const bool should_play = mode == "conversation_audio_transient_uvls";
     assert(audio.playback_begin() == should_play);
     const auto startup = port.speaker_startup();
@@ -1403,10 +1423,6 @@ int main(int argc,char** argv) {
 
     assert(startup.stage == Stage::none && startup.settling_uvls_us == 570);
     assert(startup.clock_ready_after_uvls_us >= 2000 && !rx.enabled && tx.enabled);
-    std::array<int16_t, 6000> reply{};
-    reply.fill(2048);
-    reply.front() = reply.back() = 0;
-    K151PcmSpeakerSink sink{port, local_stop, consent, local_owner};
     assert(sink.play_pcm24k(reply, static_cast<uint64_t>(speaker_clock_us / 1000)).complete);
     assert(playback_writes == 25 && speaker_peak == 2048 && speaker_eof == 7);
     assert(audio.playback_end() && audio.state() == AudioState::idle);
