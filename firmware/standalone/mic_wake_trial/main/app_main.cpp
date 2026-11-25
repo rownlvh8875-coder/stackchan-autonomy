@@ -57,7 +57,7 @@ const char* tx_result_name(K151SilentTxResult result) {
 }
 #elif defined(STACKCHAN_K151_SPEAKER_STOP_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL";
-constexpr char kChallengeMarker[] = "WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START";
+constexpr char kChallengeMarker[] = "WAIT_SPEAKER_SCREEN_STOP_SHUTDOWN_START";
 K151SpeakerStopCue speaker_stop_cue;
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";

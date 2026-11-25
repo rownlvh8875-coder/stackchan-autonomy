@@ -150,6 +150,8 @@ def speaker_probe_binary(tmp_path_factory):
         ("no_touch", "completed_no_stop"),
         ("cue_not_sent", "screen_stop_timing_unverified"),
         ("write_fault", "cleanup_failed"),
+        ("sticky_sws", "cleanup_failed"),
+        ("sticky_sws_tx_active", "cleanup_failed"),
         ("cleanup", "cleanup_failed"),
     ],
 )
@@ -163,9 +165,11 @@ def test_combined_speaker_stop_and_standby(speaker_probe_binary, case, outcome):
         timeout=10,
     )
     assert process.returncode == 0, process.stderr
-    report = json.loads(process.stdout.splitlines()[-1])
+    wire = process.stdout.splitlines()[-1]
+    assert len(wire.encode("ascii")) + 1 <= 512
+    report = json.loads(wire)
     assert report["result"] == outcome
-    assert report["speaker_probe"] == "K151_SPEAKER_STOP_V2"
+    assert report["speaker_probe"] == "K151_SPEAKER_STOP_V3"
     assert report["pcm_blocks"] == {"early": 0, "no_touch": 250, "write_fault": 2}.get(case, 3)
     assert report["dma_complete"] is (case == "no_touch")
     assert report["standby_confirmed"] is (
@@ -175,6 +179,14 @@ def test_combined_speaker_stop_and_standby(speaker_probe_binary, case, outcome):
         assert report["sample_to_standby_us"] == 5_000
     else:
         assert report["sample_to_standby_us"] is None
+    assert report["stop_diagnostic"] == {
+        "screen_stop_sampled": case not in {"host", "no_touch"},
+        "pcm_write_rejected": case == "write_fault",
+        "cleanup_stage": 20 if case.startswith("sticky_sws") else 0,
+        "reset_latch_verified": case.startswith("sticky_sws"),
+        "tx_idle_observed": case not in {"early", "sticky_sws_tx_active"},
+        "sample_to_reset_idle_us": 5_000 if case == "sticky_sws" else None,
+    }
 
 
 @pytest.fixture(scope="module")

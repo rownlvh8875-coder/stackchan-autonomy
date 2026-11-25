@@ -967,6 +967,44 @@ def test_speaker_stop_progress_waits_for_first_pcm_before_prompting(receiver):
             receiver.validate_output_report(invalid, speaker=True, speaker_protocol=protocol)
 
 
+def test_stop_fallback_evidence_preserves_the_cleanup_failure(receiver):
+    protocol = "K151_SPEAKER_STOP_V3"
+    details = {
+        "screen_stop_sampled": True,
+        "pcm_write_rejected": False,
+        "cleanup_stage": 20,
+        "reset_latch_verified": True,
+        "tx_idle_observed": True,
+        "sample_to_reset_idle_us": 5_000,
+    }
+    report = {
+        "speaker_probe": protocol,
+        "result": "cleanup_failed",
+        "pcm_blocks": 132,
+        "dma_complete": False,
+        "standby_confirmed": False,
+        "sample_to_standby_us": None,
+        "operating_admission": False,
+        "stop_diagnostic": details,
+    }
+    assert (
+        receiver.validate_output_report(report, speaker=True, speaker_protocol=protocol) == report
+    )
+    for invalid in (
+        {"screen_stop_sampled": False},
+        {"pcm_write_rejected": True},
+        {"cleanup_stage": 0},
+        {"reset_latch_verified": False},
+        {"tx_idle_observed": False},
+    ):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | {"stop_diagnostic": details | invalid},
+                speaker=True,
+                speaker_protocol=protocol,
+            )
+
+
 @pytest.mark.parametrize(
     "outcome", ["two_descriptors_observed", "stopped", "timeout", "cleanup_failed"]
 )

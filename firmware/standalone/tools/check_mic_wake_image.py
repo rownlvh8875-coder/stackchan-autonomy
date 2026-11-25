@@ -26,14 +26,25 @@ def inspect_image(
         raise ValueError("Select a single trial image")
     if speaker_stop:
         envelope, _ = inspect_envelope(app, elf_sha256, b"k151_speaker_stop_probe")
+        progress = (
+            b'"SPEAKER_STOP_PLAYING"',
+            b'"pcm_blocks"',
+            b'"dma_complete"',
+            b'"standby_confirmed"',
+        )
         protocols = {
             "K151_SPEAKER_STOP_V1": (b"WAIT_SPEAKER_SCREEN_STOP_START\0",),
-            "K151_SPEAKER_STOP_V2": (
-                b"WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START\0",
-                b'"SPEAKER_STOP_PLAYING"',
-                b'"pcm_blocks"',
-                b'"dma_complete"',
-                b'"standby_confirmed"',
+            "K151_SPEAKER_STOP_V2": (b"WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START\0",) + progress,
+            "K151_SPEAKER_STOP_V3": (b"WAIT_SPEAKER_SCREEN_STOP_SHUTDOWN_START\0",)
+            + progress
+            + (
+                b'"stop_diagnostic"',
+                b'"screen_stop_sampled"',
+                b'"pcm_write_rejected"',
+                b'"cleanup_stage"',
+                b'"reset_latch_verified"',
+                b'"tx_idle_observed"',
+                b'"sample_to_reset_idle_us"',
             ),
         }
         observed = [protocol for protocol in protocols if protocol.encode() + b'"' in app]

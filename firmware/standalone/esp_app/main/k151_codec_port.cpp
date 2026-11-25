@@ -606,9 +606,17 @@ bool K151CodecPort::speaker_off(const std::atomic_bool* consent) {
   else note_speaker_cleanup_failure(verified ? Cleanup::standby_interrupted : standby_failure);
   fault_ = true;
   // Reset is a fallback on uncertainty, never a successful completed turn.
-  if (!reset_controlled_ || !set_amplifier_reset(true)) cleanup_unverified_ = true;
+  const bool reset_verified = reset_controlled_ && set_amplifier_reset(true);
+  if (!reset_verified) cleanup_unverified_ = true;
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+  speaker_stop_reset_latch_verified_ |= reset_verified;
+#endif
   return false;
 }
+
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+bool K151CodecPort::speaker_stop_tx_idle() const { return channel_is_idle(tx_); }
+#endif
 
 bool K151CodecPort::play_mono_24k(std::span<const int16_t> mono) {
   output_data_ = OutputData::empty;

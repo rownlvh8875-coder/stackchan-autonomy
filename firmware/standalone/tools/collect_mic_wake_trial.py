@@ -32,7 +32,9 @@ SPEAKER_MUTE_SETTLE_PROTOCOL = "K151_SPEAKER_V12"
 SPEAKER_AMP_OFF_PROTOCOL = "K151_SPEAKER_V13"
 SPEAKER_STOP_PROTOCOL = "K151_SPEAKER_STOP_V1"
 SPEAKER_STOP_PROGRESS_PROTOCOL = "K151_SPEAKER_STOP_V2"
-SPEAKER_STOP_PROTOCOLS = {SPEAKER_STOP_PROTOCOL, SPEAKER_STOP_PROGRESS_PROTOCOL}
+SPEAKER_STOP_SHUTDOWN_PROTOCOL = "K151_SPEAKER_STOP_V3"
+SPEAKER_STOP_PROGRESS_PROTOCOLS = {SPEAKER_STOP_PROGRESS_PROTOCOL, SPEAKER_STOP_SHUTDOWN_PROTOCOL}
+SPEAKER_STOP_PROTOCOLS = {SPEAKER_STOP_PROTOCOL, *SPEAKER_STOP_PROGRESS_PROTOCOLS}
 SPEAKER_STOP_SCOPE = "ONE_SYNTHETIC_SPEAKER_SCREEN_STOP_AND_OTA1_RESTORE"
 SPEAKER_STOP_MODE = "SYNTHETIC_SPEAKER_SCREEN_STOP"
 SPEAKER_STOP_CUE = "SPEAKER_STOP_ARMED"
@@ -54,6 +56,7 @@ SPEAKER_CHALLENGES = {
     SPEAKER_AMP_OFF_PROTOCOL: "WAIT_SPEAKER_AMP_OFF_LOCAL_START",
     SPEAKER_STOP_PROTOCOL: "WAIT_SPEAKER_SCREEN_STOP_START",
     SPEAKER_STOP_PROGRESS_PROTOCOL: "WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START",
+    SPEAKER_STOP_SHUTDOWN_PROTOCOL: "WAIT_SPEAKER_SCREEN_STOP_SHUTDOWN_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
@@ -71,6 +74,7 @@ SPEAKER_REVIEW_KINDS = {
     SPEAKER_AMP_OFF_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V13",
     SPEAKER_STOP_PROTOCOL: "REVIEW_ONLY_SPEAKER_STOP_V1",
     SPEAKER_STOP_PROGRESS_PROTOCOL: "REVIEW_ONLY_SPEAKER_STOP_V2",
+    SPEAKER_STOP_SHUTDOWN_PROTOCOL: "REVIEW_ONLY_SPEAKER_STOP_V3",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -192,8 +196,52 @@ def validate_question_report(record, *, cue_seen, wake=None):
     return record
 
 
+def _validate_stop_shutdown(record):
+    detail = record.get("stop_diagnostic")
+    flags = {
+        "screen_stop_sampled",
+        "pcm_write_rejected",
+        "reset_latch_verified",
+        "tx_idle_observed",
+    }
+    if (
+        not isinstance(detail, dict)
+        or set(detail) != flags | {"cleanup_stage", "sample_to_reset_idle_us"}
+        or any(type(detail[key]) is not bool for key in flags)
+        or type(detail["cleanup_stage"]) is not int
+        or not 0 <= detail["cleanup_stage"] <= 25
+        or (detail["reset_latch_verified"] and detail["cleanup_stage"] == 0)
+        or (
+            record["result"] == SPEAKER_STOP_OK
+            and (
+                not detail["screen_stop_sampled"]
+                or not detail["tx_idle_observed"]
+                or detail["reset_latch_verified"]
+                or detail["pcm_write_rejected"]
+            )
+        )
+    ):
+        raise ValueError("Invalid speaker STOP shutdown evidence")
+    delta = detail["sample_to_reset_idle_us"]
+    if delta is not None and (
+        record["result"] != "cleanup_failed"
+        or record["standby_confirmed"]
+        or record["pcm_blocks"] == 0
+        or record["dma_complete"]
+        or type(delta) is not int
+        or not 0 <= delta <= 10_000_000
+        or not (
+            detail["screen_stop_sampled"]
+            and detail["reset_latch_verified"]
+            and detail["tx_idle_observed"]
+        )
+        or detail["pcm_write_rejected"]
+    ):
+        raise ValueError("Reset timing requires a verified fallback and idle TX")
+
+
 def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL):
-    if speaker and speaker_protocol == SPEAKER_STOP_PROGRESS_PROTOCOL:
+    if speaker and speaker_protocol in SPEAKER_STOP_PROGRESS_PROTOCOLS:
         fields = {
             "speaker_probe",
             "result",
@@ -208,6 +256,9 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
         dma = record.get("dma_complete")
         quiet = record.get("standby_confirmed")
         delta = record.get("sample_to_standby_us")
+        shutdown_report = speaker_protocol == SPEAKER_STOP_SHUTDOWN_PROTOCOL
+        if shutdown_report:
+            fields.add("stop_diagnostic")
         if (
             set(record) != fields
             or record.get("speaker_probe") != speaker_protocol
@@ -245,6 +296,8 @@ def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL
             or (result != SPEAKER_STOP_OK and delta is not None)
         ):
             raise ValueError("Invalid speaker STOP progress")
+        if shutdown_report:
+            _validate_stop_shutdown(record)
         return record
     if speaker and speaker_protocol == SPEAKER_STOP_PROTOCOL:
         result = record.get("result")
@@ -605,7 +658,7 @@ def receive_once(
             elif marker == SPEAKER_STOP_PROGRESS_CUE:
                 if (
                     not speaker
-                    or speaker_protocol != SPEAKER_STOP_PROGRESS_PROTOCOL
+                    or speaker_protocol not in SPEAKER_STOP_PROGRESS_PROTOCOLS
                     or not speaker_stop_armed
                     or speaker_stop_cued
                     or set(record) != {"mic_trial", "operating_admission"}
@@ -809,6 +862,7 @@ def main():
             cue = {
                 SPEAKER_STOP_PROTOCOL: SPEAKER_STOP_CUE,
                 SPEAKER_STOP_PROGRESS_PROTOCOL: SPEAKER_STOP_PROGRESS_CUE,
+                SPEAKER_STOP_SHUTDOWN_PROTOCOL: SPEAKER_STOP_PROGRESS_CUE,
             }.get(args.speaker_protocol, "지금 Hi StackChan을 한 번 말해 주세요.")
             report = receive_once(
                 port,

@@ -15,12 +15,21 @@ namespace stackchan::standalone {
 namespace {
 constexpr auto tone = k151_probe_tone<6000>();
 constexpr int kRepetitions = 10; // At most 2.5 seconds at 24 kHz.
+struct StopDiagnostic {
+  bool screen_stop_sampled = false;
+  bool pcm_write_rejected = false;
+  K151SpeakerCleanupStage cleanup_stage = K151SpeakerCleanupStage::none;
+  bool reset_latch_verified = false;
+  bool tx_idle_observed = false;
+  std::optional<uint32_t> reset_idle_us{};
+};
 struct Report {
   const char* result;
   std::optional<uint32_t> sampled_us{};
   unsigned pcm_blocks = 0;
   bool dma_complete = false;
   bool standby_confirmed = false;
+  StopDiagnostic stop{};
 };
 }
 
@@ -28,7 +37,13 @@ class K151SpeakerStopProbe final {
  public:
   Report run(const std::atomic_bool& owner, K151AudioBoardEvidence evidence, K151SpeakerStopCue& cue) {
     auto result = exercise(owner, evidence, cue);
+    // Read before disarm, which latches STOP itself. Default shutdown also
+    // holds reset, but only the earlier fallback in speaker_off is evidence here.
+    result.stop.screen_stop_sampled = stop_.load() && K151DisplayStop::observed_at_us() >= 0;
+    result.stop.reset_latch_verified = codec_.speaker_stop_reset_latch_verified();
+    result.stop.tx_idle_observed |= codec_.speaker_stop_tx_idle();
     const bool codec_released = codec_.shutdown();
+    result.stop.cleanup_stage = codec_.speaker_cleanup_stage();
     if (codec_.cleanup_unverified() || !release_panel() ||
         (result.standby_confirmed && !codec_released)) {
       result.result = "cleanup_failed";
@@ -80,6 +95,7 @@ class K151SpeakerStopProbe final {
     const auto began = previous;
     int64_t first_write = -1;
     bool transfer_fault = began < 0;
+    bool write_rejected = false;
     unsigned blocks = 0;
     const auto sample_time = [&]() -> std::optional<uint64_t> {
       const auto now = esp_timer_get_time();
@@ -93,6 +109,7 @@ class K151SpeakerStopProbe final {
     const auto write = [&](std::span<const int16_t> chunk) {
       if (!codec_.play_mono_24k(chunk)) {
         transfer_fault = true;
+        write_rejected = true;
         return false;
       }
       ++blocks;
@@ -120,9 +137,19 @@ class K151SpeakerStopProbe final {
     audio.stop();
     // AudioGuard returns stopped only after amplifier standby and physical
     // channel idle both pass. A write fault invalidates that witness.
-    if (audio.state() != AudioState::stopped) return {"cleanup_failed", {}, blocks};
+    if (audio.state() != AudioState::stopped) {
+      Report failure{"cleanup_failed", {}, blocks};
+      failure.stop.pcm_write_rejected = write_rejected;
+      if (window && owner.load() && codec_.speaker_stop_reset_latch_verified() &&
+          codec_.speaker_stop_tx_idle()) {
+        failure.stop.tx_idle_observed = true;
+        failure.stop.reset_idle_us = sampled_stop_elapsed_us(
+            first_write, sampled, returned, esp_timer_get_time());
+      }
+      return failure;
+    }
     if (window && owner.load()) {
-      const auto elapsed = sampled_stop_to_standby_us(
+      const auto elapsed = sampled_stop_elapsed_us(
           first_write, sampled, returned, esp_timer_get_time());
       if (elapsed) return {"screen_stop_and_standby_observed", elapsed, blocks, false, true};
     }
@@ -134,7 +161,9 @@ class K151SpeakerStopProbe final {
         else result = queued ? "screen_stop_after_queue" : "screen_stop_timing_unverified";
       }
     }
-    return {result, {}, blocks, false, true};
+    Report report{result, {}, blocks, false, true};
+    report.stop.pcm_write_rejected = write_rejected;
+    return report;
   }
 
   bool release_panel() {
@@ -158,12 +187,22 @@ void report_k151_speaker_stop_probe(const std::atomic_bool& owner, K151AudioBoar
   static K151SpeakerStopProbe probe;
   const auto report = probe.run(owner, evidence, cue);
   char delta[12] = "null";
+  char reset_delta[12] = "null";
   if (report.sampled_us)
     std::snprintf(delta, sizeof(delta), "%lu", static_cast<unsigned long>(*report.sampled_us));
-  std::printf("{\"speaker_probe\":\"K151_SPEAKER_STOP_V2\",\"result\":\"%s\","
+  if (report.stop.reset_idle_us)
+    std::snprintf(reset_delta, sizeof(reset_delta), "%lu",
+                  static_cast<unsigned long>(*report.stop.reset_idle_us));
+  const auto flag = [](bool value) { return value ? "true" : "false"; };
+  std::printf("{\"speaker_probe\":\"K151_SPEAKER_STOP_V3\",\"result\":\"%s\","
               "\"pcm_blocks\":%u,\"dma_complete\":%s,\"standby_confirmed\":%s,"
-              "\"sample_to_standby_us\":%s,\"operating_admission\":false}\n",
-              report.result, report.pcm_blocks, report.dma_complete ? "true" : "false",
-              report.standby_confirmed ? "true" : "false", delta);
+              "\"sample_to_standby_us\":%s,\"stop_diagnostic\":{\"screen_stop_sampled\":%s,"
+              "\"pcm_write_rejected\":%s,\"cleanup_stage\":%u,\"reset_latch_verified\":%s,"
+              "\"tx_idle_observed\":%s,\"sample_to_reset_idle_us\":%s},"
+              "\"operating_admission\":false}\n",
+              report.result, report.pcm_blocks, flag(report.dma_complete), flag(report.standby_confirmed),
+              delta, flag(report.stop.screen_stop_sampled), flag(report.stop.pcm_write_rejected),
+              unsigned(report.stop.cleanup_stage), flag(report.stop.reset_latch_verified),
+              flag(report.stop.tx_idle_observed), reset_delta);
 }
 } // namespace stackchan::standalone

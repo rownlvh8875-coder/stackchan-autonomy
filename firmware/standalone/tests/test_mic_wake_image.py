@@ -40,6 +40,13 @@ def test_receive_only_scope(model_fixture):
             b"WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START\0",
             b'"SPEAKER_STOP_PLAYING"\0"pcm_blocks"\0"dma_complete"\0"standby_confirmed"\0',
         ),
+        (
+            "K151_SPEAKER_STOP_V3",
+            b"WAIT_SPEAKER_SCREEN_STOP_SHUTDOWN_START\0",
+            b'"SPEAKER_STOP_PLAYING"\0"pcm_blocks"\0"dma_complete"\0"standby_confirmed"\0'
+            b'"stop_diagnostic"\0"screen_stop_sampled"\0"pcm_write_rejected"\0"cleanup_stage"\0'
+            b'"reset_latch_verified"\0"tx_idle_observed"\0"sample_to_reset_idle_us"\0',
+        ),
     ],
 )
 def test_speaker_stop_requires_its_own_app_and_marker(model_fixture, protocol, challenge, progress):

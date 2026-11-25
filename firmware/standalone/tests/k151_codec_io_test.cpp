@@ -203,6 +203,9 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
       }
       if (power==0x03 && speaker_unmuted && mode=="speaker_probe_switching_after_tx_stop")
         bytes[0] = tx.enabled ? 0 : 1;
+      if (power==0x03 && speaker_unmuted && local_stop &&
+          mode.starts_with("speaker_probe_screen_stop_sticky_sws"))
+        bytes[0] = 1; // Shutdown status is still switching with the codec powered down.
       if (power==0x42 && speaker_unmuted && tx.enabled &&
           mode=="speaker_probe_standby_read_delivered_late") {
         ++switching_samples_before_tx_stop;
@@ -602,7 +605,8 @@ extern "C" esp_err_t i2s_channel_enable(i2s_chan_handle_t h){
 }
 extern "C" esp_err_t i2s_channel_disable(i2s_chan_handle_t h){
   assert(h->alive);++h->disables;
-  if (mode=="speaker_probe_tx_stays_enabled_after_close" && h==&tx && speaker_unmuted &&
+  if ((mode=="speaker_probe_tx_stays_enabled_after_close" ||
+       mode=="speaker_probe_screen_stop_sticky_sws_tx_active") && h==&tx && speaker_unmuted &&
       !tx_disable_reported_early) {
     tx_disable_reported_early=true;
     return ESP_OK;

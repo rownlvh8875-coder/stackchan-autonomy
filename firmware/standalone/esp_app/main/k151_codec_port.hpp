@@ -66,6 +66,10 @@ class K151CodecPort final {
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
   K151SpeakerResetObservations speaker_reset_observations() const { return speaker_reset_observations_; }
 #endif
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+  bool speaker_stop_reset_latch_verified() const { return speaker_stop_reset_latch_verified_; }
+  bool speaker_stop_tx_idle() const;
+#endif
   bool cleanup_unverified() const { return cleanup_unverified_; }
 
  private:
@@ -139,6 +143,9 @@ class K151CodecPort final {
   K151MicWakeStage prepare_stage_ = K151MicWakeStage::admission;
   K151SpeakerStartupDiagnostic speaker_startup_{K151SpeakerStartupStage::audio_guard};
   K151SpeakerCleanupStage speaker_cleanup_stage_ = K151SpeakerCleanupStage::none;
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+  bool speaker_stop_reset_latch_verified_ = false;
+#endif
   bool cleanup_unverified_ = false;
 };
 
