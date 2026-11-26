@@ -92,8 +92,10 @@ def test_local_fault_report_cannot_advance_setup():
     assert not port.writes
 
 
-def test_full_encrypted_pairing_and_no_secret_echo():
+@pytest.mark.parametrize("prefix", [b"", b"synthetic startup output\r\n\x00SS"])
+def test_full_encrypted_pairing_and_no_secret_echo(prefix):
     port = FakePort()
+    port.rx[:0] = prefix
     messages = []
     password = "fake-password-12345"
     api = "synthetic-not-real-api-key-012345"
@@ -127,6 +129,48 @@ def test_full_encrypted_pairing_and_no_secret_echo():
         index for index, message in enumerate(messages) if "touch the top of the head" in message
     )
     assert screen < head
+
+
+@pytest.mark.parametrize("prefix_length", [512, 513])
+def test_first_frame_prefix_discard_has_a_byte_limit(prefix_length):
+    port = FakePort()
+    port.rx[:0] = b"x" * prefix_length
+
+    if prefix_length == 512:
+        assert wire.expect(port, Op.DEVICE_HELLO, 20).op is Op.DEVICE_HELLO
+    else:
+        with pytest.raises(wire.ScpsInvalidFrame):
+            wire.expect(port, Op.DEVICE_HELLO, 20)
+
+
+def test_corrupt_first_frame_is_rejected_even_with_a_valid_frame_behind_it():
+    port = FakePort()
+    valid = bytes(port.rx)
+    invalid = bytearray(valid)
+    invalid[-1] ^= 1
+    port.rx[:] = b"synthetic startup output\r\n" + invalid + valid
+
+    with pytest.raises(wire.ScpsInvalidFrame):
+        wire.expect(port, Op.DEVICE_HELLO, 20)
+    assert port.rx == valid
+
+
+def test_bytes_before_display_ready_remain_a_protocol_error():
+    port = FakePort()
+    port.rx[:] = b"unexpected" + encode(Frame(Op.DISPLAY_READY))
+    with pytest.raises(wire.ScpsInvalidFrame):
+        wire.expect(port, Op.DISPLAY_READY, 20)
+
+
+def test_first_frame_header_shares_the_startup_prefix_deadline(monkeypatch):
+    port = FakePort()
+    port.rx[:0] = b"x" * 15
+    clock = count()
+    monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=clock.__next__))
+
+    with pytest.raises(wire.ScpsResponseTimeout):
+        wire.expect(port, Op.DEVICE_HELLO, 20)
+    assert not port.writes
 
 
 @pytest.mark.parametrize("matches", [True, False])

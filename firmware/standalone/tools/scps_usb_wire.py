@@ -20,6 +20,7 @@ HEADER_BYTES = 8
 CRC_BYTES = 4
 MAX_SEALED = 359
 MAX_FRAME = HEADER_BYTES + MAX_SEALED + CRC_BYTES
+MAX_STARTUP_PREFIX = 512
 
 
 class Op(IntEnum):
@@ -133,11 +134,37 @@ def _read_exact(port: SerialLike, length: int, expires_at: float) -> bytes:
     return bytes(chunks)
 
 
-def read_one(port: SerialLike, deadline_seconds: float = 20.0) -> Frame:
+def _read_setup_header(port: SerialLike, cutoff: float) -> bytes:
+    # A port opened just after boot may already contain unrelated bytes. Sync
+    # once before any SCPS traffic and keep the original absolute deadline.
+    matched = 0
+    for seen in range(MAX_STARTUP_PREFIX + len(MAGIC)):
+        try:
+            octet = _read_exact(port, 1, cutoff)[0]
+        except ScpsResponseTimeout as exc:
+            if seen:
+                raise ScpsInvalidFrame("startup data without an initial frame") from exc
+            raise
+        if octet == MAGIC[matched]:
+            matched += 1
+            if matched == len(MAGIC):
+                return MAGIC + _read_exact(port, HEADER_BYTES - len(MAGIC), cutoff)
+        else:
+            matched = int(octet == MAGIC[0])
+    raise ScpsInvalidFrame("startup data exceeded initial frame prefix limit")
+
+
+def read_one(
+    port: SerialLike, deadline_seconds: float = 20.0, *, first_setup_frame: bool = False
+) -> Frame:
     if not 0 < deadline_seconds <= 135.0:
         raise ScpsWireError("invalid read deadline")
     cutoff = time.monotonic() + deadline_seconds
-    header = _read_exact(port, HEADER_BYTES, cutoff)
+    header = (
+        _read_setup_header(port, cutoff)
+        if first_setup_frame
+        else _read_exact(port, HEADER_BYTES, cutoff)
+    )
     if header[:4] != MAGIC or header[4] != VERSION or not 1 <= header[5] <= Op.LOCAL_SETUP_FAULT:
         raise ScpsInvalidFrame("invalid framing header")
     op = Op(header[5])
@@ -160,7 +187,7 @@ def write_one(port: SerialLike, frame: Frame) -> None:
 
 
 def expect(port: SerialLike, expected: Op, seconds: float) -> Frame:
-    frame = read_one(port, seconds)
+    frame = read_one(port, seconds, first_setup_frame=expected is Op.DEVICE_HELLO)
     if frame.op is Op.DENIED:
         raise ScpsDeviceDenied("unexpected pairing state")
     if frame.op is Op.LOCAL_SETUP_FAULT:
