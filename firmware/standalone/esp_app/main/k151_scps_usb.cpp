@@ -17,7 +17,40 @@ constexpr uint32_t kTxBuffer=512,kRxBuffer=512;
 constexpr uint32_t kTxTicks=0;
 constexpr uint32_t kFinalTxMs=250;
 constexpr uint64_t kSessionMaxMs=120000;
+
+#if !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
+bool open_scps_driver() {
+  usb_serial_jtag_driver_config_t cfg{};
+  cfg.tx_buffer_size=kTxBuffer;
+  cfg.rx_buffer_size=kRxBuffer;
+  return usb_serial_jtag_driver_install(&cfg)==ESP_OK;
 }
+#endif
+
+bool send_scps_frame(scpswire::Op op,std::span<const uint8_t> payload) {
+  const auto framed=scpswire::encode(op,payload);
+  if(!framed)return false;
+  const int count=usb_serial_jtag_write_bytes(framed->data(),framed->size(),kTxTicks);
+  // Driver enqueue != proof of physical receipt; never automatically retry.
+  return count==static_cast<int>(framed->size());
+}
+}
+
+#ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
+bool k151_probe_scps_tx() {
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
+  return false;
+#else
+  if(usb_serial_jtag_is_driver_installed() || !open_scps_driver())return false;
+  // The shape and TX path match DEVICE_HELLO. Zero bytes cannot supply a
+  // valid key exchange, and this diagnostic never accepts host input.
+  const std::array<uint8_t,scpswire::kHelloBytes> fixture{};
+  const bool drained=send_scps_frame(scpswire::Op::device_hello,fixture) &&
+      usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(kFinalTxMs)+1)==ESP_OK;
+  return usb_serial_jtag_driver_uninstall()==ESP_OK && drained;
+#endif
+}
+#endif
 
 const char* K151ScpsUsbPort::compiled_link_marker() {
   return "SCPW encrypted USB setup with local second-touch gate compiled; NOT STARTED";
@@ -34,12 +67,7 @@ void K151ScpsUsbPort::scrub_pending() {
 }
 
 bool K151ScpsUsbPort::send(scpswire::Op op,std::span<const uint8_t> payload) {
-  const auto framed=scpswire::encode(op,payload);
-  if(!running_ || !framed)return false;
-  const int count=usb_serial_jtag_write_bytes(framed->data(),
-                                             framed->size(),kTxTicks);
-  // Driver enqueue != proof of physical receipt; never automatically retry.
-  return count==static_cast<int>(framed->size());
+  return running_ && send_scps_frame(op,payload);
 }
 
 bool K151ScpsUsbPort::start(uint64_t now,bool exact_board_verified,
@@ -61,10 +89,7 @@ bool K151ScpsUsbPort::start(uint64_t now,bool exact_board_verified,
   if(!pairing_.device_hello(now,touch_.owner_window_open(now),
                             trusted_lcd_verified,hello))return fault();
 
-  usb_serial_jtag_driver_config_t cfg={};
-  cfg.tx_buffer_size=kTxBuffer;
-  cfg.rx_buffer_size=kRxBuffer;
-  if(usb_serial_jtag_driver_install(&cfg)!=ESP_OK)return fault();
+  if(!open_scps_driver())return fault();
   running_=true;
   trusted_lcd_=trusted_lcd_verified;
   began_ms_=now;

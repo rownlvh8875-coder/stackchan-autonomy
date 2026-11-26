@@ -15,6 +15,10 @@
 
 namespace stackchan::standalone {
 
+#ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
+bool k151_probe_scps_tx();
+#endif
+
 class K151ScpsUsbPort final {
  public:
   static const char* compiled_link_marker();

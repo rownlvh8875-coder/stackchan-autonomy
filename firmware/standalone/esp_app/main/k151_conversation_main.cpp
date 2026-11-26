@@ -2,6 +2,7 @@
 // The separate K151 conversation build. The default HOLD uses app_main.cpp.
 #include "k151_conversation_owner.hpp"
 #include "k151_conversation_policy.hpp"
+#include "k151_scps_usb.hpp"
 #include "audio_wipe.hpp"
 
 #include <driver/usb_serial_jtag.h>
@@ -87,11 +88,13 @@ void report_terminal_usb(const void* data, size_t size) {
 }
 
 #ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
+enum class ProbeTx : unsigned { skipped, unconfirmed, drained };
+
 void report_setup_startup(K151ConversationBootStage boot, K151OwnerSession::StartupStage setup,
-                          bool released) {
+                          bool released, ProbeTx tx) {
   char line[96];
-  const int size = std::snprintf(line, sizeof(line), "K151_SETUP_STARTUP_PROBE_V1 %u %u %u\n",
-                                 unsigned(boot), unsigned(setup), unsigned(released));
+  const int size = std::snprintf(line, sizeof(line), "\nK151_SETUP_STARTUP_PROBE_V2 %u %u %u %u\n",
+                                 unsigned(boot), unsigned(setup), unsigned(released), unsigned(tx));
   if (size > 0 && size < int(sizeof(line))) report_terminal_usb(line, size);
 }
 #else
@@ -159,7 +162,13 @@ extern "C" void app_main() {
     released = setup.shutdown();
     armed = false;
   }
-  report_setup_startup(boot, setup_stage, released);
+  auto tx = ProbeTx::skipped;
+  if (setup_stage == K151OwnerSession::StartupStage::ready && released) {
+    // Allow Windows to reopen USB after reset. Send one frame, like DEVICE_HELLO.
+    vTaskDelay(pdMS_TO_TICKS(3500));
+    tx = k151_probe_scps_tx() ? ProbeTx::drained : ProbeTx::unconfirmed;
+  }
+  report_setup_startup(boot, setup_stage, released, tx);
   if (!released) for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
 #else
 #ifdef STACKCHAN_K151_PRIVATE_POLICY
