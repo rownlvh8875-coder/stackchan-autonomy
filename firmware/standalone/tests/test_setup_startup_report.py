@@ -57,8 +57,8 @@ def test_timeout_and_overlong_noise_cannot_be_mistaken_for_a_report():
 @pytest.mark.parametrize(
     ("prefix", "verdict"),
     [
-        (b"boot" * 128, "probe_received"),
-        (b"boot" * 128 + b"x", "startup_prefix_limit"),
+        (b"boot" * 512, "probe_received"),
+        (b"boot" * 512 + b"x", "startup_prefix_limit"),
         (wire.MAGIC + b"\x00\x01\x56\x00", "invalid_header"),
     ],
 )
@@ -70,7 +70,7 @@ def test_scps_probe_separates_production_verdict_from_passive_observation(
     ticks = count()
 
     def clock():
-        return next(ticks) / 100
+        return next(ticks) / 1000
 
     monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=clock))
     report = collector.read_scps_report(Port(prefix + frame + footer), clock=clock)
@@ -106,7 +106,7 @@ def test_scps_probe_requires_exact_fixture_and_bounds_observation(
     ticks = count()
 
     def clock():
-        return next(ticks) / 100
+        return next(ticks) / 1000
 
     monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=clock))
     port = Port(data)
@@ -118,7 +118,7 @@ def test_scps_probe_requires_exact_fixture_and_bounds_observation(
     assert port.tell() <= 8192
 
 
-@pytest.mark.parametrize(("prefix_length", "exit_code"), [(512, 0), (513, 1)])
+@pytest.mark.parametrize(("prefix_length", "exit_code"), [(2048, 0), (2049, 1)])
 def test_scps_cli_fails_closed_with_only_metadata(monkeypatch, capsys, prefix_length, exit_code):
     prefix = b"private-serial-text".ljust(prefix_length, b"x")
     frame = wire.encode(wire.Frame(wire.Op.DEVICE_HELLO, bytes(86)))

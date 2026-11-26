@@ -20,7 +20,9 @@ HEADER_BYTES = 8
 CRC_BYTES = 4
 MAX_SEALED = 359
 MAX_FRAME = HEADER_BYTES + MAX_SEALED + CRC_BYTES
-MAX_STARTUP_PREFIX = 512
+# The K151 no-touch probe received its first valid frame after 1,433 bytes.
+# Allow a bounded 2 KiB prefix only before the first SCPS frame.
+MAX_STARTUP_PREFIX = 2048
 
 
 class Op(IntEnum):

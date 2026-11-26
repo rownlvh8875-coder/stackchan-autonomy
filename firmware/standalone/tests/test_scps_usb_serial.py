@@ -92,7 +92,7 @@ def test_local_fault_report_cannot_advance_setup():
     assert not port.writes
 
 
-@pytest.mark.parametrize("prefix", [b"", b"synthetic startup output\r\n\x00SS"])
+@pytest.mark.parametrize("prefix", [b"", b"synthetic startup output\r\n\x00SS", b"x" * 1433])
 def test_full_encrypted_pairing_and_no_secret_echo(prefix):
     port = FakePort()
     port.rx[:0] = prefix
@@ -131,12 +131,12 @@ def test_full_encrypted_pairing_and_no_secret_echo(prefix):
     assert screen < head
 
 
-@pytest.mark.parametrize("prefix_length", [512, 513])
+@pytest.mark.parametrize("prefix_length", [2048, 2049])
 def test_first_frame_prefix_discard_has_a_byte_limit(prefix_length):
     port = FakePort()
     port.rx[:0] = b"x" * prefix_length
 
-    if prefix_length == 512:
+    if prefix_length == 2048:
         assert wire.expect(port, Op.DEVICE_HELLO, 20).op is Op.DEVICE_HELLO
     else:
         with pytest.raises(wire.ScpsInvalidFrame):
@@ -410,7 +410,7 @@ def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
 
     port = Serial()
     if hello_failure == "prefix_limit":
-        port.rx[:0] = b"x" * 513
+        port.rx[:0] = b"x" * 2049
     elif hello_failure == "partial_prefix":
         port.rx[:] = b"synthetic-rx-only\x01SCP"
     elif hello_failure == "bad_version":
@@ -427,7 +427,7 @@ def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
         sys.modules, "serial", SimpleNamespace(Serial=lambda **_: port, SerialException=OSError)
     )
     clock = count()
-    monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=lambda: next(clock) / 100))
+    monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=lambda: next(clock) / 1000))
 
     receipt = tmp_path / "setup-failure.json"
     assert cli.main(["--port", "COM3", "--interactive", "--failure-receipt", str(receipt)]) == 1
