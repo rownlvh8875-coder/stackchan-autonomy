@@ -377,10 +377,14 @@ def test_cli_cues_head_touch_only_after_opening_without_reset(monkeypatch, open_
     [
         ("timeout", "device_hello", "response_timeout", [Op.STOP]),
         ("io_error", "device_hello", "serial_io", [Op.STOP]),
-        ("invalid_frame", "device_hello", "invalid_frame", [Op.STOP]),
+        ("prefix_limit", "device_hello", "startup_prefix_limit", [Op.STOP]),
+        ("partial_prefix", "device_hello", "startup_without_frame", [Op.STOP]),
+        ("bad_version", "device_hello", "invalid_header", [Op.STOP]),
+        ("bad_length", "device_hello", "invalid_length", [Op.STOP]),
+        ("bad_crc", "device_hello", "invalid_body", [Op.STOP]),
         ("sensor_read", "device_hello", "device_sensor_read", [Op.STOP]),
         ("usb_start", "device_hello", "device_usb_start", [Op.STOP]),
-        ("bad_fault_code", "device_hello", "invalid_frame", [Op.STOP]),
+        ("bad_fault_code", "device_hello", "invalid_body", [Op.STOP]),
         (None, "display_ready", "device_denied", [Op.PC_HELLO, Op.STOP]),
     ],
 )
@@ -405,8 +409,16 @@ def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
             return super().read(size)
 
     port = Serial()
-    if hello_failure == "invalid_frame":
-        port.rx = bytearray(b"invalid\x01")
+    if hello_failure == "prefix_limit":
+        port.rx[:0] = b"x" * 513
+    elif hello_failure == "partial_prefix":
+        port.rx[:] = b"synthetic-rx-only\x01SCP"
+    elif hello_failure == "bad_version":
+        port.rx[4] ^= 1
+    elif hello_failure == "bad_length":
+        port.rx[6] += 1
+    elif hello_failure == "bad_crc":
+        port.rx[-1] ^= 1
     elif hello_failure in ("sensor_read", "usb_start", "bad_fault_code"):
         reason_byte = {"sensor_read": 4, "usb_start": 6, "bad_fault_code": 255}[hello_failure]
         packet = b"SCPW\x01\x09\x01\x00" + bytes([reason_byte])
@@ -415,13 +427,14 @@ def test_cli_distinguishes_early_pairing_failures_without_exposing_details(
         sys.modules, "serial", SimpleNamespace(Serial=lambda **_: port, SerialException=OSError)
     )
     clock = count()
-    monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=clock.__next__))
+    monkeypatch.setattr(wire, "time", SimpleNamespace(monotonic=lambda: next(clock) / 100))
 
     receipt = tmp_path / "setup-failure.json"
     assert cli.main(["--port", "COM3", "--interactive", "--failure-receipt", str(receipt)]) == 1
     output = capsys.readouterr().out
     assert f"Pairing failed at {stage} ({reason})." in output
     assert "internal test detail" not in output
+    assert "synthetic-rx-only" not in output
     assert "PC pairing code" not in output
     assert json.loads(receipt.read_text(encoding="utf-8")) == {"stage": stage, "reason": reason}
     assert [frame.op for frame in port.writes] == sent

@@ -66,7 +66,9 @@ class ScpsResponseTimeout(ScpsWireError):
 
 
 class ScpsInvalidFrame(ScpsWireError):
-    diagnostic = "invalid_frame"
+    def __init__(self, message: str, *, diagnostic: str = "invalid_frame"):
+        self.diagnostic = diagnostic
+        super().__init__(message)
 
 
 class ScpsDeviceDenied(ScpsWireError):
@@ -143,7 +145,9 @@ def _read_setup_header(port: SerialLike, cutoff: float) -> bytes:
             octet = _read_exact(port, 1, cutoff)[0]
         except ScpsResponseTimeout as exc:
             if seen:
-                raise ScpsInvalidFrame("startup data without an initial frame") from exc
+                raise ScpsInvalidFrame(
+                    "startup data without an initial frame", diagnostic="startup_without_frame"
+                ) from exc
             raise
         if octet == MAGIC[matched]:
             matched += 1
@@ -151,7 +155,9 @@ def _read_setup_header(port: SerialLike, cutoff: float) -> bytes:
                 return MAGIC + _read_exact(port, HEADER_BYTES - len(MAGIC), cutoff)
         else:
             matched = int(octet == MAGIC[0])
-    raise ScpsInvalidFrame("startup data exceeded initial frame prefix limit")
+    raise ScpsInvalidFrame(
+        "startup data exceeded initial frame prefix limit", diagnostic="startup_prefix_limit"
+    )
 
 
 def read_one(
@@ -166,16 +172,16 @@ def read_one(
         else _read_exact(port, HEADER_BYTES, cutoff)
     )
     if header[:4] != MAGIC or header[4] != VERSION or not 1 <= header[5] <= Op.LOCAL_SETUP_FAULT:
-        raise ScpsInvalidFrame("invalid framing header")
+        raise ScpsInvalidFrame("invalid framing header", diagnostic="invalid_header")
     op = Op(header[5])
     payload_size = int.from_bytes(header[6:], "little")
     if not _length_allowed(op, payload_size):
-        raise ScpsInvalidFrame("invalid declared length")
+        raise ScpsInvalidFrame("invalid declared length", diagnostic="invalid_length")
     trailer = _read_exact(port, payload_size + CRC_BYTES, cutoff)
     try:
         return decode(header + trailer)
     except ScpsWireError as exc:
-        raise ScpsInvalidFrame("invalid frame body") from exc
+        raise ScpsInvalidFrame("invalid frame body", diagnostic="invalid_body") from exc
 
 
 def write_one(port: SerialLike, frame: Frame) -> None:
