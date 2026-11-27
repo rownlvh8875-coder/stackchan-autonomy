@@ -137,3 +137,48 @@ def test_trial_restore_is_bound_to_factory_ota1_and_current_nvs_snapshot(synthet
     nvs.write_bytes(b"short")
     with pytest.raises(ValueError, match="NVS"):
         verify_trial_restore(a, b, digest, slot, nvs)
+
+
+def test_reversible_rehearsal_covers_torn_install_and_restores(synthetic, tmp_path):
+    from offline_factory_recovery import rehearse_restore
+
+    a, b, digest = synthetic
+    ota1 = tmp_path / "factory-ota1.bin"
+    nvs = tmp_path / "pretransition-nvs.bin"
+    candidate = tmp_path / "candidate.bin"
+    with a.open("rb") as backup:
+        backup.seek(0x510000)
+        ota1.write_bytes(backup.read(0x4F0000))
+    nvs.write_bytes(b"n" * 0x4000)
+    candidate.write_bytes(b"c" * 4097)
+    candidate_digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    nvs_digest = hashlib.sha256(nvs.read_bytes()).hexdigest()
+    result = rehearse_restore(a, b, digest, ota1, nvs, nvs_digest, candidate, candidate_digest)
+    assert result["candidate_write"] == {"offset": 0x510000, "bytes": 4097, "erase_bytes": 8192}
+    assert [entry["partition"] for entry in result["restore_ranges"]] == ["ota_1", "nvs"]
+    assert result["simulated_recovery"] == {
+        "interrupted_install": True,
+        "after_runtime_nvs_change": True,
+        "interrupted_ota1_restore": True,
+        "interrupted_nvs_restore": True,
+    }
+    assert result["hardware_security_change_supported"] is False
+    assert result["install_authorized"] is False
+    assert result["flash_modified"] is False
+    assert str(a) not in json.dumps(result)
+    assert candidate.read_bytes() == b"c" * 4097 and nvs.read_bytes() == b"n" * 0x4000
+
+    nvs.write_bytes(b"m" * 0x4000)
+    with pytest.raises(ValueError, match="NVS"):
+        rehearse_restore(a, b, digest, ota1, nvs, nvs_digest, candidate, candidate_digest)
+    with pytest.raises(ValueError, match="candidate"):
+        rehearse_restore(
+            a,
+            b,
+            digest,
+            ota1,
+            nvs,
+            hashlib.sha256(nvs.read_bytes()).hexdigest(),
+            candidate,
+            "0" * 64,
+        )
