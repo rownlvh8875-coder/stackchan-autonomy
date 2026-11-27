@@ -24,7 +24,7 @@ class K151ConversationOwner final {
   K151ConversationOwner& operator=(const K151ConversationOwner&) = delete;
 
   bool start(K151AudioBoardEvidence evidence, bool physical_lcd_verified,
-             SavedOwnerCredentials* saved = nullptr);
+             SavedOwnerCredentials* saved = nullptr, OwnerUnlockPort* unlock = nullptr);
   // The caller supplies the reviewed deployment scope and a static app-flash
   // asset. The robot's separate local review must also pass.
   bool request_voice(VoiceModelConfig models, std::span<const uint8_t> model_pack,

@@ -179,14 +179,27 @@ bool K151LcdPanel::locate_panel(i2c_master_bus_handle_t bus) {
 }
 
 bool K151LcdPanel::read_contact_count(uint8_t& count) const {
-  constexpr uint8_t status_register = 0x02;
-  std::array<uint8_t, 6> touch_status{};
-  if (!ready() || !touch_ || stop_input_handed_off_ ||
-      i2c_master_transmit_receive(touch_, &status_register, 1,
-                                  touch_status.data(), touch_status.size(),
-                                  kI2cTimeoutMs) != ESP_OK || stop_.load()) return false;
-  count = touch_status[0] & 0x0f;
+  std::array<uint8_t, 6> report{};
+  if (!read_touch_report(report)) return false;
+  count = report[0] & 0x0f;
   return count <= 2;
+}
+
+bool K151LcdPanel::read_touch_point(uint8_t& count, int& x, int& y) const {
+  std::array<uint8_t, 6> report{};
+  if (!read_touch_report(report)) return false;
+  // Same FT6336 layout as the pinned M5Stack UpdateTouchPoint implementation.
+  count = report[0] & 0x0f;
+  x = ((report[1] & 0x0f) << 8) | report[2];
+  y = ((report[3] & 0x0f) << 8) | report[4];
+  return count <= 2;
+}
+
+bool K151LcdPanel::read_touch_report(std::array<uint8_t, 6>& report) const {
+  constexpr uint8_t status_register = 0x02;
+  return ready() && touch_ && !stop_input_handed_off_ &&
+      i2c_master_transmit_receive(touch_, &status_register, 1, report.data(), report.size(),
+                                  kI2cTimeoutMs) == ESP_OK && !stop_.load();
 }
 
 bool K151LcdPanel::handoff_stop_input(i2c_master_bus_handle_t bus,

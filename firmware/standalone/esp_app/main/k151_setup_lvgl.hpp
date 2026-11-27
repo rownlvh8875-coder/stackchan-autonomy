@@ -4,6 +4,7 @@
 
 #include "setup_screen_model.hpp"
 #include "k151_voice_status.hpp"
+#include "owner_unlock.hpp"
 #include <atomic>
 #include <optional>
 #include <string_view>
@@ -44,6 +45,13 @@ class K151SetupLvgl final {
   enum class ReviewPhase : uint8_t { idle, wait_clear, wait_press, holding, wait_release, closed };
   enum class SavedSetupScreen : uint8_t { presence, restored };
   bool present_saved_setup(SavedSetupScreen screen);
+  enum class UnlockScreen : uint8_t { enter, enroll, deriving };
+  enum class UnlockChoice : uint8_t { waiting, confirm, cancel, fault };
+  bool present_unlock(UnlockScreen screen, const OwnerCode* generated = nullptr);
+  UnlockChoice poll_unlock();
+  bool finish_unlock(bool restored);
+  void clear_unlock();
+  bool add_unlock_label(lv_obj_t* screen, const char* label, int x, int y);
   bool begin_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
   ReviewResult poll_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
   bool begin_voice_review(uint64_t now_ms, bool allow_first_budget, bool lvgl_lock_held,
@@ -67,6 +75,10 @@ class K151SetupLvgl final {
   bool save_after_pairing_ = false;
   bool voice_approved_ = false;
   std::optional<K151VoiceStatus> voice_status_;
+  std::optional<UnlockScreen> unlock_screen_;
+  OwnerCodeInput unlock_input_;
+  std::array<lv_obj_t*, 37> unlock_labels_{};
+  size_t unlock_labels_count_ = 0;
   bool attempted_ = false;
 };
 } // namespace stackchan::standalone

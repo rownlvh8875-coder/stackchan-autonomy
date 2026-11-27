@@ -27,6 +27,40 @@ bool head_window = false, panel_reviewed = false, pairing_complete = false, read
 bool retry_failed = false;
 uint64_t voice_prompt_at = 0;
 unsigned touches = 0, receive_calls = 0, activations = 0;
+bool unlock_case() { return scenario.starts_with("unlock_"); }
+bool unlock_enroll() { return scenario == "unlock_enroll"; }
+constexpr std::array<char, kOwnerCodeLength> mock_code{
+    '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
+bool unlock_busy = false;
+
+struct MockUnlock final : OwnerUnlockPort {
+  explicit MockUnlock(SavedOwnerCredentials& saved) : saved(saved) {}
+  SavedOwnerCredentials& saved;
+  uint64_t began = 0;
+  unsigned reads = 0, generated = 0, cancelled = 0;
+  ReadCode inspect() override {
+    ++reads;
+    assert(head_window && !usb);
+    return unlock_enroll() ? ReadCode::missing : ReadCode::found;
+  }
+  bool generate(std::span<char, kOwnerCodeLength> out) override {
+    assert(unlock_enroll() && pairing_complete && !usb);
+    ++generated;
+    std::copy(mock_code.begin(), mock_code.end(), out.begin());
+    return true;
+  }
+  bool begin(OwnerCode code) override {
+    assert(!began && !usb && std::ranges::equal(code, mock_code));
+    began = ms;
+    return true;
+  }
+  State state() const override {
+    assert(began);
+    return ms - began < 200 || scenario == "unlock_timeout" ? State::deriving : State::ready;
+  }
+  SavedOwnerCredentials& credentials() override { return saved; }
+  void cancel() override { ++cancelled; }
+};
 }
 
 TaskHandle_t xTaskGetCurrentTaskHandle() { return current_task; }
@@ -72,7 +106,28 @@ bool K151SetupLvgl::attach(K151LcdPanel&, bool verified, bool lock, bool local) 
 }
 bool K151SetupLvgl::present_saved_setup(SavedSetupScreen screen) {
   assert(screen == SavedSetupScreen::presence && view && !usb);
-  return scenario == "save_first_pairing";
+  return scenario == "save_first_pairing" || unlock_case();
+}
+bool K151SetupLvgl::present_unlock(UnlockScreen screen, const OwnerCode* generated) {
+  assert(unlock_case() && !usb && view);
+  unlock_busy = screen == UnlockScreen::deriving;
+  if (!unlock_busy) {
+    assert((screen == UnlockScreen::enroll) == unlock_enroll());
+    assert((generated != nullptr) == unlock_enroll());
+    unlock_input_.set_generated(generated ? *generated : OwnerCode(mock_code));
+  }
+  return true;
+}
+K151SetupLvgl::UnlockChoice K151SetupLvgl::poll_unlock() {
+  if (!unlock_busy) return UnlockChoice::confirm;
+  if (scenario == "unlock_cancel") return UnlockChoice::cancel;
+  if (scenario == "unlock_stop") stopped = true;
+  return UnlockChoice::waiting;
+}
+bool K151SetupLvgl::finish_unlock(bool restored) {
+  assert(unlock_case() && unlock_busy && restored == !unlock_enroll() && !usb);
+  ready_page = true;
+  return true;
 }
 bool K151SetupLvgl::present(TouchConsentPhase phase, OwnerSetupPhase ready,
                            bool input, bool error, bool lock) {
@@ -90,7 +145,7 @@ bool K151SetupLvgl::present(TouchConsentPhase phase, OwnerSetupPhase ready,
 bool K151SetupLvgl::detach(bool lock) { assert(lock && !usb); view = false; return true; }
 bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first_budget, bool lock, bool one_turn) {
   assert(now == ms && lock && view && ready_page && !usb);
-  assert(first_budget == (scenario != "existing_ledger_scope"));
+  assert(first_budget == (scenario != "existing_ledger_scope" && scenario != "unlock_restored"));
   assert(!one_turn);
   voice_prompt_at = now;
   return scenario != "voice_frame_failed";
@@ -112,7 +167,7 @@ TouchConsentEvent K151HeadTouchOwner::poll_once(uint64_t now) {
   assert(head && i2c && now == ms);
   ++touches;
   last_read_failed_ = scenario == "head_read_error";
-  if (last_read_failed_ || now - head_started >= 30000U)
+  if (last_read_failed_ || (now - head_started >= 30000U && scenario != "unlock_timeout"))
     return TouchConsentEvent::invalidated;
   if (!head_window && scenario != "no_head_touch" && now - head_started >= 3050U) {
     owner_mode_ = true;
@@ -172,12 +227,22 @@ int main(int argc, char* argv[]) {
   MockOwnerRecords records;
   MockOwnerCipher cipher;
   SavedOwnerCredentials saved(records, cipher);
+  MockUnlock unlock(saved);
+  if (unlock_case() && !unlock_enroll()) {
+    RuntimeSecrets previous;
+    constexpr std::array<uint8_t, 4> ssid{'t', 'e', 's', 't'};
+    assert(previous.provision(ssid, "synthetic-password", "synthetic-unit-test-token", true));
+    assert(saved.save_first(previous, [] { return true; }));
+    records.commits = 0;
+    cipher.reject = scenario == "unlock_wrong";
+  }
   K151OwnerSession session;
   assert(!session.handoff());
   if (scenario == "existing_lvgl") lvgl = true;
   if (scenario == "existing_bus") i2c = true;
   const auto started = session.start(scenario != "wrong_board", scenario != "unverified_lcd",
-                                     saved_pairing ? &saved : nullptr);
+                                     saved_pairing ? &saved : nullptr,
+                                     unlock_case() ? &unlock : nullptr);
   using Startup = K151OwnerSession::StartupStage;
   if (scenario == "hold" || scenario == "wrong_board" || scenario == "unverified_lcd" ||
       scenario == "existing_lvgl" || scenario == "existing_bus") {
@@ -224,7 +289,8 @@ int main(int argc, char* argv[]) {
     return 0;
   }
   Step terminal = Step::idle;
-  const uint64_t end = scenario == "no_head_touch" ? 31000 : 8000;
+  const uint64_t end = scenario == "unlock_timeout" ? 70000 :
+                       scenario == "no_head_touch" ? 31000 : 8000;
   for (; ms <= end; ms += 50) {
     terminal = session.poll();
     if (terminal == Step::fault || terminal == Step::stopped || terminal == Step::ready) break;
@@ -236,6 +302,17 @@ int main(int argc, char* argv[]) {
   if (saved_pairing)
     assert(terminal == Step::ready && pairing_complete && records.reads == 1 &&
            records.commits == 0 && cipher.seals == 0 && records.data.empty());
+  if (unlock_case()) {
+    assert(unlock.reads == 1 && unlock.began && unlock.generated == unsigned(unlock_enroll()));
+    assert(!usb && !records.commits && (unlock_enroll() || receive_calls == 0));
+    if (scenario != "unlock_restored" && !unlock_enroll()) {
+      const bool cancelled = scenario == "unlock_cancel" || scenario == "unlock_stop";
+      assert(terminal == (cancelled ? Step::stopped : Step::fault) && unlock.cancelled == 1);
+      assert(!i2c && !session.handoff() && !session.request_voice_review(true, true, true));
+      return 0;
+    }
+    assert(terminal == Step::ready);
+  }
   if (terminal == Step::ready) {
     assert(terminal == Step::ready && i2c && head && lcd && !usb);
     assert(!session.handoff() && !voice_prompt_at);
@@ -267,8 +344,9 @@ int main(int argc, char* argv[]) {
     assert(terminal == Step::voice_ready);
     const auto handoff = session.handoff();
     assert(handoff && handoff->setup.ready() && handoff->bus == &board_bus);
-    assert(handoff->paid_consent && handoff->budget_writes && handoff->allow_first_budget == first);
-    assert(handoff->save_after_setup == (saved_pairing ? &saved : nullptr));
+    assert(handoff->paid_consent && handoff->budget_writes &&
+           handoff->allow_first_budget == (first && scenario != "unlock_restored"));
+    assert(handoff->save_after_setup == ((saved_pairing || unlock_enroll()) ? &saved : nullptr));
     assert(!session.handoff());
     ms += 1000;
     assert(session.poll() == Step::voice_ready && touches == previous && !usb);

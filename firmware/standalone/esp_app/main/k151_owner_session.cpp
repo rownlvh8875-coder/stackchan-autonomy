@@ -12,6 +12,8 @@ namespace stackchan::standalone {
 namespace {
 constexpr uint64_t kPollIntervalMs = 50;
 constexpr uint64_t kVoiceReviewTimeoutMs = 30'000;
+constexpr uint64_t kUnlockInputTimeoutMs = 120'000;
+constexpr uint64_t kUnlockDeriveTimeoutMs = 60'000;
 #if defined(CONFIG_ESP_CONSOLE_UART_DEFAULT) && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
 constexpr bool kSeparateUartConsole = true;
 #else
@@ -27,10 +29,10 @@ bool K151OwnerSession::on_owner_task() const {
 }
 
 bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verified,
-                             SavedOwnerCredentials* saved) {
+                             SavedOwnerCredentials* saved, OwnerUnlockPort* unlock) {
   if (task_) return false;
   startup_stage_ = StartupStage::preconditions;
-  if (stop_.load() || !exact_board_verified || !physical_lcd_verified ||
+  if ((saved && unlock) || stop_.load() || !exact_board_verified || !physical_lcd_verified ||
       !kSeparateUartConsole || !K151InstallHold::device_activation_allowed() ||
       lv_is_initialized()) return false;
   startup_stage_ = StartupStage::owner_task;
@@ -53,7 +55,7 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
   startup_stage_ = StartupStage::view;
   if (!view_.attach(panel_, physical_lcd_verified, true, true)) return abort();
   startup_stage_ = StartupStage::presence_frame;
-  const bool presence = saved
+  const bool presence = (saved || unlock)
       ? view_.present_saved_setup(K151SetupLvgl::SavedSetupScreen::presence)
       : view_.present(TouchConsentPhase::clear_for_arm, OwnerSetupPhase::hold, false, false, true);
   if (!presence) return abort();
@@ -65,7 +67,8 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
   last_sample_ms_ = static_cast<uint64_t>(now_us / 1000);
   board_verified_ = exact_board_verified;
   lcd_verified_ = physical_lcd_verified;
-  saved_ = saved;
+  unlock_ = unlock;
+  saved_ = unlock ? &unlock->credentials() : saved;
   startup_stage_ = StartupStage::ready;
   step_ = Step::head_touch;
   return true;
@@ -136,8 +139,17 @@ K151OwnerSession::Step K151OwnerSession::poll() {
   if (stop_.load()) return abort_setup();
   if (event == TouchConsentEvent::invalidated)
     return abort_setup(touch_.last_read_failed() ? Failure::sensor_read : Failure::head_input);
+  if (step_ == Step::unlock_input || step_ == Step::unlock_deriving) return poll_unlock(now);
   if (step_ == Step::head_touch && event == TouchConsentEvent::owner_window_open) {
-    if (saved_) {
+    if (unlock_) {
+      const auto present = unlock_->inspect();
+      if (present == ReadCode::failure || stop_.load()) return abort_setup();
+      if (present == ReadCode::found) {
+        if (!view_.present_unlock(K151SetupLvgl::UnlockScreen::enter)) return abort_setup();
+        unlock_started_ms_ = now;
+        return step_ = Step::unlock_input;
+      }
+    } else if (saved_) {
       setup_input_.store(true);
       const auto restored = setup_.restore_saved(*saved_, now);
       if (restored == SavedSetupLoad::unusable) return abort_setup();
@@ -163,10 +175,49 @@ K151OwnerSession::Step K151OwnerSession::poll() {
       if (!usb_.finalize_after_touch(now) || !setup_.ready() ||
           !view_.present(TouchConsentPhase::consumed, setup_.phase(), true, false, true) ||
           !usb_.close_completed_transport() || !setup_.ready()) return abort_setup();
+      if (unlock_) {
+        std::array<char, kOwnerCodeLength> generated{};
+        const OwnerCode code(generated);
+        const bool ok = unlock_->generate(generated) &&
+            view_.present_unlock(K151SetupLvgl::UnlockScreen::enroll, &code);
+        wipe_secret(reinterpret_cast<unsigned char*>(generated.data()), generated.size());
+        if (!ok) return abort_setup();
+        unlock_enrolling_ = true;
+        unlock_started_ms_ = now;
+        return step_ = Step::unlock_input;
+      }
       step_ = Step::ready;
     }
   }
   return step_;
+}
+
+K151OwnerSession::Step K151OwnerSession::poll_unlock(uint64_t now) {
+  using Choice = K151SetupLvgl::UnlockChoice;
+  const bool deriving = step_ == Step::unlock_deriving;
+  if (!owner_.load() || now - unlock_started_ms_ >=
+                           (deriving ? kUnlockDeriveTimeoutMs : kUnlockInputTimeoutMs))
+    return abort_setup();
+  const auto choice = view_.poll_unlock();
+  if (choice == Choice::cancel) return step_ = shutdown() ? Step::stopped : Step::fault;
+  if (choice == Choice::fault || stop_.load()) return abort_setup();
+  if (!deriving) {
+    if (choice != Choice::confirm) return step_;
+    if (!unlock_->begin(view_.unlock_input_.code()) ||
+        !view_.present_unlock(K151SetupLvgl::UnlockScreen::deriving)) return abort_setup();
+    unlock_started_ms_ = now;
+    return step_ = Step::unlock_deriving;
+  }
+  const auto state = unlock_->state();
+  if (state == OwnerUnlockPort::State::deriving) return step_;
+  if (state != OwnerUnlockPort::State::ready) return abort_setup();
+  if (!unlock_enrolling_) {
+    setup_input_.store(true);
+    if (setup_.restore_saved(*saved_, now) != SavedSetupLoad::restored) return abort_setup();
+    restored_setup_ = true;
+  }
+  if (!setup_.ready() || !view_.finish_unlock(restored_setup_)) return abort_setup();
+  return step_ = Step::ready;
 }
 
 std::optional<K151VoiceHandoff> K151OwnerSession::handoff() {
@@ -186,6 +237,8 @@ bool K151OwnerSession::shutdown() {
   paid_consent_.store(false);
   budget_writes_.store(false);
   setup_input_.store(false);
+  if (unlock_) unlock_->cancel();
+  unlock_ = nullptr;
   saved_ = nullptr;
   setup_.stop();
   if (!usb_.shutdown()) return false;

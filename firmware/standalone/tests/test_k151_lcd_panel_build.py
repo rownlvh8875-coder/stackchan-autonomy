@@ -46,6 +46,7 @@ def lcd_binary(tmp_path_factory):
     "case",
     [
         "ok",
+        "unlock_screen",
         "cold_start",
         "cold_other_output_high",
         "cold_stop_before_release",

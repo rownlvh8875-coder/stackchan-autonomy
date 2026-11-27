@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "persistent_store.hpp"
+#include <array>
 #include <atomic>
 
 namespace stackchan::standalone {
@@ -44,6 +45,26 @@ class K151SavedOwnerNvs final : public AtomicKv {
  private:
   const std::atomic_bool& stop_;
   bool initialized_ = false;
+};
+
+class K151OwnerCodeNvs final : public AtomicKv {
+ public:
+  using Salt = std::array<uint8_t, 16>;
+  explicit K151OwnerCodeNvs(const std::atomic_bool& stop) : stop_(stop) {}
+  ReadCode inspect();
+  bool prepare_salt(const Salt& salt);
+  const Salt& salt() const { return salt_; }
+  bool has_salt() const { return salt_ready_; }
+  ReadValue read(std::string_view key, size_t max_bytes) override;
+  bool commit(std::string_view key, std::span<const uint8_t> bytes) override;
+
+ private:
+  ReadValue envelope();
+  const std::atomic_bool& stop_;
+  Salt salt_{};
+  ReadCode initial_ = ReadCode::failure;
+  bool initialized_ = false;
+  bool salt_ready_ = false;
 };
 
 }  // namespace stackchan::standalone

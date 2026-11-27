@@ -2,6 +2,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 #include <cstdint>
 #include <driver/i2c_master.h>
 #include <esp_lcd_panel_io.h>
@@ -34,6 +35,8 @@ class K151LcdPanel final {
   friend class K151DisplayStop;
   friend class K151SetupLvgl;
   bool read_contact_count(uint8_t& count) const;
+  bool read_touch_report(std::array<uint8_t, 6>& report) const;
+  bool read_touch_point(uint8_t& count, int& x, int& y) const;
   bool handoff_stop_input(i2c_master_bus_handle_t bus, const std::atomic_bool& expected_stop);
   bool present_voice_status_rows();
   bool present_rows(unsigned first, unsigned end);

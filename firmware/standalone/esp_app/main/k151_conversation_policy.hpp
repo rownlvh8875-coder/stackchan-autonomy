@@ -50,6 +50,7 @@ struct K151ConversationPolicy {
   std::optional<K151OneTurnDeviceEvidence> one_turn_device_evidence = std::nullopt;
   // Number of the reviewed dedicated HMAC_UP eFuse key, never the key bytes.
   std::optional<std::uint8_t> owner_hmac_slot = std::nullopt;
+  bool reversible_owner_unlock = false;
 };
 
 // Read-only, observed on each approved boot. Empty fields fail closed.
@@ -66,6 +67,7 @@ struct K151ConversationBootFacts {
   bool psram_ready = false;
   bool security_matches = false;
   std::optional<std::uint8_t> protected_owner_hmac_slot = std::nullopt;
+  bool reversible_unlock_verified = false;
 };
 
 struct K151AdmittedConversation {
@@ -76,6 +78,7 @@ struct K151AdmittedConversation {
   bool allow_first_budget;
   K151ConversationBuildMode mode;
   std::optional<std::uint8_t> owner_hmac_slot;
+  bool reversible_owner_unlock;
 };
 
 inline constexpr bool local_conversation_scope_complete(const K151ConversationPolicy& policy) {
@@ -84,10 +87,11 @@ inline constexpr bool local_conversation_scope_complete(const K151ConversationPo
   const bool existing_budget = !policy.trial_budget_must_be_missing && policy.trial_budget_sha256 &&
       std::ranges::any_of(*policy.trial_budget_sha256, [](auto value) { return value != 0; });
   const bool scoped = policy.mode == K151ConversationBuildMode::one_paid_turn
-      ? !policy.owner_hmac_slot && (first_budget || existing_budget)
+      ? !policy.owner_hmac_slot && !policy.reversible_owner_unlock && (first_budget || existing_budget)
       : policy.mode == K151ConversationBuildMode::continuous &&
         !policy.trial_budget_must_be_missing && !policy.trial_budget_sha256 &&
-        policy.owner_hmac_slot && *policy.owner_hmac_slot < 6;
+        (policy.reversible_owner_unlock ? !policy.owner_hmac_slot
+                                        : policy.owner_hmac_slot && *policy.owner_hmac_slot < 6);
   // Device observations are a separate output basis for a single paid turn.
   // The final HOLD verdict on the other path means its measured-output checks passed.
   const bool output_reviewed = policy.one_turn_device_evidence
@@ -113,7 +117,9 @@ inline K151ConversationBootStage conversation_boot_stage(
   if (!boot.psram_ready) return Stage::psram;
   if (boot.nvs_offset != 0x9000 || boot.nvs_bytes != 0x4000) return Stage::nvs;
   const bool security_ok = policy.mode == K151ConversationBuildMode::one_paid_turn
-      ? boot.security_matches : boot.protected_owner_hmac_slot == policy.owner_hmac_slot;
+      ? boot.security_matches
+      : policy.reversible_owner_unlock ? boot.security_matches && boot.reversible_unlock_verified
+                                       : boot.protected_owner_hmac_slot == policy.owner_hmac_slot;
   if (!security_ok) return Stage::security;
   if (boot.flash_bytes != 16 * 1024 * 1024) return Stage::flash;
   return Stage::ready;
@@ -126,7 +132,7 @@ inline std::optional<K151AdmittedConversation> admit_conversation_boot(
   return K151AdmittedConversation{
       {policy.output.exact_board_revision_verified, policy.exclusive_i2s0_verified},
       policy.physical_lcd_verified, policy.paid_scope_approved, policy.budget_scope_approved,
-      policy.allow_first_budget, policy.mode, policy.owner_hmac_slot};
+      policy.allow_first_budget, policy.mode, policy.owner_hmac_slot, policy.reversible_owner_unlock};
 }
 
 inline bool matches_reviewed_trial_budget(const K151ConversationPolicy& policy, bool missing,

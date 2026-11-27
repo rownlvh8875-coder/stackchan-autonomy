@@ -87,6 +87,26 @@ const std::atomic_bool& stop_source() {
 
 bool conversation_case() { return scenario.starts_with("bootstrap_conversation_"); }
 bool restored_conversation() { return scenario.starts_with("bootstrap_conversation_reboot_"); }
+constexpr std::array<char, kOwnerCodeLength> test_code{
+    '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
+bool deriving_setup = false;
+struct RuntimeTestUnlock final : OwnerUnlockPort {
+  explicit RuntimeTestUnlock(SavedOwnerCredentials& saved) : saved(saved) {}
+  ReadCode inspect() override { assert(!setup_usb && !calls); return ReadCode::found; }
+  bool generate(std::span<char, kOwnerCodeLength>) override { return false; }
+  bool begin(OwnerCode code) override {
+    assert(std::ranges::equal(code, test_code) && !began && !setup_usb && !calls);
+    began = now_us;
+    return true;
+  }
+  State state() const override {
+    return now_us - began < 100'000 ? State::deriving : State::ready;
+  }
+  SavedOwnerCredentials& credentials() override { return saved; }
+  void cancel() override {}
+  SavedOwnerCredentials& saved;
+  int64_t began = 0;
+};
 bool initial_saved_conversation() { return scenario.starts_with("bootstrap_conversation_save_"); }
 bool continuous_conversation() {
   return scenario == "bootstrap_conversation_continuous" || restored_conversation() ||
@@ -116,6 +136,8 @@ int nvs_init_calls = 0, nvs_write_opens = 0, nvs_sets = 0, nvs_commits = 0;
 std::vector<uint8_t> durable_budget, durable_profile{0x7b}, staged;
 std::vector<uint8_t> durable_owner_setup;
 bool stop_owner_at_open = false, refuse_owner_commit = false;
+bool code_nvs_case() { return scenario == "owner_code_nvs"; }
+std::string_view owner_nvs_key() { return code_nvs_case() ? "owner_cfg_v2" : "owner_cfg_v1"; }
 bool staged_profile = false;
 
 struct Store final : AtomicKv {
@@ -288,7 +310,7 @@ extern "C" void heap_caps_free(void* pcm) { std::free(pcm); }
 extern "C" bool esp_ptr_external_ram(const void*) { return true; }
 
 extern "C" esp_err_t nvs_flash_init() {
-  if (scenario != "bootstrap_scopes_separate" && scenario != "owner_nvs") {
+  if (scenario != "bootstrap_scopes_separate" && scenario != "owner_nvs" && !code_nvs_case()) {
     assert(stop_timer_active && (stop_masks[0] & 0x18) == 0x18 && (stop_masks[1] & 0x0c) == 0x08);
   }
   ++nvs_init_calls;
@@ -297,7 +319,7 @@ extern "C" esp_err_t nvs_flash_init() {
 }
 extern "C" esp_err_t nvs_open(const char* space, nvs_open_mode_t mode, nvs_handle_t* handle) {
   if (std::string_view{space} == "sc_owner") {
-    assert(scenario == "owner_nvs");
+    assert(scenario == "owner_nvs" || code_nvs_case());
     if (mode == NVS_READONLY && durable_owner_setup.empty()) return ESP_ERR_NVS_NOT_FOUND;
     *handle = mode == NVS_READONLY ? 3 : 4;
     if (mode == NVS_READWRITE && stop_owner_at_open) stop = true;
@@ -314,7 +336,7 @@ extern "C" esp_err_t nvs_open(const char* space, nvs_open_mode_t mode, nvs_handl
 }
 extern "C" esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* out, size_t* len) {
   if (handle == 3) {
-    assert(std::string_view{key} == "owner_cfg_v1");
+    assert(std::string_view{key} == owner_nvs_key());
     if (out) {
       assert(*len == durable_owner_setup.size());
       std::memcpy(out, durable_owner_setup.data(), *len);
@@ -336,7 +358,8 @@ extern "C" esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* ou
 extern "C" esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const void* bytes,
                                   size_t size) {
   if (handle == 4) {
-    assert(std::string_view{key} == "owner_cfg_v1" && size == 351 && !stop.load());
+    assert(std::string_view{key} == owner_nvs_key() &&
+           size == (code_nvs_case() ? 371U : 351U) && !stop.load());
     const auto* data = static_cast<const uint8_t*>(bytes);
     staged.assign(data, data + size);
     ++nvs_sets;
@@ -408,6 +431,20 @@ bool K151SetupLvgl::present(TouchConsentPhase, OwnerSetupPhase, bool, bool, bool
 bool K151SetupLvgl::present_saved_setup(SavedSetupScreen) {
   return (restored_conversation() || initial_saved_conversation()) &&
          lvgl_on && !setup_usb && !network_starts;
+}
+bool K151SetupLvgl::present_unlock(UnlockScreen screen, const OwnerCode* generated) {
+  assert(restored_conversation() && !generated && !setup_usb && !network_starts);
+  assert(screen == UnlockScreen::enter || screen == UnlockScreen::deriving);
+  deriving_setup = screen == UnlockScreen::deriving;
+  if (!deriving_setup) unlock_input_.set_generated(test_code);
+  return true;
+}
+K151SetupLvgl::UnlockChoice K151SetupLvgl::poll_unlock() {
+  assert(restored_conversation() && !setup_usb && !network_starts);
+  return deriving_setup ? UnlockChoice::waiting : UnlockChoice::confirm;
+}
+bool K151SetupLvgl::finish_unlock(bool restored) {
+  return restored && deriving_setup && lvgl_on && !setup_usb && !network_starts;
 }
 bool K151SetupLvgl::detach(bool lock) { return lock && !setup_usb && !codec_running; }
 bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first, bool lock, bool one_turn) {
@@ -776,6 +813,7 @@ void exercise_conversation() {
   MockOwnerRecords records;
   MockOwnerCipher cipher;
   SavedOwnerCredentials saved(records, cipher);
+  RuntimeTestUnlock unlock(saved);
   if (restored_conversation()) {
     RuntimeSecrets previous_boot;
     constexpr std::array<uint8_t, 4> ssid{'t', 'e', 's', 't'};
@@ -797,10 +835,17 @@ void exercise_conversation() {
   }
   assert(!request(true, true) &&
          conversation.start({true, true}, true,
-                            restored_conversation() || initial_saved_conversation() ? &saved : nullptr));
+                            initial_saved_conversation() ? &saved : nullptr,
+                            restored_conversation() ? &unlock : nullptr));
   assert(!cipher.opens);
   now_us += 50'000;
-  if (!restored_conversation()) {
+  if (restored_conversation()) {
+    for (int i = 0; i < 3; ++i) {
+      assert(conversation.poll().phase == Phase::setup && !setup_usb &&
+             !cipher.opens && !network_starts && !calls);
+      now_us += 50'000;
+    }
+  } else {
     assert(conversation.poll().phase == Phase::setup && setup_usb);
     now_us += 50'000;
   }
@@ -1089,6 +1134,37 @@ void exercise_bootstrap() {
 int main(int argc, char** argv) {
   assert(argc == 2);
   scenario = argv[1];
+  if (code_nvs_case()) {
+    K151OwnerCodeNvs storage(stop);
+    const K151OwnerCodeNvs::Salt salt{123};
+    assert(!storage.prepare_salt(salt) && storage.inspect() == ReadCode::missing);
+    assert(storage.prepare_salt(salt) && !storage.prepare_salt(salt));
+    MockOwnerCipher cipher;
+    SavedOwnerCredentials saved(storage, cipher);
+    RuntimeSecrets before;
+    constexpr std::array<uint8_t, 4> ssid{'t', 'e', 's', 't'};
+    assert(before.provision(ssid, "mock-password", "not-a-real-key-test", true));
+    stop_owner_at_open = true;
+    assert(!saved.save_first(before, [] { return !stop.load(); }) && !nvs_sets);
+    stop = false;
+    stop_owner_at_open = false;
+    assert(saved.save_first(before, [] { return !stop.load(); }) && nvs_commits == 1);
+    assert(durable_owner_setup[0] == 'K' && durable_owner_setup[3] == '2' &&
+           durable_owner_setup[4] == salt[0]);
+    K151OwnerCodeNvs reboot(stop);
+    assert(reboot.inspect() == ReadCode::found && reboot.salt() == salt);
+    RuntimeSecrets after;
+    SavedOwnerCredentials restored(reboot, cipher);
+    assert(restored.restore(after) == SavedSetupLoad::restored && after.api_key() == before.api_key());
+    durable_owner_setup[4] ^= 1;
+    RuntimeSecrets corrupted;
+    assert(restored.restore(corrupted) == SavedSetupLoad::unusable && !corrupted.valid());
+    durable_owner_setup[0] ^= 1;
+    K151OwnerCodeNvs malformed(stop);
+    assert(malformed.inspect() == ReadCode::failure && !malformed.prepare_salt(salt));
+    assert(nvs_commits == 1 && durable_budget.empty());
+    return 0;
+  }
   if (scenario == "owner_nvs") {
     K151SavedOwnerNvs storage(stop);
     MockOwnerCipher cipher;

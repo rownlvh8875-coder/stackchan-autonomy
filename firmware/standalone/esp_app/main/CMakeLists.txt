@@ -1,7 +1,8 @@
 set(k151_entry "app_main.cpp")
 idf_build_get_property(k151_review K151_CONVERSATION_REVIEW)
 if(k151_review)
-    set(k151_entry "k151_conversation_main.cpp" "k151_conversation_policy.cpp" "k151_owner_hmac.cpp")
+    set(k151_entry "k151_conversation_main.cpp" "k151_conversation_policy.cpp" "k151_owner_hmac.cpp"
+                   "k151_owner_code.cpp")
     set(k151_pack "${CMAKE_CURRENT_LIST_DIR}/../../resource_bench/main/srmodels.bin")
     if(NOT CMAKE_BUILD_EARLY_EXPANSION)
         if(NOT EXISTS "${k151_pack}")

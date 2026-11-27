@@ -40,6 +40,9 @@ esp_lcd_panel_io_t lcd_io;
 lv_display_t display{};
 lv_obj_t screen, root;
 std::array<lv_obj_t, 3> labels;
+std::array<lv_obj_t, 37> unlock_labels;
+std::array<std::string_view, unlock_labels.size()> unlock_captions;
+unsigned unlock_label_count = 0;
 std::array<std::string_view, 3> captions;  // Known mock labels only.
 uint8_t ldo_enable = 0xbf, ldo_voltage = 0x9a, expander_p1 = 0x83;
 uint8_t expander_p0 = 0x07, p0_direction = 0x18, p1_direction = 0x0c, p0_drive = 0x10;
@@ -48,6 +51,7 @@ bool release_failed_once = false;
 unsigned ft_contact_reads = 0, irq_ack_reads = 0;
 unsigned handoff_first_contact_read = 1;
 uint8_t screen_contacts = 0;
+int touch_x = 0, touch_y = 0;
 bool spi_open = false, lcd_open = false, lv_open = false, display_on = false;
 bool sd_cs_driven = false;
 uint32_t sd_cs_level = 0;
@@ -102,12 +106,59 @@ class K151ScpsUsbPort {
 class K151OwnerSession {
  public:
   using Review = K151SetupLvgl::ReviewResult;
+  using Unlock = K151SetupLvgl::UnlockChoice;
   static bool begin_voice(K151SetupLvgl& setup, uint64_t now, bool first_budget,
                           bool one_turn = false) {
     return setup.begin_voice_review(now, first_budget, true, one_turn);
   }
   static Review poll_voice(K151SetupLvgl& setup, uint64_t now) {
     return setup.poll_voice_review(now, true);
+  }
+  static void check_unlock(K151SetupLvgl& setup) {
+    using Screen = K151SetupLvgl::UnlockScreen;
+    constexpr std::array<char, kOwnerCodeLength> code{
+        '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
+    const OwnerCode generated(code);
+    const auto sample = [&](uint8_t count, int x, int y) {
+      screen_contacts = count;
+      touch_x = x;
+      touch_y = y;
+      return setup.poll_unlock();
+    };
+    const auto key = [&](int x, int y) {
+      assert(sample(1, x, y) == Unlock::waiting);
+      return sample(0, x, y);
+    };
+    assert(setup.present_unlock(Screen::enroll, &generated));
+    assert(unlock_captions[1] == std::string_view(code.data(), code.size()));
+    assert(key(280, 228) == Unlock::waiting); // Held before screen was ready.
+    assert(key(280, 228) == Unlock::confirm);
+    assert(setup.present_unlock(Screen::deriving));
+    assert(unlock_captions[1] == "Cancel");
+    assert(std::ranges::all_of(setup.unlock_input_.code(), [](char c) { return c == '\0'; }));
+    assert(sample(0, 0, 0) == Unlock::waiting);
+    assert(key(160, 218) == Unlock::cancel);
+
+    assert(setup.present_unlock(Screen::enter));
+    assert(sample(0, 0, 0) == Unlock::waiting);
+    assert(key(280, 218) == Unlock::waiting); // Require all symbols.
+    assert(sample(1, 20, 61) == Unlock::waiting);
+    assert(sample(2, 20, 61) == Unlock::waiting);
+    assert(sample(0, 20, 61) == Unlock::waiting);
+    assert(sample(1, 20, 61) == Unlock::waiting);
+    assert(sample(1, 80, 61) == Unlock::waiting); // Dragging cancels this tap.
+    assert(sample(0, 80, 61) == Unlock::waiting && !setup.unlock_input_.size());
+    for (size_t i = 0; i < code.size(); ++i) {
+      assert(key(20 + 38 * (i % 8), 61 + 37 * (i / 8)) == Unlock::waiting);
+      assert(setup.unlock_input_.size() == i + 1);
+    }
+    assert(key(50, 218) == Unlock::waiting && setup.unlock_input_.size() == code.size() - 1);
+    assert(key(20 + 38 * 7, 98) == Unlock::waiting);
+    assert(std::ranges::equal(setup.unlock_input_.code(), code));
+    assert(key(280, 218) == Unlock::confirm);
+    assert(setup.finish_unlock(true));
+    assert(!unlock_label_count && std::ranges::all_of(setup.unlock_input_.code(),
+                                                     [](char c) { return c == '\0'; }));
   }
 };
 bool K151InstallHold::display_activation_allowed() { return scenario != "hold"; }
@@ -148,12 +199,19 @@ extern "C" esp_err_t i2c_master_transmit_receive(
   if (device == &touch) {
     assert(size == 6);
     if (*reg == 0x02) {
-      assert(scenario.starts_with("handoff_") || scenario.starts_with("review_"));
+      assert(scenario.starts_with("handoff_") || scenario.starts_with("review_") || scenario == "unlock_screen");
       ++ft_contact_reads;
       std::fill_n(data, size, 0);
       if (scenario.starts_with("review_")) {
         if (scenario == "review_i2c_error") return ESP_FAIL;
         data[0] = screen_contacts;
+      }
+      if (scenario == "unlock_screen") {
+        data[0] = screen_contacts;
+        data[1] = static_cast<uint8_t>(touch_x >> 8);
+        data[2] = static_cast<uint8_t>(touch_x);
+        data[3] = static_cast<uint8_t>(touch_y >> 8);
+        data[4] = static_cast<uint8_t>(touch_y);
       }
       if (scenario == "handoff_touch_held" ||
           (scenario == "handoff_late_press" && ft_contact_reads == 2))
@@ -434,10 +492,21 @@ extern "C" lv_obj_t* lv_obj_create(lv_obj_t* parent) {
   return &root;
 }
 extern "C" lv_obj_t* lv_label_create(lv_obj_t* parent) {
+  if (parent == &screen && scenario == "unlock_screen") {
+    assert(unlock_label_count < unlock_labels.size());
+    return &unlock_labels[unlock_label_count++];
+  }
   assert(parent == &root && label_count < labels.size());
   return &labels[label_count++];
 }
 extern "C" void lv_obj_delete(lv_obj_t* object) {
+  if (scenario == "unlock_screen" && object != &root) {
+    const auto index = object - unlock_labels.data();
+    assert(index >= 0 && index < static_cast<ptrdiff_t>(unlock_labels.size()) && unlock_label_count);
+    unlock_captions[index] = {};
+    --unlock_label_count;
+    return;
+  }
   assert(object == &root && lv_open);
   label_count = 0;
 }
@@ -445,6 +514,10 @@ extern "C" void lv_obj_set_size(lv_obj_t* obj, int32_t, int32_t) { assert(obj ==
 extern "C" void lv_obj_center(lv_obj_t* obj) { assert(obj == &root); }
 extern "C" void lv_obj_align(lv_obj_t*, lv_align_t, int32_t, int32_t) {}
 extern "C" void lv_label_set_text(lv_obj_t* label, const char* value) {
+  if (scenario == "unlock_screen" && label == &unlock_labels[1]) {
+    assert(std::ranges::all_of(std::string_view(value), [](char c) { return c == '*'; }));
+    return;
+  }
   const auto index = label - labels.data();
   assert(index >= 0 && index < 3);
   // Only the compiled-in mock pairing value is examined while it is live.
@@ -457,6 +530,11 @@ extern "C" void lv_label_set_text(lv_obj_t* label, const char* value) {
   captions[index] = index == 0 ? std::string_view(value) : std::string_view{};
 }
 extern "C" void lv_label_set_text_static(lv_obj_t* label, const char* value) {
+  if (scenario == "unlock_screen") {
+    for (size_t i = 0; i < unlock_labels.size(); ++i)
+      if (label == &unlock_labels[i]) { unlock_captions[i] = value; return; }
+    return;
+  }
   assert(label == &labels[1] && scenario.starts_with("review_voice_status"));
   captions[1] = value;
 }
@@ -481,7 +559,7 @@ int main(int argc, char** argv) {
   const bool handoff_case = scenario.starts_with("handoff_");
   const bool review_case = scenario.starts_with("review_");
   const bool start_ok = scenario == "ok" || cold_ok || handoff_case || scenario.starts_with("sas_") ||
-                        scenario == "stop_after_start" || review_case;
+                        scenario == "stop_after_start" || review_case || scenario == "unlock_screen";
   auto* handle = scenario == "wrong_bus" ? &other_bus : &bus;
   assert(panel.start(handle, scenario != "not_requested") == start_ok);
   if (!start_ok) {
@@ -510,6 +588,12 @@ int main(int argc, char** argv) {
   assert(!setup.attach(panel, true, false, true));
   assert(!setup.attach(panel, true, true, false));
   assert(setup.attach(panel, true, true, true) && frames == 2 && setup.attached());
+  if (scenario == "unlock_screen") {
+    K151OwnerSession::check_unlock(setup);
+    assert(setup.detach(true) && panel.shutdown());
+    check_released();
+    return 0;
+  }
   if (handoff_case) {
     const std::atomic_bool wrong_flag{false};
     assert(!K151DisplayStop::handoff(panel, &bus, wrong_flag));

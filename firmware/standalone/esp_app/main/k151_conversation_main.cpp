@@ -4,6 +4,7 @@
 #include "k151_conversation_policy.hpp"
 #include "k151_owner_credential_cipher.hpp"
 #include "k151_owner_hmac.hpp"
+#include "k151_owner_code.hpp"
 #include "k151_display_stop.hpp"
 #include "nvs_port.hpp"
 #include "k151_scps_usb.hpp"
@@ -70,6 +71,8 @@ K151ConversationBootFacts observe_boot(const K151ConversationPolicy& policy) {
   facts.psram_ready = esp_psram_is_initialized();
   facts.security_matches = nvs && !nvs->encrypted && !esp_flash_encryption_enabled() &&
                            !esp_secure_boot_enabled();
+  facts.reversible_unlock_verified = facts.security_matches && app && !app->encrypted &&
+                                     K151OwnerCode::available();
   if (nvs && !nvs->encrypted && app && app->encrypted &&
       policy.owner_hmac_slot && K151OwnerHmac::available(*policy.owner_hmac_slot))
     facts.protected_owner_hmac_slot = policy.owner_hmac_slot;
@@ -133,16 +136,20 @@ bool run_conversation(const K151AdmittedConversation& approval) {
                      reinterpret_cast<std::uintptr_t>(model_start);
   const std::span<const std::uint8_t> pack(model_start, bytes);
   SavedOwnerCredentials* saved = nullptr;
+  OwnerUnlockPort* unlock = nullptr;
   if (approval.owner_hmac_slot) {
     static K151SavedOwnerNvs storage(K151DisplayStop::flag());
     static K151OwnerHmac cipher(*approval.owner_hmac_slot);
     static SavedOwnerCredentials credentials(storage, cipher);
     saved = &credentials;
+  } else if (approval.reversible_owner_unlock) {
+    static K151OwnerCode credentials(K151DisplayStop::flag());
+    unlock = &credentials;
   }
   // The initial USB handshake can generate ephemeral keys before Wi-Fi.
-  SetupEntropy entropy(saved != nullptr);
+  SetupEntropy entropy(saved || unlock);
   auto& owner = K151ConversationOwner::instance();
-  if (!owner.start(approval.audio, approval.physical_lcd_verified, saved)) {
+  if (!owner.start(approval.audio, approval.physical_lcd_verified, saved, unlock)) {
     (void)owner.shutdown();
     return false;
   }

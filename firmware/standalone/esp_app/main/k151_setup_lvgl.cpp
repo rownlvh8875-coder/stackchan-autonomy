@@ -92,6 +92,93 @@ bool K151SetupLvgl::present_saved_setup(SavedSetupScreen screen) {
   return true;
 }
 
+bool K151SetupLvgl::add_unlock_label(lv_obj_t* screen, const char* label, int x, int y) {
+  if (unlock_labels_count_ == unlock_labels_.size()) return false;
+  auto* child = lv_label_create(screen);
+  if (!child) return false;
+  unlock_labels_[unlock_labels_count_++] = child;
+  lv_label_set_text_static(child, label);
+  lv_obj_align(child, LV_ALIGN_TOP_MID, x - 160, y);
+  return true;
+}
+
+bool K151SetupLvgl::present_unlock(UnlockScreen mode, const OwnerCode* generated) {
+  if (!attached() || panel_->stop_input_handed_off_ || stop_.load() || sas_visible_ ||
+      (mode == UnlockScreen::enroll) != (generated != nullptr)) return false;
+  auto* screen = lv_display_get_screen_active(panel_->display());
+  if (!screen) return false;
+  clear_unlock();
+  unlock_screen_ = mode;
+  lv_label_set_text_static(title_, "");
+  lv_label_set_text_static(first_, "");
+  lv_label_set_text_static(second_, "");
+  const bool keypad = mode == UnlockScreen::enter;
+  const bool deriving = mode == UnlockScreen::deriving;
+  const auto caption = keypad ? "Enter your unlock code" : deriving ? "Unlocking setup" :
+                                                                    "Write down your unlock code";
+  if (!add_unlock_label(screen, caption, 160, 8)) return false;
+  if (generated) {
+    unlock_input_.set_generated(*generated);
+    if (!add_unlock_label(screen, unlock_input_.text(), 160, 92)) return false;
+  }
+  if (keypad) {
+    // Static glyphs and a mask label. No selected character is copied to LVGL.
+    static constexpr auto glyphs = [] {
+      std::array<std::array<char, 2>, kOwnerCodeAlphabet.size()> result{};
+      for (size_t i = 0; i < result.size(); ++i) result[i][0] = kOwnerCodeAlphabet[i];
+      return result;
+    }();
+    if (!add_unlock_label(screen, "", 160, 30)) return false;
+    for (size_t i = 0; i < glyphs.size(); ++i) {
+      const int x = OwnerCodeInput::kLeft + (static_cast<int>(i % 8) * OwnerCodeInput::kCellWidth)
+                    + OwnerCodeInput::kCellWidth / 2;
+      const int y = OwnerCodeInput::kTop + (static_cast<int>(i / 8) * OwnerCodeInput::kCellHeight) + 9;
+      if (!add_unlock_label(screen, glyphs[i].data(), x, y)) return false;
+    }
+    if (!add_unlock_label(screen, "Delete", 52, 212)) return false;
+  }
+  if (!add_unlock_label(screen, "Cancel", 160, 212)) return false;
+  if (!deriving && !add_unlock_label(screen, keypad ? "Unlock" : "Saved", 268, 212)) return false;
+  return panel_->present_now() && !stop_.load();
+}
+
+K151SetupLvgl::UnlockChoice K151SetupLvgl::poll_unlock() {
+  uint8_t count{};
+  int x{}, y{};
+  if (!unlock_screen_ || !attached() || !panel_->read_touch_point(count, x, y))
+    return UnlockChoice::fault;
+  const bool keypad = *unlock_screen_ == UnlockScreen::enter;
+  const int key = unlock_input_.sample(count,
+      OwnerCodeInput::key_at(x, y, keypad, *unlock_screen_ == UnlockScreen::deriving));
+  if (key == OwnerCodeInput::kCancel) return UnlockChoice::cancel;
+  if (key == OwnerCodeInput::kConfirm && unlock_input_.full()) return UnlockChoice::confirm;
+  if (keypad && key >= 0 && key <= OwnerCodeInput::kBack) {
+    unlock_input_.edit(key);
+    std::array<char, kOwnerCodeLength + 1> mask{};
+    std::fill_n(mask.begin(), unlock_input_.size(), '*');
+    lv_label_set_text(unlock_labels_[1], mask.data());
+    if (!panel_->present_now()) return UnlockChoice::fault;
+  }
+  return UnlockChoice::waiting;
+}
+
+void K151SetupLvgl::clear_unlock() {
+  for (size_t i = 0; i < unlock_labels_count_; ++i) lv_obj_delete(unlock_labels_[i]);
+  unlock_labels_count_ = 0;
+  unlock_screen_.reset();
+  unlock_input_.clear();
+}
+
+bool K151SetupLvgl::finish_unlock(bool restored) {
+  clear_unlock();
+  if (!attached() || stop_.load()) return false;
+  review_ = ReviewPhase::closed;
+  lv_label_set_text_static(title_, restored ? "SAVED SETUP READY" : "UNLOCK CODE READY");
+  lv_label_set_text_static(first_, "Cloud still OFF");
+  lv_label_set_text_static(second_, "Review paid voice next");
+  return panel_->present_now() && !stop_.load();
+}
+
 bool K151SetupLvgl::begin_pairing_review(uint64_t now, bool lvgl_lock_held) {
   if (review_ != ReviewPhase::idle || !sas_visible_ || !lvgl_lock_held || !attached())
     return false;
@@ -225,6 +312,10 @@ bool K151SetupLvgl::show_final_touch_prompt() {
 
 bool K151SetupLvgl::detach(bool lvgl_lock_held) {
   if (!lvgl_lock_held) return false;
+  if (unlock_screen_) {
+    clear_unlock();
+    if (panel_ && panel_->ready()) (void)panel_->present_now();
+  }
   if (root_ && panel_ && panel_->display()) lv_obj_delete(root_);
   root_ = title_ = first_ = second_ = nullptr;
   panel_ = nullptr;

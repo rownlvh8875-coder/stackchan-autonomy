@@ -18,7 +18,10 @@ namespace stackchan::standalone {
 // only leave setup through the existing voice bootstrap on that task.
 class K151OwnerSession final {
  public:
-  enum class Step { idle, head_touch, pairing, ready, voice_review, voice_ready, stopped, fault };
+  enum class Step {
+    idle, head_touch, pairing, unlock_input, unlock_deriving, ready, voice_review, voice_ready,
+    stopped, fault
+  };
   enum class StartupStage : unsigned {
     idle = 0, preconditions = 1, owner_task = 2, board_bus = 3, lvgl = 4,
     panel = 5, view = 6, presence_frame = 7, head = 8, clock = 9, ready = 10
@@ -34,7 +37,7 @@ class K151OwnerSession final {
   // Optional continuous-setup store must come from a verified local provider
   // and outlive the session. With no provider, use the existing RAM-only path.
   bool start(bool exact_board_verified, bool physical_lcd_verified,
-             SavedOwnerCredentials* saved = nullptr);
+             SavedOwnerCredentials* saved = nullptr, OwnerUnlockPort* unlock = nullptr);
   StartupStage startup_stage() const { return startup_stage_; }
   std::optional<scpswire::SetupFailure> early_setup_failure() const { return early_setup_failure_; }
   // Called by the pinned owner task with the approved deployment scope, only
@@ -51,6 +54,7 @@ class K151OwnerSession final {
 
  private:
   bool on_owner_task() const;
+  Step poll_unlock(uint64_t now);
   Step abort_setup(std::optional<scpswire::SetupFailure> diagnosis = std::nullopt);
 
   const std::atomic_bool& stop_;
@@ -64,16 +68,19 @@ class K151OwnerSession final {
   K151LocalOwnerSetup setup_{owner_, setup_input_, stop_};
   K151ScpsUsbPort usb_{touch_, setup_, view_, stop_};
   SavedOwnerCredentials* saved_ = nullptr;
+  OwnerUnlockPort* unlock_ = nullptr;
   i2c_master_bus_handle_t bus_ = nullptr;
   TaskHandle_t task_ = nullptr;
   int core_ = -1;
   uint64_t last_sample_ms_ = 0;
   uint64_t voice_review_started_ms_ = 0;
+  uint64_t unlock_started_ms_ = 0;
   bool owns_lvgl_ = false;
   bool board_verified_ = false;
   bool lcd_verified_ = false;
   bool handoff_taken_ = false;
   bool restored_setup_ = false;
+  bool unlock_enrolling_ = false;
   bool allow_first_budget_ = false;
   bool one_paid_turn_ = false;
   bool bus_release_unverified_ = false;

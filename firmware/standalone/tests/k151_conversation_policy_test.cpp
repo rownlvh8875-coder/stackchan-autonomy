@@ -159,6 +159,23 @@ int main() {
   auto missing_key = facts;
   missing_key.protected_owner_hmac_slot.reset();
   assert(!admit_conversation_boot(policy, missing_key));
+  auto reversible = policy;
+  reversible.owner_hmac_slot.reset();
+  reversible.reversible_owner_unlock = true;
+  facts.security_matches = true;
+  assert(conversation_boot_stage(reversible, facts) == Boot::security);
+  facts.reversible_unlock_verified = true;
+  auto local = admit_conversation_boot(reversible, facts);
+  assert(local && local->reversible_owner_unlock && !local->owner_hmac_slot);
+  auto incomplete_output = reversible;
+  incomplete_output.output.independent_stop_latency_measured = false;
+  assert(conversation_boot_stage(incomplete_output, facts) == Boot::policy);
+  auto observed_instead = reversible;
+  observed_instead.one_turn_device_evidence = observations;
+  assert(conversation_boot_stage(observed_instead, facts) == Boot::policy);
+  reversible.owner_hmac_slot = 2;
+  assert(conversation_boot_stage(reversible, facts) == Boot::policy);
+  facts.security_matches = false;
   for (std::uint32_t K151ConversationBootFacts::*field : {
        &K151ConversationBootFacts::slot_offset, &K151ConversationBootFacts::slot_bytes,
        &K151ConversationBootFacts::flash_bytes, &K151ConversationBootFacts::nvs_offset,

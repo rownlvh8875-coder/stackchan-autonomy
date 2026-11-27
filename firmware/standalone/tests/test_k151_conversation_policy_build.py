@@ -48,6 +48,9 @@ def test_k151_conversation_boot_policy(tmp_path):
         ("continuous", False, False, None, None),
         ("continuous", False, False, 0, b"CONTINUOUS"),
         ("continuous", False, True, 0, None),
+        ("continuous", False, False, "local", b"CONTINUOUS_LOCAL_UNLOCK"),
+        ("continuous", False, True, "local", None),
+        ("one_paid_turn", True, False, "local", None),
     ],
 )
 def test_local_policy_marker_requires_complete_compiled_scope(
@@ -82,7 +85,13 @@ def test_local_policy_marker_requires_complete_compiled_scope(
         if device_observed
         else ""
     )
-    slot = f",\n.owner_hmac_slot = {owner_slot}" if owner_slot is not None else ""
+    slot = (
+        ",\n.reversible_owner_unlock = true"
+        if owner_slot == "local"
+        else f",\n.owner_hmac_slot = {owner_slot}"
+        if owner_slot is not None
+        else ""
+    )
     (tmp_path / "k151_private_policy.inc").write_text(
         "{\n.expected_factory_identity = {1},\n"
         f".output = {output},\n"
@@ -122,7 +131,12 @@ def test_local_policy_marker_requires_complete_compiled_scope(
     else:
         assert result.returncode == 0, result.stderr
         data = object_file.read_bytes()
-        for suffix in (b"ONE_PAID_TURN", b"ONE_PAID_TURN_DEVICE_OBSERVED", b"CONTINUOUS"):
+        for suffix in (
+            b"ONE_PAID_TURN",
+            b"ONE_PAID_TURN_DEVICE_OBSERVED",
+            b"CONTINUOUS",
+            b"CONTINUOUS_LOCAL_UNLOCK",
+        ):
             assert (b"K151_CONVERSATION_LOCAL_RELEASE_" + suffix + b"\0" in data) == (
                 suffix == marker
             )

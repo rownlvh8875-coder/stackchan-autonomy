@@ -55,6 +55,12 @@ def owner_binary(tmp_path_factory):
     [
         "handoff",
         "save_first_pairing",
+        "unlock_restored",
+        "unlock_enroll",
+        "unlock_wrong",
+        "unlock_cancel",
+        "unlock_stop",
+        "unlock_timeout",
         "hold",
         "wrong_board",
         "unverified_lcd",
