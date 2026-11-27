@@ -10,13 +10,14 @@ import os
 import re
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from tempfile import gettempdir
 from typing import BinaryIO
 
 from esp_app_image import NVS_BYTES, NVS_OFFSET, SLOT_BYTES, SLOT_OFFSET
 from paid_trial_sequence import (
+    PreflightFactoryBoot,
     TrialResult,
     TrialScopes,
     TrialStep,
@@ -157,6 +158,7 @@ def run_bound_paid_trial(
     *,
     port: str,
     recover_only: bool = False,
+    release_preflight: Callable[[], PreflightFactoryBoot | None] | None = None,
 ) -> TrialResult:
     claim = paths.review_dir / "install-started.json"
     if claim.exists() != recover_only:
@@ -239,4 +241,14 @@ def run_bound_paid_trial(
                 trial_boot_possible=TrialStep.RECORD_TRIAL_BOOT_INTENT in phases,
                 factory_boot_possible=TrialStep.RECORD_FACTORY_BOOT_INTENT in phases,
             )
-        return run_paid_trial(scopes, step_for_review)
+        result = run_paid_trial(scopes, step_for_review)
+        # Keep both locks through the same-handle return to factory boot.
+        # An existing or partial journal belongs to the recovery path.
+        if (
+            release_preflight is not None
+            and not result.install_attempted
+            and result.trial_failure in (TrialStep.PREFLIGHT, TrialStep.CLAIM_ONCE)
+            and not claim.exists()
+        ):
+            return replace(result, preflight_factory_boot=release_preflight())
+        return result

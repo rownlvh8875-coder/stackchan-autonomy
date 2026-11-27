@@ -8,6 +8,9 @@ adapter, CLI, credential access or API client.
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
+
+PreflightFactoryBoot = Literal["requested", "unconfirmed"]
 
 
 class TrialStep(StrEnum):
@@ -50,6 +53,7 @@ class TrialResult:
     install_attempted: bool = False
     trial_failure: TrialStep | None = None
     recovery_failure: TrialStep | None = None
+    preflight_factory_boot: PreflightFactoryBoot | None = None
 
     @property
     def factory_boot_requested(self) -> bool:

@@ -28,7 +28,9 @@ class Chip:
         return 2
 
     def read_mac(self):
-        if self.owner.wrong_recovery_board and self.index == 2:
+        if (self.owner.wrong_preflight_board and self.index == 1) or (
+            self.owner.wrong_recovery_board and self.index == 2
+        ):
             return (4, 0, 0, 0, 0, 1)
         return (2, 0, 0, 0, 0, 1)
 
@@ -46,10 +48,13 @@ class Tool:
     def __init__(self, paths):
         self.events = []
         self.connections = 0
+        self.wrong_preflight_board = False
         self.wrong_recovery_board = False
         self.bad_metadata = False
         self.bad_final_metadata = False
         self.fail_ota_restore = False
+        self.preflight_nvs_error = None
+        self.preflight_reset_error = None
         self.flash = {0x510000: paths.ota1.read_bytes(), 0x9000: paths.nvs.read_bytes()}
 
     def detect(self, port, **kwargs):
@@ -74,6 +79,8 @@ class Tool:
         address, data = regions[0]
         assert len(regions) == 1 and kwargs.get("diff") is False
         self.events.append(("verify", chip.index, address))
+        if chip.index == 1 and address == 0x9000 and self.preflight_nvs_error is not None:
+            raise self.preflight_nvs_error("synthetic private preflight error")
         if self.flash[address] != data or (
             chip.index == 2 and self.fail_ota_restore and address == 0x510000
         ):
@@ -89,6 +96,8 @@ class Tool:
     def reset_chip(self, chip, mode):
         assert mode == "hard-reset"
         self.events.append(("reset", chip.index))
+        if chip.index == 1 and self.preflight_reset_error is not None:
+            raise self.preflight_reset_error("synthetic private reset error")
 
 
 def run(review, monkeypatch, command_setup=lambda _tool: None):
@@ -151,6 +160,7 @@ def test_ambiguous_board_reference_does_not_open_port(review, monkeypatch, refer
 @pytest.mark.parametrize(
     ("attribute", "failure", "no_write_after"),
     [
+        ("wrong_preflight_board", TrialStep.PREFLIGHT, 0),
         ("bad_metadata", TrialStep.PREFLIGHT, 0),
         ("wrong_recovery_board", TrialStep.REBIND_FOR_RESTORE, 1),
         ("fail_ota_restore", TrialStep.VERIFY_ORIGINAL_OTA1, 2),
@@ -164,8 +174,82 @@ def test_failed_gate_never_writes_unverified_range_or_reboots_factory(
     assert failure in (result.trial_failure, result.recovery_failure)
     assert not result.factory_boot_requested
     assert len([event for event in tool.events if event[0] == "write"]) == no_write_after
+    if failure is TrialStep.PREFLIGHT:
+        assert ("reset", 1) not in tool.events
     assert ("reset", 2) not in tool.events
     assert "synthetic private verification error" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("nvs_error", "reset_error", "status"),
+    [
+        (ValueError, None, "requested"),
+        (KeyboardInterrupt, None, "requested"),
+        (ValueError, OSError, "unconfirmed"),
+        (ValueError, KeyboardInterrupt, "unconfirmed"),
+    ],
+)
+def test_preflight_nvs_rejection_returns_verified_factory_app_to_normal_boot(
+    review, monkeypatch, capsys, nvs_error, reset_error, status
+):
+    def command_setup(tool):
+        tool.preflight_nvs_error = nvs_error
+        tool.preflight_reset_error = reset_error
+
+    result, tool, paths = run(review, monkeypatch, command_setup)
+    assert result.trial_failure is TrialStep.PREFLIGHT
+    assert not result.install_attempted and not result.factory_boot_requested
+    assert result.recovery_failure is None
+    assert tool.events[-4:] == [
+        ("verify", 1, 0x510000),
+        ("verify", 1, 0x9000),
+        ("reset", 1),
+        ("close", 1),
+    ]
+    assert result.preflight_factory_boot == status
+    assert not (paths.review_dir / "install-started.json").exists()
+    assert not any(event[0] in {"write", "trial"} for event in tool.events)
+    captured = capsys.readouterr()
+    assert "synthetic private" not in captured.out + captured.err
+
+
+def test_preflight_does_not_boot_unverified_factory_app(review, monkeypatch):
+    def command_setup(tool):
+        tool.flash[0x510000] = b"synthetic different factory app"
+
+    result, tool, _ = run(review, monkeypatch, command_setup)
+    assert result.trial_failure is TrialStep.PREFLIGHT
+    assert not result.install_attempted
+    assert not any(event[0] in {"write", "trial", "reset"} for event in tool.events)
+
+
+@pytest.mark.parametrize("journal_exists", [False, True])
+def test_no_write_claim_failure_only_reboots_without_install_journal(
+    review, monkeypatch, journal_exists
+):
+    paths, _, approval = review
+    journal = paths.review_dir / "install-started.json"
+
+    def command_setup(tool):
+        verify_flash = tool.verify_flash
+
+        def change_review(chip, regions, **kwargs):
+            verify_flash(chip, regions, **kwargs)
+            if regions[0][0] == 0x9000:
+                if journal_exists:
+                    journal.write_bytes(b"fixture uncertain install journal")
+                else:
+                    approval.write_bytes(approval.read_bytes() + b"\n")
+
+        tool.verify_flash = change_review
+
+    result, tool, _ = run(review, monkeypatch, command_setup)
+    assert result.trial_failure is TrialStep.CLAIM_ONCE
+    assert not result.install_attempted and result.recovery_failure is None
+    assert (("reset", 1) in tool.events) is not journal_exists
+    assert result.preflight_factory_boot == (None if journal_exists else "requested")
+    assert tool.events[-1] == ("close", 1)
+    assert not any(event[0] in {"write", "trial"} for event in tool.events)
 
 
 def test_missing_record_never_loads_esptool_or_checks_port(review, monkeypatch):

@@ -215,6 +215,36 @@ def test_recovery_uses_only_the_ranges_allowed_at_the_interrupted_phase(
     assert seen == []
 
 
+def test_recovery_can_resume_after_a_failed_reconnect(review):
+    paths, _, _ = review
+    claim = paths.review_dir / "install-started.json"
+    result = run_bound_paid_trial(
+        paths,
+        lambda step, _: step not in (TrialStep.BOOT_AND_RUN_ONE_TURN, TrialStep.REBIND_FOR_RESTORE),
+    )
+    assert result.recovery_failure is TrialStep.REBIND_FOR_RESTORE
+    journal = claim.read_bytes()
+    seen = []
+
+    def reconnect_fails(step, _inputs):
+        seen.append(step)
+        return False
+
+    result = run_bound_paid_trial(paths, reconnect_fails, recover_only=True)
+    assert result.recovery_failure is TrialStep.REBIND_FOR_RESTORE
+    assert seen == [TrialStep.REBIND_FOR_RESTORE] and claim.read_bytes() == journal
+
+    def restore(step, _inputs):
+        seen.append(step)
+        return True
+
+    seen.clear()
+    result = run_bound_paid_trial(paths, restore, recover_only=True)
+    assert result.factory_boot_requested and result.recovery_failure is None
+    assert TrialStep.WRITE_APP not in seen and TrialStep.BOOT_AND_RUN_ONE_TURN not in seen
+    assert TrialStep.WRITE_ORIGINAL_OTA1 in seen and TrialStep.WRITE_PRETRIAL_NVS in seen
+
+
 @pytest.mark.parametrize("change", ["missing", "port", "approval", "torn", "in_use", "old"])
 def test_unsafe_resume_stops_before_device_contact(review, change):
     paths, _, approval = review

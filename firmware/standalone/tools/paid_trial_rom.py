@@ -19,7 +19,7 @@ from esp_app_image import (
     SLOT_OFFSET,
 )
 from paid_trial_binding import BoundPaidTrial, PaidTrialPaths, run_bound_paid_trial
-from paid_trial_sequence import TrialResult, TrialStep
+from paid_trial_sequence import PreflightFactoryBoot, TrialResult, TrialStep
 
 _KEEP = {"flash_mode": "keep", "flash_freq": "keep", "flash_size": "keep"}
 
@@ -44,8 +44,10 @@ class _RomPaidTrial:
         self.exercise_one_turn = exercise_one_turn
         self.esptool = None
         self.chip = None
+        self.preflight_factory_verified = False
 
     def close(self):
+        self.preflight_factory_verified = False
         chip, self.chip = self.chip, None
         if chip is not None:
             chip._port.close()
@@ -114,14 +116,28 @@ class _RomPaidTrial:
         finally:
             self.close()
 
+    def release_preflight(self) -> PreflightFactoryBoot | None:
+        if not self.preflight_factory_verified:
+            return None
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            try:
+                self._reset_and_release()
+            except (Exception, KeyboardInterrupt, SystemExit):
+                return "unconfirmed"
+        return "requested"
+
     def __call__(self, step: TrialStep, files: BoundPaidTrial) -> bool:
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             match step:
                 case TrialStep.PREFLIGHT:
                     self._open_bound(files)
                     self._verify(SLOT_OFFSET, files.ota1)
+                    # The verified factory app and boot metadata on this handle
+                    # allow a normal boot request even if the NVS baseline differs.
+                    self.preflight_factory_verified = True
                     self._verify(NVS_OFFSET, files.nvs)
                 case TrialStep.WRITE_APP:
+                    self.preflight_factory_verified = False
                     self._write(SLOT_OFFSET, files.app)
                 case TrialStep.VERIFY_APP:
                     self._verify(SLOT_OFFSET, files.app)
@@ -156,7 +172,13 @@ def run_rom_paid_trial(
 ) -> TrialResult:
     adapter = _RomPaidTrial(port, port_available, exercise_one_turn)
     try:
-        return run_bound_paid_trial(paths, adapter, port=port, recover_only=recover_only)
+        return run_bound_paid_trial(
+            paths,
+            adapter,
+            port=port,
+            recover_only=recover_only,
+            release_preflight=adapter.release_preflight,
+        )
     finally:
         with suppress(OSError):
             adapter.close()
