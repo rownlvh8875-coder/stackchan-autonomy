@@ -207,20 +207,76 @@ def test_interruption_reports_time_in_the_current_sqlite_stage(monkeypatch):
             probe.interrupt(trace)
 
         trace.run(work)
-    assert probe.snapshot()["interruptions"] == [
-        {
-            "operation": "lease_renew",
-            "stage": "sqlite_commit",
-            "elapsed_s": 11,
-            "stage_elapsed_s": 5,
-        },
-        {
-            "operation": "lease_renew",
-            "stage": "operation",
-            "elapsed_s": 11,
-            "stage_elapsed_s": 6,
-        },
-    ]
+    during_commit, after_commit = probe.snapshot()["interruptions"]
+    assert during_commit["operation"] == "lease_renew"
+    assert during_commit["stage"] == "sqlite_commit"
+    assert during_commit["elapsed_s"] == 11 and during_commit["stage_elapsed_s"] == 5
+    assert during_commit["completed_stages_s"] == {
+        "storage_serial_wait": 2,
+        "storage_executor_wait": 3,
+    }
+    assert during_commit["commit_completion"]["wall_s"] == 5
+    assert during_commit["commit_completion"]["worker_cpu_s"] >= 0
+    assert during_commit["commit_completion"]["outcome"] == "returned"
+    assert after_commit["stage"] == "operation" and after_commit["stage_elapsed_s"] == 6
+    assert after_commit["completed_stages_s"]["sqlite_commit"] == 5
+    assert "commit_completion" not in after_commit
+
+
+async def test_interrupted_commit_preserves_busy_result_from_real_sqlite(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from stackchan_autonomy import state_store
+    from stackchan_autonomy.timing_diagnostics import TimingProbe, operation_label
+
+    path = tmp_path / "private-name.sqlite3"
+    store = state_store.SQLiteState(path)
+    with store.transaction():
+        pass
+    reader = sqlite3.connect(path, isolation_level=None)
+    reader.execute("BEGIN")
+    assert reader.execute("SELECT count(*) FROM autonomy_clock").fetchone() == (0,)
+    probe, storage = TimingProbe(), AsyncStorage()
+    inside_commit = threading.Event()
+    allow_commit = threading.Event()
+    original_timing = state_store.sqlite_timing
+
+    @contextmanager
+    def observe(stage):
+        with original_timing(stage):
+            if stage == "sqlite_commit":
+                inside_commit.set()
+                assert allow_commit.wait(3)
+            yield
+
+    def write():
+        with store.transaction() as db:
+            store.observed_time(db, "private-scope", 1)
+
+    monkeypatch.setattr(state_store, "sqlite_timing", observe)
+    try:
+        with probe.collect(), operation_label("lease_check"):
+            task = asyncio.create_task(storage.call(write))
+            await wait_thread(inside_commit)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert probe.snapshot()["interruptions"][-1]["commit_completion"] is None
+            allow_commit.set()
+            await storage.aclose()
+    finally:
+        allow_commit.set()
+        reader.rollback()
+        reader.close()
+    record = probe.snapshot()["interruptions"][-1]
+    assert record["stage"] == "sqlite_commit"
+    assert record["completed_stages_s"]["sqlite_begin"] >= 0
+    assert record["commit_completion"]["outcome"] == "busy"
+    assert record["commit_completion"]["wall_s"] >= 0.15
+    assert record["commit_completion"]["worker_cpu_s"] < record["commit_completion"]["wall_s"]
+    with store.transaction() as db:
+        assert db.execute("SELECT count(*) FROM autonomy_clock").fetchone() == (0,)
+    assert "private-" not in json.dumps(probe.snapshot())
 
 
 async def test_result_delivery_and_loop_stall_are_measured_separately():

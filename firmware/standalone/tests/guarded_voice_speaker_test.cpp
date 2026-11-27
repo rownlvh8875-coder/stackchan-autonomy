@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <functional>
 #include <iostream>
 #include <vector>
 
@@ -15,6 +16,7 @@ struct AudioFake {
   bool microphone = false, amplifier = false;
   bool fail_drain = false, fail_mute = false;
   int drain_calls = 0, speaker_on_calls = 0;
+  std::function<void()> during_drain;
   AudioHooks hooks() {
     return {
         [this]() { microphone = false; return true; },
@@ -23,7 +25,11 @@ struct AudioFake {
         [this]() { microphone = true; return true; },
         []() { return true; },
         [this]() { ++speaker_on_calls; amplifier = true; return true; },
-        [this]() { ++drain_calls; return !fail_drain; }
+        [this]() {
+          ++drain_calls;
+          if (during_drain) during_drain();
+          return !fail_drain;
+        }
     };
   }
 };
@@ -151,6 +157,22 @@ int main() {
     assert(!x.speaker.play_pcm24k(x.samples, 1200).complete);
     assert(x.hardware.drain_calls == 1 && x.speaker.latched());
     assert(x.guard.state() == AudioState::fault && !x.hardware.amplifier);
+  }
+  for (bool physical_stop : {true, false}) {
+    Fixture x;
+    x.hardware.during_drain = [&] {
+      assert(x.hardware.amplifier && !x.hardware.microphone);
+      assert(x.sink.calls == 1); // The PCM sink already reported completion.
+      if (physical_stop) x.stop = true;
+      else x.consent = false;
+    };
+    assert(!x.speaker.play_pcm24k(x.samples, 1200).complete);
+    assert(x.hardware.drain_calls == 1 && !x.hardware.amplifier);
+    assert(x.speaker.latched() && x.guard.stopped() && x.busy);
+    x.stop = false;
+    x.consent = true;
+    assert(!x.speaker.play_pcm24k(x.samples, 1300).complete && x.sink.calls == 1);
+    assert(!x.guard.capture_begin() && !x.hardware.microphone);
   }
   {
     Fixture x;
