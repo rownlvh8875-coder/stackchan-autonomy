@@ -1,7 +1,7 @@
 set(k151_entry "app_main.cpp")
 idf_build_get_property(k151_review K151_CONVERSATION_REVIEW)
 if(k151_review)
-    set(k151_entry "k151_conversation_main.cpp" "k151_conversation_policy.cpp")
+    set(k151_entry "k151_conversation_main.cpp" "k151_conversation_policy.cpp" "k151_owner_hmac.cpp")
     set(k151_pack "${CMAKE_CURRENT_LIST_DIR}/../../resource_bench/main/srmodels.bin")
     if(NOT CMAKE_BUILD_EARLY_EXPANSION)
         if(NOT EXISTS "${k151_pack}")
@@ -13,7 +13,7 @@ if(k151_review)
         endif()
     endif()
     set(k151_embed EMBED_FILES "${k151_pack}")
-    set(k151_boot_requires app_update esp_psram bootloader_support)
+    set(k151_boot_requires app_update esp_psram bootloader_support efuse)
 endif()
 
 idf_component_register(

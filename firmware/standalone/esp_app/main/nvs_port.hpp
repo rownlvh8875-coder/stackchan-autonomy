@@ -33,4 +33,17 @@ class IsolatedNvs : public AtomicKv {
   bool approved_ = false;
 };
 
+// Owner-task-only store for the single authenticated ciphertext envelope.
+// The caller admits writes after local setup and budget review.
+class K151SavedOwnerNvs final : public AtomicKv {
+ public:
+  explicit K151SavedOwnerNvs(const std::atomic_bool& stop) : stop_(stop) {}
+  ReadValue read(std::string_view key, size_t max_bytes) override;
+  bool commit(std::string_view key, std::span<const uint8_t> bytes) override;
+
+ private:
+  const std::atomic_bool& stop_;
+  bool initialized_ = false;
+};
+
 }  // namespace stackchan::standalone

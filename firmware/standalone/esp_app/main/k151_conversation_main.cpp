@@ -3,10 +3,14 @@
 #include "k151_conversation_owner.hpp"
 #include "k151_conversation_policy.hpp"
 #include "k151_owner_credential_cipher.hpp"
+#include "k151_owner_hmac.hpp"
+#include "k151_display_stop.hpp"
+#include "nvs_port.hpp"
 #include "k151_scps_usb.hpp"
 #include "audio_wipe.hpp"
 
 #include <driver/usb_serial_jtag.h>
+#include <bootloader_random.h>
 #include <esp_chip_info.h>
 #include <esp_flash.h>
 #include <esp_flash_encrypt.h>
@@ -30,7 +34,7 @@ namespace {
 constexpr char kTag[] = "SC_K151_BOOT";
 bool armed = false; // Only the pinned app task changes or uses this gate.
 
-K151ConversationBootFacts observe_boot() {
+K151ConversationBootFacts observe_boot(const K151ConversationPolicy& policy) {
   K151ConversationBootFacts facts;
   esp_chip_info_t chip{};
   esp_chip_info(&chip);
@@ -66,6 +70,9 @@ K151ConversationBootFacts observe_boot() {
   facts.psram_ready = esp_psram_is_initialized();
   facts.security_matches = nvs && !nvs->encrypted && !esp_flash_encryption_enabled() &&
                            !esp_secure_boot_enabled();
+  if (nvs && !nvs->encrypted && app && app->encrypted &&
+      policy.owner_hmac_slot && K151OwnerHmac::available(*policy.owner_hmac_slot))
+    facts.protected_owner_hmac_slot = policy.owner_hmac_slot;
   if (esp_flash_get_physical_size(esp_flash_default_chip, &facts.flash_bytes) != ESP_OK)
     facts.flash_bytes = 0;
   return facts;
@@ -105,12 +112,37 @@ void report_early_setup_failure(scpswire::SetupFailure failure) {
   if (frame) report_terminal_usb(frame->data(), frame->size());
 }
 
+class SetupEntropy final {
+ public:
+  explicit SetupEntropy(bool enabled) : enabled_(enabled) {
+    if (enabled_) bootloader_random_enable();
+  }
+  ~SetupEntropy() { finish(); }
+  void finish() {
+    if (!enabled_) return;
+    bootloader_random_disable();
+    enabled_ = false;
+  }
+
+ private:
+  bool enabled_;
+};
+
 bool run_conversation(const K151AdmittedConversation& approval) {
   const auto bytes = reinterpret_cast<std::uintptr_t>(model_end) -
                      reinterpret_cast<std::uintptr_t>(model_start);
   const std::span<const std::uint8_t> pack(model_start, bytes);
+  SavedOwnerCredentials* saved = nullptr;
+  if (approval.owner_hmac_slot) {
+    static K151SavedOwnerNvs storage(K151DisplayStop::flag());
+    static K151OwnerHmac cipher(*approval.owner_hmac_slot);
+    static SavedOwnerCredentials credentials(storage, cipher);
+    saved = &credentials;
+  }
+  // The initial USB handshake can generate ephemeral keys before Wi-Fi.
+  SetupEntropy entropy(saved != nullptr);
   auto& owner = K151ConversationOwner::instance();
-  if (!owner.start(approval.audio, approval.physical_lcd_verified)) {
+  if (!owner.start(approval.audio, approval.physical_lcd_verified, saved)) {
     (void)owner.shutdown();
     return false;
   }
@@ -118,6 +150,7 @@ bool run_conversation(const K151AdmittedConversation& approval) {
   using Phase = K151ConversationOwner::Phase;
   for (;;) {
     const auto progress = owner.poll();
+    if (progress.phase != Phase::setup) entropy.finish();
     if (progress.phase == Phase::cloud_off) {
       const auto mode = approval.mode == K151ConversationBuildMode::one_paid_turn
                         ? K151VoiceMode::one_paid_turn : K151VoiceMode::continuous;
@@ -149,7 +182,7 @@ extern "C" void app_main() {
   using namespace stackchan::standalone;
 #if defined(STACKCHAN_K151_CONVERSATION_SETUP_PROBE)
   const auto& policy = k151_local_conversation_policy();
-  const auto facts = local_conversation_scope_complete(policy) ? observe_boot()
+  const auto facts = local_conversation_scope_complete(policy) ? observe_boot(policy)
                                                               : K151ConversationBootFacts{};
   const auto boot = conversation_boot_stage(policy, facts);
   const auto approval = admit_conversation_boot(policy, facts);
@@ -180,7 +213,7 @@ extern "C" void app_main() {
 #endif
   const auto& policy = k151_local_conversation_policy();
   if (!local_conversation_scope_complete(policy)) return;
-  const auto facts = observe_boot();
+  const auto facts = observe_boot(policy);
   const auto approval = admit_conversation_boot(policy, facts);
   if (!approval) {
     ESP_LOGE(kTag, "K151 operating boot evidence refused at %u",

@@ -37,19 +37,21 @@ def test_k151_conversation_boot_policy(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("mode", "first_budget", "device_observed", "marker"),
+    ("mode", "first_budget", "device_observed", "owner_slot", "marker"),
     [
-        ("hold", False, False, None),
-        ("one_paid_turn", False, False, b"ONE_PAID_TURN"),
-        ("one_paid_turn", True, False, b"ONE_PAID_TURN"),
-        ("one_paid_turn", False, True, b"ONE_PAID_TURN_DEVICE_OBSERVED"),
-        ("one_paid_turn", True, True, b"ONE_PAID_TURN_DEVICE_OBSERVED"),
-        ("continuous", False, False, b"CONTINUOUS"),
-        ("continuous", False, True, None),
+        ("hold", False, False, None, None),
+        ("one_paid_turn", False, False, None, b"ONE_PAID_TURN"),
+        ("one_paid_turn", True, False, None, b"ONE_PAID_TURN"),
+        ("one_paid_turn", False, True, None, b"ONE_PAID_TURN_DEVICE_OBSERVED"),
+        ("one_paid_turn", True, True, None, b"ONE_PAID_TURN_DEVICE_OBSERVED"),
+        ("one_paid_turn", False, False, 1, None),
+        ("continuous", False, False, None, None),
+        ("continuous", False, False, 0, b"CONTINUOUS"),
+        ("continuous", False, True, 0, None),
     ],
 )
 def test_local_policy_marker_requires_complete_compiled_scope(
-    tmp_path, mode, first_budget, device_observed, marker
+    tmp_path, mode, first_budget, device_observed, owner_slot, marker
 ):
     compiler = shutil.which("g++")
     if not compiler:
@@ -80,13 +82,14 @@ def test_local_policy_marker_requires_complete_compiled_scope(
         if device_observed
         else ""
     )
+    slot = f",\n.owner_hmac_slot = {owner_slot}" if owner_slot is not None else ""
     (tmp_path / "k151_private_policy.inc").write_text(
         "{\n.expected_factory_identity = {1},\n"
         f".output = {output},\n"
         ".physical_lcd_verified = true,\n.exclusive_i2s0_verified = true,\n"
         f".paid_scope_approved = true,\n.budget_scope_approved = true,\n"
         f".allow_first_budget = {str(first_budget).lower()},\n"
-        f".mode = K151ConversationBuildMode::{mode}{trial_budget}{observed}\n}}\n"
+        f".mode = K151ConversationBuildMode::{mode}{trial_budget}{observed}{slot}\n}}\n"
     )
     object_file = tmp_path / "policy.o"
     result = subprocess.run(

@@ -55,7 +55,10 @@ int main() {
     rejected.nvs_bytes = 0;
     assert(conversation_boot_stage(policy, rejected) == Boot::nvs);
   }
-  assert(!trial->allow_first_budget);
+  assert(!trial->allow_first_budget && !trial->owner_hmac_slot);
+  auto trial_with_slot = policy;
+  trial_with_slot.owner_hmac_slot = 2;
+  assert(conversation_boot_stage(trial_with_slot, facts) == Boot::policy);
   assert(matches_reviewed_trial_budget(policy, false, facts.factory_identity_sha256));
   assert(!matches_reviewed_trial_budget(policy, false, K151BudgetDigest{}));
   assert(!matches_reviewed_trial_budget(policy, false, std::nullopt));
@@ -117,8 +120,18 @@ int main() {
   policy.trial_budget_sha256.reset();
   policy.trial_budget_must_be_missing = false;
   policy.mode = K151ConversationBuildMode::continuous;
+  assert(conversation_boot_stage(policy, facts) == Boot::policy);
+  policy.owner_hmac_slot = 6;
+  assert(conversation_boot_stage(policy, facts) == Boot::policy);
+  policy.owner_hmac_slot = 2;
+  assert(conversation_boot_stage(policy, facts) == Boot::security);
+  facts.security_matches = false;
+  facts.protected_owner_hmac_slot = 3;
+  assert(conversation_boot_stage(policy, facts) == Boot::security);
+  facts.protected_owner_hmac_slot = 2;
   const auto continuous = admit_conversation_boot(policy, facts);
-  assert(continuous && continuous->mode == K151ConversationBuildMode::continuous);
+  assert(continuous && continuous->mode == K151ConversationBuildMode::continuous &&
+         continuous->owner_hmac_slot == 2);
 
   for (bool K151ConversationPolicy::*field : {
        &K151ConversationPolicy::physical_lcd_verified, &K151ConversationPolicy::exclusive_i2s0_verified,
@@ -138,11 +151,14 @@ int main() {
   }
   for (bool K151ConversationBootFacts::*field : {
        &K151ConversationBootFacts::esp32s3, &K151ConversationBootFacts::ota1,
-       &K151ConversationBootFacts::psram_ready, &K151ConversationBootFacts::security_matches}) {
+       &K151ConversationBootFacts::psram_ready}) {
     auto denied = facts;
     denied.*field = false;
     assert(!admit_conversation_boot(policy, denied));
   }
+  auto missing_key = facts;
+  missing_key.protected_owner_hmac_slot.reset();
+  assert(!admit_conversation_boot(policy, missing_key));
   for (std::uint32_t K151ConversationBootFacts::*field : {
        &K151ConversationBootFacts::slot_offset, &K151ConversationBootFacts::slot_bytes,
        &K151ConversationBootFacts::flash_bytes, &K151ConversationBootFacts::nvs_offset,

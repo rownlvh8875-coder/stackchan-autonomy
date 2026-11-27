@@ -114,6 +114,8 @@ void display_press() {
 }
 int nvs_init_calls = 0, nvs_write_opens = 0, nvs_sets = 0, nvs_commits = 0;
 std::vector<uint8_t> durable_budget, durable_profile{0x7b}, staged;
+std::vector<uint8_t> durable_owner_setup;
+bool stop_owner_at_open = false, refuse_owner_commit = false;
 bool staged_profile = false;
 
 struct Store final : AtomicKv {
@@ -286,7 +288,7 @@ extern "C" void heap_caps_free(void* pcm) { std::free(pcm); }
 extern "C" bool esp_ptr_external_ram(const void*) { return true; }
 
 extern "C" esp_err_t nvs_flash_init() {
-  if (scenario != "bootstrap_scopes_separate") {
+  if (scenario != "bootstrap_scopes_separate" && scenario != "owner_nvs") {
     assert(stop_timer_active && (stop_masks[0] & 0x18) == 0x18 && (stop_masks[1] & 0x0c) == 0x08);
   }
   ++nvs_init_calls;
@@ -294,6 +296,13 @@ extern "C" esp_err_t nvs_flash_init() {
   return scenario == "bootstrap_nvs_init_error" ? ESP_FAIL : ESP_OK;
 }
 extern "C" esp_err_t nvs_open(const char* space, nvs_open_mode_t mode, nvs_handle_t* handle) {
+  if (std::string_view{space} == "sc_owner") {
+    assert(scenario == "owner_nvs");
+    if (mode == NVS_READONLY && durable_owner_setup.empty()) return ESP_ERR_NVS_NOT_FOUND;
+    *handle = mode == NVS_READONLY ? 3 : 4;
+    if (mode == NVS_READWRITE && stop_owner_at_open) stop = true;
+    return ESP_OK;
+  }
   assert(std::string_view{space} == "sc_gpt");
   if (scenario == "bootstrap_nvs_read_error") return ESP_FAIL;
   *handle = mode == NVS_READONLY ? 1 : 2;
@@ -304,6 +313,15 @@ extern "C" esp_err_t nvs_open(const char* space, nvs_open_mode_t mode, nvs_handl
   return ESP_OK;
 }
 extern "C" esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* out, size_t* len) {
+  if (handle == 3) {
+    assert(std::string_view{key} == "owner_cfg_v1");
+    if (out) {
+      assert(*len == durable_owner_setup.size());
+      std::memcpy(out, durable_owner_setup.data(), *len);
+    }
+    *len = durable_owner_setup.size();
+    return ESP_OK;
+  }
   assert(handle == 1 && std::string_view{key} == "budget");
   if (durable_budget.empty()) return ESP_ERR_NVS_NOT_FOUND;
   if (out) {
@@ -317,6 +335,13 @@ extern "C" esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* ou
 }
 extern "C" esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const void* bytes,
                                   size_t size) {
+  if (handle == 4) {
+    assert(std::string_view{key} == "owner_cfg_v1" && size == 351 && !stop.load());
+    const auto* data = static_cast<const uint8_t*>(bytes);
+    staged.assign(data, data + size);
+    ++nvs_sets;
+    return ESP_OK;
+  }
   assert(handle == 2);
   staged_profile = std::string_view{key} == "wake_profile";
   assert(staged_profile ? scenario == "bootstrap_scopes_separate" :
@@ -328,6 +353,12 @@ extern "C" esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const vo
   return ESP_OK;
 }
 extern "C" esp_err_t nvs_commit(nvs_handle_t handle) {
+  if (handle == 4) {
+    if (refuse_owner_commit) return ESP_FAIL;
+    durable_owner_setup = staged;
+    ++nvs_commits;
+    return ESP_OK;
+  }
   assert(handle == 2);
   ++nvs_commits;
   if (scenario == "bootstrap_commit_error") return ESP_FAIL;
@@ -335,7 +366,7 @@ extern "C" esp_err_t nvs_commit(nvs_handle_t handle) {
   if (scenario == "bootstrap_stop_at_reservation" && nvs_commits == 2) display_press();
   return ESP_OK;
 }
-extern "C" void nvs_close(nvs_handle_t handle) { assert(handle == 1 || handle == 2); }
+extern "C" void nvs_close(nvs_handle_t handle) { assert(handle >= 1 && handle <= 4); }
 
 extern "C" esp_err_t i2c_master_get_bus_handle(i2c_port_t port, i2c_master_bus_handle_t* out) {
   assert(port == I2C_NUM_1);
@@ -1058,6 +1089,36 @@ void exercise_bootstrap() {
 int main(int argc, char** argv) {
   assert(argc == 2);
   scenario = argv[1];
+  if (scenario == "owner_nvs") {
+    K151SavedOwnerNvs storage(stop);
+    MockOwnerCipher cipher;
+    SavedOwnerCredentials saved(storage, cipher);
+    RuntimeSecrets synthetic;
+    constexpr std::array<uint8_t, 4> ssid{'t', 'e', 's', 't'};
+    assert(synthetic.provision(ssid, "mock-password", "not-a-real-key-test", true));
+    assert(storage.read("budget", 351).code == ReadCode::failure && !nvs_init_calls);
+    assert(storage.read("owner_cfg_v1", 350).code == ReadCode::failure && !nvs_init_calls);
+    const std::array<uint8_t, 351> unframed{};
+    assert(!storage.commit("owner_cfg_v1", unframed) && !nvs_init_calls && !nvs_sets);
+    stop_owner_at_open = true;
+    assert(!saved.save_first(synthetic, [] { return !stop.load(); }) && !nvs_sets && !nvs_commits);
+    stop = false;
+    stop_owner_at_open = false;
+    refuse_owner_commit = true;
+    assert(!saved.save_first(synthetic, [] { return !stop.load(); }) && !nvs_commits);
+    refuse_owner_commit = false;
+    assert(saved.save_first(synthetic, [] { return !stop.load(); }) && nvs_commits == 1);
+    assert(!storage.commit("owner_cfg_v1", durable_owner_setup) && nvs_commits == 1);
+    K151SavedOwnerNvs rebooted_storage(stop);
+    SavedOwnerCredentials rebooted(rebooted_storage, cipher);
+    RuntimeSecrets restored;
+    assert(rebooted.restore(restored) == SavedSetupLoad::restored);
+    assert(restored.api_key() == synthetic.api_key());
+    stop = true;
+    assert(rebooted_storage.read("owner_cfg_v1", 351).code == ReadCode::failure);
+    assert(durable_budget.empty() && durable_profile == std::vector<uint8_t>{0x7b});
+    return 0;
+  }
   if (scenario == "bootstrap_stop_masks_already_configured") stop_masks = {0xff, 0xfb};
   initial_stop_masks = stop_masks;
   if (conversation_case()) {

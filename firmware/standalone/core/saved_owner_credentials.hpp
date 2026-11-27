@@ -34,8 +34,14 @@ class OwnerCredentialCipher {
 };
 
 class SavedOwnerCredentials final {
+  static constexpr std::array<uint8_t, 4> kMagic{'K', 'C', 'R', '1'};
+
  public:
   static constexpr std::string_view kKey = "owner_cfg_v1";
+  static constexpr size_t kRecordBytes = kMagic.size() + OwnerCredentialCipher::kSealedBytes;
+  static bool has_record_envelope(std::span<const uint8_t> bytes) {
+    return bytes.size() == kRecordBytes && std::equal(kMagic.begin(), kMagic.end(), bytes.begin());
+  }
   SavedOwnerCredentials(AtomicKv& storage, OwnerCredentialCipher& cipher)
       : storage_(storage), cipher_(cipher) {}
 
@@ -43,8 +49,7 @@ class SavedOwnerCredentials final {
     if (output.valid()) return SavedSetupLoad::unusable;
     const auto saved = storage_.read(kKey, kRecordBytes);
     if (saved.code == ReadCode::missing && saved.bytes.empty()) return SavedSetupLoad::missing;
-    if (saved.code != ReadCode::found || saved.bytes.size() != kRecordBytes ||
-        !std::equal(kMagic.begin(), kMagic.end(), saved.bytes.begin()))
+    if (saved.code != ReadCode::found || !has_record_envelope(saved.bytes))
       return SavedSetupLoad::unusable;
     PlainBuffer plain;
     if (!cipher_.open(OwnerCredentialCipher::Record(
@@ -89,8 +94,6 @@ class SavedOwnerCredentials final {
   }
 
  private:
-  static constexpr std::array<uint8_t, 4> kMagic{'K', 'C', 'R', '1'};
-  static constexpr size_t kRecordBytes = kMagic.size() + OwnerCredentialCipher::kSealedBytes;
   struct PlainBuffer {
     std::array<uint8_t, OwnerCredentialCipher::kPlainBytes> bytes{};
     ~PlainBuffer() { wipe_secret(bytes.data(), bytes.size()); }

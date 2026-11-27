@@ -41,5 +41,29 @@ without an existing budget stops before networking and leaves the budget absent.
 
 Host tests exercise the owner task, budget, and runtime with simulated reboot,
 audio, network and storage. The board's persistent protected key source and
-ciphertext storage binding still need verification. The ESP review build links
+ciphertext storage binding still need verification on hardware. The public ESP review build links
 the adapter for validation and leaves both disconnected from startup.
+
+### Protected platform binding
+
+The continuous boot profile pins the slot of a reviewed, dedicated high-entropy
+ESP32-S3 upstream HMAC key. Runtime admission requires secure boot, release-mode
+flash encryption, an encrypted running app, restricted ROM download, hardware
+JTAG disabled on both interfaces, and read, write and purpose protection on that
+slot. The device uses PSA to reference the hardware key, derive a purpose-specific
+256-bit AES key, and destroy the two volatile PSA handles after use. A no-RF
+hardware entropy source covers the local setup handshake and the first record
+seal. The separate `sc_owner` namespace accepts one fixed ciphertext record.
+Its adapter opens read-only until initial save and has no erase or rotation path.
+This partition layout uses application-layer encryption without an NVS key
+partition or automatic NVS key provisioning.
+The one-turn profile still uses RAM setup.
+
+Authenticity of a record does not provide flash rollback protection. The
+observed K151 security state fails this protected profile. Any future security
+transition needs a separate recovery design covering signed, compatible firmware
+and the ROM access and encryption state. The existing raw stock backup alone
+does not establish recovery on a secured unit.
+
+[Espressif HMAC reference](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/peripherals/hmac.html)
+and [release flash encryption reference](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/security/flash-encryption.html).

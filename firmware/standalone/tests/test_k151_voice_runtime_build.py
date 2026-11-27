@@ -210,6 +210,7 @@ def _run_runtime(binary, scenario):
         "bootstrap_wifi_revoke_storage",
         "bootstrap_usb_detached",
         "bootstrap_scopes_separate",
+        "owner_nvs",
     ],
 )
 def test_runtime_owner_lifecycle(runtime_binary, scenario):
