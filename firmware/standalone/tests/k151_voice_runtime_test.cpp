@@ -7,12 +7,14 @@
 #include "k151_head_touch_owner.hpp"
 #include "k151_display_stop.hpp"
 #include "k151_lcd_panel.hpp"
+#include "saved_owner_credentials_fixture.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <driver/gpio.h>
 #include <esp_heap_caps.h>
 #include <nvs.h>
@@ -84,7 +86,12 @@ const std::atomic_bool& stop_source() {
 }
 
 bool conversation_case() { return scenario.starts_with("bootstrap_conversation_"); }
-bool continuous_conversation() { return scenario == "bootstrap_conversation_continuous"; }
+bool restored_conversation() { return scenario.starts_with("bootstrap_conversation_reboot_"); }
+bool initial_saved_conversation() { return scenario.starts_with("bootstrap_conversation_save_"); }
+bool continuous_conversation() {
+  return scenario == "bootstrap_conversation_continuous" || restored_conversation() ||
+         initial_saved_conversation();
+}
 bool realtime_conversation() {
   return continuous_conversation() || scenario == "bootstrap_conversation_realtime" ||
          scenario == "bootstrap_conversation_tts_failure";
@@ -367,9 +374,14 @@ bool K151SetupLvgl::attach(K151LcdPanel&, bool exact, bool lock, bool local) {
 bool K151SetupLvgl::present(TouchConsentPhase, OwnerSetupPhase, bool, bool, bool lock) {
   return lock && lvgl_on;
 }
+bool K151SetupLvgl::present_saved_setup(SavedSetupScreen) {
+  return (restored_conversation() || initial_saved_conversation()) &&
+         lvgl_on && !setup_usb && !network_starts;
+}
 bool K151SetupLvgl::detach(bool lock) { return lock && !setup_usb && !codec_running; }
 bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first, bool lock, bool one_turn) {
-  assert(first && lock && !setup_usb && !network_starts && !nvs_init_calls);
+  assert(first == !restored_conversation());
+  assert(lock && !setup_usb && !network_starts && !nvs_init_calls);
   assert(one_turn == !continuous_conversation());
   review_started_ms = now;
   return true;
@@ -403,7 +415,7 @@ bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
 void K151SecurePcSetup::stop() {}
 K151ScpsUsbPort::~K151ScpsUsbPort() { assert(!setup_usb); }
 bool K151ScpsUsbPort::start(uint64_t, bool exact, bool panel, bool uart, bool exclusive) {
-  assert(exact && panel && uart && exclusive && lvgl_on);
+  assert(exact && panel && uart && exclusive && lvgl_on && !restored_conversation());
   return running_ = setup_usb = true;
 }
 bool K151ScpsUsbPort::poll_once(uint64_t, bool lock) { return lock && setup_usb; }
@@ -478,6 +490,8 @@ bool K151CodecPort::play_mono_24k(std::span<const int16_t> pcm) {
   assert(pcm.size() == 240 && pcm.front() == 10);
 #endif
   ++plays;
+  if (plays == 2 && scenario == "bootstrap_conversation_reboot_stop_playback")
+    display_press();
   return pending_pcm = true;
 }
 bool K151CodecPort::wait_for_tx_tail(const std::atomic_bool&, const std::atomic_bool&,
@@ -564,7 +578,9 @@ bool K151HttpsVoicePort::post_once(const Request& req, std::string_view,
   if (call_in_turn == 0) {
     if (scenario.starts_with("bootstrap_")) {
       const auto ledger = BudgetLedger::restore(durable_budget);
-      assert(ledger && ledger->count() == static_cast<size_t>(plays + 1) && nvs_commits == plays + 2);
+      const int already_charged = restored_conversation() ? 1 : 0;
+      assert(ledger && ledger->count() == static_cast<size_t>(plays + 1 + already_charged));
+      assert(nvs_commits == plays + 2 - already_charged);
     }
     assert(req.pcm24k.size() == 4 * QuestionCapture::kFrame);
     for (int16_t sample : req.pcm24k) assert(sample == (plays == 0 ? 2000 : 2400));
@@ -726,11 +742,42 @@ void exercise_conversation() {
     const auto mode = continuous ? K151VoiceMode::continuous : K151VoiceMode::one_paid_turn;
     return conversation.request_voice(models, pack, paid, budget, true, mode);
   };
-  assert(!request(true, true) && conversation.start({true, true}, true));
+  MockOwnerRecords records;
+  MockOwnerCipher cipher;
+  SavedOwnerCredentials saved(records, cipher);
+  if (restored_conversation()) {
+    RuntimeSecrets previous_boot;
+    constexpr std::array<uint8_t, 4> ssid{'t', 'e', 's', 't'};
+    assert(previous_boot.provision(ssid, "mock-password", "not-a-real-key-test", true));
+    assert(saved.save_first(previous_boot, [] { return true; }));
+    if (scenario != "bootstrap_conversation_reboot_no_budget") {
+      auto ledger = BudgetLedger::fresh();
+      assert(ledger.reserve(static_cast<uint64_t>(std::time(nullptr)) - 120, true,
+                            [](auto) { return true; }));
+      durable_budget = ledger.serialize();
+    }
+  } else if (initial_saved_conversation()) {
+    records.fail_commit = scenario == "bootstrap_conversation_save_failed";
+    records.before_commit = [] {
+      const auto budget = BudgetLedger::restore(durable_budget);
+      assert(budget && budget->count() == 0 && nvs_commits == 1 &&
+             stop_timer_active && !network_starts && !setup_usb);
+    };
+  }
+  assert(!request(true, true) &&
+         conversation.start({true, true}, true,
+                            restored_conversation() || initial_saved_conversation() ? &saved : nullptr));
+  assert(!cipher.opens);
   now_us += 50'000;
-  assert(conversation.poll().phase == Phase::setup && setup_usb);
-  now_us += 50'000;
+  if (!restored_conversation()) {
+    assert(conversation.poll().phase == Phase::setup && setup_usb);
+    now_us += 50'000;
+  }
   assert(conversation.poll().phase == Phase::cloud_off && !setup_usb);
+  assert(cipher.opens == (restored_conversation() ? 1U : 0U));
+  if (initial_saved_conversation()) assert(records.commits == 0 && records.data.empty());
+  if (restored_conversation() || initial_saved_conversation())
+    assert(!conversation.request_voice(models, pack, true, true, false, K151VoiceMode::one_paid_turn));
   assert(!request(false, true) && !request(true, false) && !review_started_ms);
   assert(!calls && !network_starts && !nvs_init_calls);
   assert(request(true, true));
@@ -742,7 +789,26 @@ void exercise_conversation() {
     assert(conversation.poll().phase == Phase::voice_review && !network_starts && !nvs_init_calls);
   }
   now_us += 50'000;
-  assert(conversation.poll().phase == Phase::voice && network_starts == 1 && !setup_usb);
+  const auto started = conversation.poll().phase;
+  if (scenario == "bootstrap_conversation_reboot_no_budget") {
+    assert(started == Phase::fault && !network_starts && !nvs_commits && !calls && !mic_opens);
+    assert(!board_bus_registered && !stop_timer_active && !setup_usb);
+    return;
+  }
+  if (initial_saved_conversation()) {
+    assert(records.commits == 1 && cipher.seals == 1 && nvs_commits == 1 && !calls && !mic_opens);
+    if (records.fail_commit) {
+      assert(started == Phase::fault && records.data.empty() && !network_starts &&
+             !board_bus_registered && !stop_timer_active);
+    } else {
+      assert(started == Phase::voice && !records.data.empty() && network_starts == 1);
+      display_press();
+      assert(conversation.poll().phase == Phase::stopped && !board_bus_registered &&
+             !stop_timer_active && network_stops == 1 && !calls && !mic_opens);
+    }
+    return;
+  }
+  assert(started == Phase::voice && network_starts == 1 && !setup_usb);
   assert(conversation.poll().voice == NativeVoiceStep::waiting_network);
   assert(voice_status == std::vector<K151VoiceStatus>{K151VoiceStatus::connecting});
   if (scenario == "bootstrap_conversation_stop") {
@@ -795,8 +861,16 @@ void exercise_conversation() {
     assert(voice_status.back() == K151VoiceStatus::listening && mic_opens == 3 && mic_open);
     assert(!amp_open && stop_timer_active && calls == 3 && plays == 1);
     capture_and_answer();
+    if (scenario == "bootstrap_conversation_reboot_stop_playback") {
+      assert(state.phase == Phase::stopped && !board_bus_registered && !stop_timer_active);
+      assert(calls == 6 && plays == 2 && !mic_open && !amp_open && network_stops == 1);
+      now_us += 600'000;
+      assert(conversation.poll().phase == Phase::stopped && calls == 6 && plays == 2);
+      return;
+    }
     assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::answered);
-    assert(calls == 6 && plays == 2 && nvs_commits == 3 && !mic_open && !amp_open && !pending_pcm);
+    assert(calls == 6 && plays == 2 && !mic_open && !amp_open && !pending_pcm);
+    assert(nvs_commits == (restored_conversation() ? 2 : 3));
     now_us += 600'000;
     state = conversation.poll();
     assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::listening);

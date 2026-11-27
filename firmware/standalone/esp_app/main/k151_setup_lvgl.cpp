@@ -79,6 +79,19 @@ bool K151SetupLvgl::present_pairing_sas(std::string_view code,
   return sas_visible_;
 }
 
+bool K151SetupLvgl::present_saved_setup(SavedSetupScreen screen) {
+  if (!attached() || panel_->stop_input_handed_off_ || review_ != ReviewPhase::idle ||
+      sas_visible_ || stop_.load()) return false;
+  const bool restored = screen == SavedSetupScreen::restored;
+  lv_label_set_text(title_, restored ? "SAVED SETUP READY" : "SETUP PRESENCE");
+  lv_label_set_text(first_, restored ? "Cloud still OFF" : "Restore saved setup if available");
+  lv_label_set_text(second_, restored ? "Review paid voice next" : "Touch top for 3 sec, then lift");
+  if (!panel_->present_now() || stop_.load()) return false;
+  if (restored) review_ = ReviewPhase::closed;
+  else save_after_pairing_ = true;
+  return true;
+}
+
 bool K151SetupLvgl::begin_pairing_review(uint64_t now, bool lvgl_lock_held) {
   if (review_ != ReviewPhase::idle || !sas_visible_ || !lvgl_lock_held || !attached())
     return false;
@@ -206,7 +219,7 @@ bool K151SetupLvgl::show_final_touch_prompt() {
   sas_visible_ = false;
   lv_label_set_text(title_, "FINAL APPROVAL");
   lv_label_set_text(first_, "Touch top for 3 sec");
-  lv_label_set_text(second_, "Lift to approve");
+  lv_label_set_text(second_, save_after_pairing_ ? "Lift to allow encrypted save" : "Lift to approve");
   return panel_->present_now() && !stop_.load();
 }
 

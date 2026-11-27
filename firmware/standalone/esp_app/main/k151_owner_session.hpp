@@ -31,7 +31,10 @@ class K151OwnerSession final {
 
   // Both inputs are independently established for this board before start.
   // A successful SPI transfer alone cannot attest the physical screen.
-  bool start(bool exact_board_verified, bool physical_lcd_verified);
+  // Optional continuous-setup store must come from a verified local provider
+  // and outlive the session. With no provider, use the existing RAM-only path.
+  bool start(bool exact_board_verified, bool physical_lcd_verified,
+             SavedOwnerCredentials* saved = nullptr);
   StartupStage startup_stage() const { return startup_stage_; }
   std::optional<scpswire::SetupFailure> early_setup_failure() const { return early_setup_failure_; }
   // Called by the pinned owner task with the approved deployment scope, only
@@ -60,6 +63,7 @@ class K151OwnerSession final {
   K151HeadTouchOwner touch_{owner_, stop_};
   K151LocalOwnerSetup setup_{owner_, setup_input_, stop_};
   K151ScpsUsbPort usb_{touch_, setup_, view_, stop_};
+  SavedOwnerCredentials* saved_ = nullptr;
   i2c_master_bus_handle_t bus_ = nullptr;
   TaskHandle_t task_ = nullptr;
   int core_ = -1;
@@ -69,6 +73,7 @@ class K151OwnerSession final {
   bool board_verified_ = false;
   bool lcd_verified_ = false;
   bool handoff_taken_ = false;
+  bool restored_setup_ = false;
   bool allow_first_budget_ = false;
   bool one_paid_turn_ = false;
   bool bus_release_unverified_ = false;

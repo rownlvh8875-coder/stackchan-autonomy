@@ -22,3 +22,24 @@ Official ESP-IDF fixed source: [esp_wifi.h](https://github.com/espressif/esp-idf
 - A bounded FreeRTOS queue carries Wi-Fi connection, disconnect, IP and SNTP events to a single owning task. The ESP event callback immediately raises an atomic `link_down` latch on disconnection, so paid-work eligibility is revoked even before the task drains its queue. Queue overflow is a permanent fault.
 - The owning task uses the portable backoff/clock policy; SNTP starts only after IP acquisition, after which a plausible clock update can mark readiness. No pending paid request is retried on reconnect. `shutdown()` attempts resource cleanup, invalidates eligibility and wipes the local copy of credentials.
 - This is **compile-only**. The adapter has not been exercised on any physical network, and event races, Wi-Fi memory, delayed callbacks, NVS semantics, request interruption time, packet loss, and recovery after a device reset remain unverified. A synchronous HTTPS client must separately check link/clock state between I/O calls, not only at the start of the transaction.
+
+## Saved setup and continuous conversation (2026-11-27)
+
+`SavedOwnerCredentials` accepts a separate atomic ciphertext store and a
+purpose-bound key from the local platform. The fixed-size record uses AES-256-GCM
+with a fresh 96-bit nonce and a 128-bit tag. The ESP adapter accepts a borrowed
+PSA key with encryption and decryption permissions and refuses exportable or
+copyable keys. Temporary plaintext storage is cleared after use.
+
+On first pairing, the owner task checks the final local pairing gesture and a
+separate paid voice review. It then arms STOP, verifies the durable budget, and
+commits and verifies the encrypted setup before starting Wi-Fi. After a reboot,
+local owner presence allows restoration. A valid record skips USB pairing and
+still requires paid voice approval on the robot. A missing record allows initial
+pairing. A corrupt or unreadable record stops setup. An authenticated setup
+without an existing budget stops before networking and leaves the budget absent.
+
+Host tests exercise the owner task, budget, and runtime with simulated reboot,
+audio, network and storage. The board's persistent protected key source and
+ciphertext storage binding still need verification. The ESP review build links
+the adapter for validation and leaves both disconnected from startup.

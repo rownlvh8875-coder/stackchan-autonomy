@@ -154,6 +154,11 @@ def _run_runtime(binary, scenario):
         "bootstrap_one_paid_trial",
         "bootstrap_conversation_complete",
         "bootstrap_conversation_continuous",
+        "bootstrap_conversation_reboot_continuous",
+        "bootstrap_conversation_reboot_stop_playback",
+        "bootstrap_conversation_reboot_no_budget",
+        "bootstrap_conversation_save_first",
+        "bootstrap_conversation_save_failed",
         "bootstrap_conversation_realtime",
         "bootstrap_conversation_stt_failure",
         "bootstrap_conversation_gpt_failure",
@@ -212,7 +217,13 @@ def test_runtime_owner_lifecycle(runtime_binary, scenario):
 
 
 @pytest.mark.parametrize(
-    "scenario", ["bootstrap_conversation_continuous", "bootstrap_conversation_tts_failure"]
+    "scenario",
+    [
+        "bootstrap_conversation_continuous",
+        "bootstrap_conversation_reboot_continuous",
+        "bootstrap_conversation_reboot_stop_playback",
+        "bootstrap_conversation_tts_failure",
+    ],
 )
 def test_runtime_realtime_wire(realtime_runtime_binary, scenario):
     _run_runtime(realtime_runtime_binary, scenario)

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "network_time_guard.hpp"
+#include "saved_owner_credentials.hpp"
 
 #include <algorithm>
 #include <array>
@@ -39,6 +40,29 @@ class OwnerSetupController final {
   bool ready() const {
     return phase_ == OwnerSetupPhase::ready && owner_.load() &&
            input_.load() && !stop_.load() && output_.valid();
+  }
+
+  // Only a trusted local owner/input path may rehydrate RAM on a new boot.
+  // Missing leaves first-time setup available; unreadable data fails closed.
+  SavedSetupLoad restore_saved(SavedOwnerCredentials& saved, uint64_t now) {
+    if (phase_ != OwnerSetupPhase::hold || output_.valid() ||
+        !owner_.load() || !input_.load() || stop_.load())
+      return SavedSetupLoad::unusable;
+    const auto loaded = saved.restore(output_);
+    if (!owner_.load() || !input_.load() || stop_.load() ||
+        loaded == SavedSetupLoad::unusable) {
+      (void)fault();
+      return SavedSetupLoad::unusable;
+    }
+    if (loaded == SavedSetupLoad::restored) {
+      started_ms_ = last_ms_ = now;
+      phase_ = OwnerSetupPhase::ready;
+    }
+    return loaded;
+  }
+
+  bool save_first(SavedOwnerCredentials& saved, bool physically_approved) {
+    return physically_approved && saved.save_first(output_, [this] { return ready(); });
   }
 
   // This function MUST only be called by a trusted physical owner controller.

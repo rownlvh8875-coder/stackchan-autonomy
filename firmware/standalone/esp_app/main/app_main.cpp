@@ -25,6 +25,7 @@
 #include "k151_voice_runtime.hpp"
 #include "k151_voice_bootstrap.hpp"
 #include "k151_wifi_time.hpp"
+#include "k151_owner_credential_cipher.hpp"
 #include "k151_owner_setup.hpp"
 #include "k151_owner_session.hpp"
 #include "k151_conversation_owner.hpp"
@@ -65,6 +66,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", K151VoiceRuntime::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151VoiceBootstrap::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151WifiTimePort::compiled_link_marker());
+  ESP_LOGI(kTag, "%s", K151OwnerCredentialCipher::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151LocalOwnerSetup::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151OwnerSession::compiled_link_marker());
   ESP_LOGI(kTag, "%s", K151ConversationOwner::compiled_link_marker());

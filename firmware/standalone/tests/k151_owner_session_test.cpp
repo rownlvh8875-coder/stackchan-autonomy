@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "k151_owner_session.hpp"
+#include "saved_owner_credentials_fixture.hpp"
 
 #include "k151_display_stop.hpp"
 #include "k151_install_hold.hpp"
@@ -68,6 +69,10 @@ bool K151LcdPanel::shutdown() { assert(!view && !usb); lcd = false; return true;
 bool K151SetupLvgl::attach(K151LcdPanel&, bool verified, bool lock, bool local) {
   assert(lvgl && lcd && verified && lock && local);
   return view = scenario != "view_failed";
+}
+bool K151SetupLvgl::present_saved_setup(SavedSetupScreen screen) {
+  assert(screen == SavedSetupScreen::presence && view && !usb);
+  return scenario == "save_first_pairing";
 }
 bool K151SetupLvgl::present(TouchConsentPhase phase, OwnerSetupPhase ready,
                            bool input, bool error, bool lock) {
@@ -163,11 +168,16 @@ bool K151ScpsUsbPort::shutdown() { usb = false; return true; }
 int main(int argc, char* argv[]) {
   assert(argc == 2);
   scenario = argv[1];
+  const bool saved_pairing = scenario == "save_first_pairing";
+  MockOwnerRecords records;
+  MockOwnerCipher cipher;
+  SavedOwnerCredentials saved(records, cipher);
   K151OwnerSession session;
   assert(!session.handoff());
   if (scenario == "existing_lvgl") lvgl = true;
   if (scenario == "existing_bus") i2c = true;
-  const auto started = session.start(scenario != "wrong_board", scenario != "unverified_lcd");
+  const auto started = session.start(scenario != "wrong_board", scenario != "unverified_lcd",
+                                     saved_pairing ? &saved : nullptr);
   using Startup = K151OwnerSession::StartupStage;
   if (scenario == "hold" || scenario == "wrong_board" || scenario == "unverified_lcd" ||
       scenario == "existing_lvgl" || scenario == "existing_bus") {
@@ -218,10 +228,14 @@ int main(int argc, char* argv[]) {
   for (; ms <= end; ms += 50) {
     terminal = session.poll();
     if (terminal == Step::fault || terminal == Step::stopped || terminal == Step::ready) break;
+    assert(records.commits == 0);
     const unsigned previous = touches;
     assert(session.poll() == terminal && touches == previous);
     assert(!session.handoff());
   }
+  if (saved_pairing)
+    assert(terminal == Step::ready && pairing_complete && records.reads == 1 &&
+           records.commits == 0 && cipher.seals == 0 && records.data.empty());
   if (terminal == Step::ready) {
     assert(terminal == Step::ready && i2c && head && lcd && !usb);
     assert(!session.handoff() && !voice_prompt_at);
@@ -254,6 +268,7 @@ int main(int argc, char* argv[]) {
     const auto handoff = session.handoff();
     assert(handoff && handoff->setup.ready() && handoff->bus == &board_bus);
     assert(handoff->paid_consent && handoff->budget_writes && handoff->allow_first_budget == first);
+    assert(handoff->save_after_setup == (saved_pairing ? &saved : nullptr));
     assert(!session.handoff());
     ms += 1000;
     assert(session.poll() == Step::voice_ready && touches == previous && !usb);

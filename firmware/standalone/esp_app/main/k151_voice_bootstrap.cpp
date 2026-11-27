@@ -20,6 +20,7 @@ K151VoiceBootstrap::K151VoiceBootstrap(const K151VoiceHandoff& handoff,
                          handoff.one_paid_turn ? K151VoiceMode::one_paid_turn
                                                : K151VoiceMode::continuous, &handoff.view) {
   reviewed_first_budget_ = handoff.allow_first_budget;
+  save_after_setup_ = handoff.save_after_setup;
 }
 
 K151VoiceBootstrap::K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel& panel,
@@ -74,6 +75,13 @@ bool K151VoiceBootstrap::start(VoiceModelConfig models, std::span<const uint8_t>
       !K151CodecPort::is_registered_board_bus(board_bus_) ||
       !ledger_.restore_budget_for_setup(allow_first_budget, baseline) || !authorized() ||
       !K151CodecPort::is_registered_board_bus(board_bus_) || !confirmed_setup()) {
+    stop();
+    return false;
+  }
+  // Publish the saved setup only after the paid review and durable budget.
+  // A reboot after the save always expects an existing budget.
+  if (save_after_setup_ && (!setup_.save_first(*save_after_setup_, authorized()) || !authorized() ||
+                            !K151CodecPort::is_registered_board_bus(board_bus_))) {
     stop();
     return false;
   }

@@ -26,7 +26,8 @@ bool K151OwnerSession::on_owner_task() const {
   return task_ && task_ == xTaskGetCurrentTaskHandle() && core_ == xPortGetCoreID();
 }
 
-bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verified) {
+bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verified,
+                             SavedOwnerCredentials* saved) {
   if (task_) return false;
   startup_stage_ = StartupStage::preconditions;
   if (stop_.load() || !exact_board_verified || !physical_lcd_verified ||
@@ -52,8 +53,10 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
   startup_stage_ = StartupStage::view;
   if (!view_.attach(panel_, physical_lcd_verified, true, true)) return abort();
   startup_stage_ = StartupStage::presence_frame;
-  if (!view_.present(TouchConsentPhase::clear_for_arm, OwnerSetupPhase::hold, false, false, true))
-    return abort();
+  const bool presence = saved
+      ? view_.present_saved_setup(K151SetupLvgl::SavedSetupScreen::presence)
+      : view_.present(TouchConsentPhase::clear_for_arm, OwnerSetupPhase::hold, false, false, true);
+  if (!presence) return abort();
   startup_stage_ = StartupStage::head;
   if (!touch_.attach_for_setup(bus_, exact_board_verified, true)) return abort();
   startup_stage_ = StartupStage::clock;
@@ -62,6 +65,7 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
   last_sample_ms_ = static_cast<uint64_t>(now_us / 1000);
   board_verified_ = exact_board_verified;
   lcd_verified_ = physical_lcd_verified;
+  saved_ = saved;
   startup_stage_ = StartupStage::ready;
   step_ = Step::head_touch;
   return true;
@@ -70,7 +74,7 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
 bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budget_scope_approved,
                                               bool allow_first_budget, bool one_paid_turn) {
   if (!on_owner_task() || step_ != Step::ready || !setup_.ready() || usb_.running() ||
-      !paid_scope_approved || !budget_scope_approved || stop_.load())
+      (saved_ && one_paid_turn) || !paid_scope_approved || !budget_scope_approved || stop_.load())
     return false;
   const auto now_us = esp_timer_get_time();
   if (now_us < 0 || static_cast<uint64_t>(now_us / 1000) < last_sample_ms_) {
@@ -78,12 +82,13 @@ bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budge
     return false;
   }
   const auto now = static_cast<uint64_t>(now_us / 1000);
-  if (!view_.begin_voice_review(now, allow_first_budget, true, one_paid_turn)) {
+  const bool first_budget_allowed = allow_first_budget && !restored_setup_;
+  if (!view_.begin_voice_review(now, first_budget_allowed, true, one_paid_turn)) {
     (void)abort_setup();
     return false;
   }
   voice_review_started_ms_ = last_sample_ms_ = now;
-  allow_first_budget_ = allow_first_budget;
+  allow_first_budget_ = first_budget_allowed;
   one_paid_turn_ = one_paid_turn;
   step_ = Step::voice_review;
   return true;
@@ -132,6 +137,18 @@ K151OwnerSession::Step K151OwnerSession::poll() {
   if (event == TouchConsentEvent::invalidated)
     return abort_setup(touch_.last_read_failed() ? Failure::sensor_read : Failure::head_input);
   if (step_ == Step::head_touch && event == TouchConsentEvent::owner_window_open) {
+    if (saved_) {
+      setup_input_.store(true);
+      const auto restored = setup_.restore_saved(*saved_, now);
+      if (restored == SavedSetupLoad::unusable) return abort_setup();
+      if (restored == SavedSetupLoad::restored) {
+        if (!view_.present_saved_setup(K151SetupLvgl::SavedSetupScreen::restored))
+          return abort_setup();
+        restored_setup_ = true;
+        return step_ = Step::ready;
+      }
+      setup_input_.store(false);
+    }
     // Admission was verified before start. The USB port independently checks
     // the current head window, shared latches, LCD and unclaimed driver.
     if (!usb_.start(now, board_verified_, lcd_verified_, kSeparateUartConsole, true))
@@ -158,7 +175,8 @@ std::optional<K151VoiceHandoff> K151OwnerSession::handoff() {
     return std::nullopt;
   handoff_taken_ = true;
   return K151VoiceHandoff{setup_, panel_, view_, bus_, paid_consent_, budget_writes_,
-                         allow_first_budget_, one_paid_turn_};
+                         allow_first_budget_, one_paid_turn_,
+                         restored_setup_ ? nullptr : saved_};
 }
 
 bool K151OwnerSession::shutdown() {
@@ -168,6 +186,7 @@ bool K151OwnerSession::shutdown() {
   paid_consent_.store(false);
   budget_writes_.store(false);
   setup_input_.store(false);
+  saved_ = nullptr;
   setup_.stop();
   if (!usb_.shutdown()) return false;
   const bool head_released = touch_.detach();

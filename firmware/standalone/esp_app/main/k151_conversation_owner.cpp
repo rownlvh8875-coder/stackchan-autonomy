@@ -15,13 +15,14 @@ bool K151ConversationOwner::on_owner_task() const {
   return task_ && task_ == xTaskGetCurrentTaskHandle() && core_ == xPortGetCoreID();
 }
 
-bool K151ConversationOwner::start(K151AudioBoardEvidence evidence, bool physical_lcd_verified) {
+bool K151ConversationOwner::start(K151AudioBoardEvidence evidence, bool physical_lcd_verified,
+                                  SavedOwnerCredentials* saved) {
   if (task_ || !evidence.verified() || !physical_lcd_verified) return false;
   task_ = xTaskGetCurrentTaskHandle();
   if (!task_) return false;
   core_ = xPortGetCoreID();
   evidence_ = evidence;
-  if (!setup_.start(evidence.exact_board_verified, physical_lcd_verified)) {
+  if (!setup_.start(evidence.exact_board_verified, physical_lcd_verified, saved)) {
     finish(Phase::fault);
     return false;
   }

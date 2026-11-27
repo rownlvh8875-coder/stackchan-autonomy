@@ -42,6 +42,8 @@ class K151SetupLvgl final {
   friend class K151OwnerSession;
   enum class ReviewResult : uint8_t { waiting, approved, fault };
   enum class ReviewPhase : uint8_t { idle, wait_clear, wait_press, holding, wait_release, closed };
+  enum class SavedSetupScreen : uint8_t { presence, restored };
+  bool present_saved_setup(SavedSetupScreen screen);
   bool begin_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
   ReviewResult poll_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
   bool begin_voice_review(uint64_t now_ms, bool allow_first_budget, bool lvgl_lock_held,
@@ -62,6 +64,7 @@ class K151SetupLvgl final {
   ReviewPhase review_ = ReviewPhase::idle;
   bool sas_visible_ = false;
   bool voice_review_started_ = false;
+  bool save_after_pairing_ = false;
   bool voice_approved_ = false;
   std::optional<K151VoiceStatus> voice_status_;
   bool attempted_ = false;

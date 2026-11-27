@@ -54,6 +54,7 @@ def owner_binary(tmp_path_factory):
     "case",
     [
         "handoff",
+        "save_first_pairing",
         "hold",
         "wrong_board",
         "unverified_lcd",

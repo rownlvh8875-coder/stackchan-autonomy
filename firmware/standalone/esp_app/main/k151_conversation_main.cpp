@@ -2,6 +2,7 @@
 // The separate K151 conversation build. The default HOLD uses app_main.cpp.
 #include "k151_conversation_owner.hpp"
 #include "k151_conversation_policy.hpp"
+#include "k151_owner_credential_cipher.hpp"
 #include "k151_scps_usb.hpp"
 #include "audio_wipe.hpp"
 
@@ -175,6 +176,7 @@ extern "C" void app_main() {
   ESP_LOGI(kTag, "%s", k151_local_release_marker());
 #else
   ESP_LOGW(kTag, "K151_CONVERSATION_REVIEW_NO_RELEASE");
+  ESP_LOGI(kTag, "%s", K151OwnerCredentialCipher::compiled_link_marker());
 #endif
   const auto& policy = k151_local_conversation_policy();
   if (!local_conversation_scope_complete(policy)) return;

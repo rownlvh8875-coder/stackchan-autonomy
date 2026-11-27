@@ -67,6 +67,7 @@ class K151VoiceBootstrap final {
   bool display_stop_owned_ = false;
   bool show_failed_trial_ = false;
   std::optional<bool> reviewed_first_budget_;
+  SavedOwnerCredentials* save_after_setup_ = nullptr;
 };
 
 } // namespace stackchan::standalone
