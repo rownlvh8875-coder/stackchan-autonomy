@@ -13,6 +13,7 @@ dependencies = [
   "PyYAML==6.0.3",
   "websockets==15.0.1",
   "pyserial==3.5",
+  "pysqlite3==0.6.2; sys_platform == 'win32' and implementation_name == 'cpython' and (platform_machine == 'AMD64' or platform_machine == 'x86')",
 ]
 
 [dependency-groups]

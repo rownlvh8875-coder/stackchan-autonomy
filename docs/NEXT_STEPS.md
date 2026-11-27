@@ -1,5 +1,22 @@
 # Next steps
 
+## 2026-11-28 Windows 가상 soak의 SQLite 커밋 개선
+
+`96e314c`의 PR Windows Python 3.12 시험은 1,323사이클에서
+`renew_timeout`으로 정지했다. 해당 SQLite COMMIT은 중단 뒤 반환했으며
+최종 4.583초가 걸렸다. 같은 작업의 직렬 대기는 0.021ms, 실행기 대기는
+0.293ms였고 기록된 최대 이벤트 루프 지연은 49ms였다.
+[실패 작업](https://github.com/rownlvh8875-coder/stackchan-autonomy/actions/runs/46019809335/job/140576215723)
+
+Windows 임시 DB에서 실제 SQLite 파일 동기화 호출에 25ms씩 지연을
+주입했다. 기존 DELETE 모드는 일반 커밋당 동기화 3회에 약 78ms,
+WAL 모드는 재사용 중 일반 커밋당 1회에 약 26ms였다. Windows x86/x64
+CPython은 WAL reset 수정이 들어간 SQLite를 사용한다. 제어권 실행 중에는
+연결 하나를 열어 매 작업 후 마지막 연결이 닫히면서 생기는 체크포인트를
+피한다. 기존 시간 한도, 트랜잭션 내구성, 원자적 소유권 검사와 오류 안전
+정지 조건은 계속 적용한다. CI 호스트의 개별 I/O가 지연된 원인은 미확정이다.
+[SQLite WAL](https://www.sqlite.org/wal.html) · [동기화 설정](https://www.sqlite.org/pragma.html#pragma_synchronous)
+
 ## 2026-11-27 Windows 제어권 검사 커밋과 재생 종료 경계
 
 `8876778`의 GitHub 검사 9개 중 8개가 통과했다. push Windows

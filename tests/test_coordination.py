@@ -1,14 +1,15 @@
 import json
 import os
-import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 
 import pytest
 
 from stackchan_autonomy.budget import SQLiteRequestBudget
 from stackchan_autonomy.control import ControlLease
 from stackchan_autonomy.settings import Settings
+from stackchan_autonomy.sqlite_runtime import WINDOWS_WAL, sqlite3
 from stackchan_autonomy.state_store import StateUnavailable
 
 
@@ -139,6 +140,47 @@ def test_corrupt_persistent_clock_is_unavailable_not_a_background_task_crash(tmp
         db.execute("UPDATE autonomy_clock SET at='invalid'")
     with pytest.raises(StateUnavailable):
         lease.renew(handle)
+
+
+@pytest.mark.skipif(
+    not WINDOWS_WAL,
+    reason="Windows CPython durable WAL path",
+)
+async def test_windows_live_lease_writes_while_legacy_reader_holds_snapshot(tmp_path):
+    from stackchan_autonomy.action import ActionExecutor
+    from stackchan_autonomy.robot import FakeRobotAdapter
+
+    path = tmp_path / "legacy.sqlite3"
+    settings = config().model_copy(update={"state_path": path, "control_resource": "robot"})
+    budget = SQLiteRequestBudget(settings)
+    assert budget.reserve(100)
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+    executor = ActionExecutor(FakeRobotAdapter(), settings)
+    try:
+        assert await executor.claim_control()
+        with closing(sqlite3.connect(path, isolation_level=None)) as reader:
+            reader.execute("BEGIN")
+            stored = reader.execute("SELECT expires_at FROM control_leases").fetchone()
+            assert stored is not None
+            assert await executor.claim_control()
+            with executor.lease.store.transaction() as writer:
+                assert writer.execute("PRAGMA synchronous").fetchone() == (2,)
+                assert writer.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+            assert reader.execute("SELECT expires_at FROM control_leases").fetchone() == stored
+        assert path.with_name(path.name + "-wal").is_file()
+
+        with closing(sqlite3.connect(path, isolation_level=None)) as blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+            with pytest.raises(StateUnavailable):
+                await executor.claim_control()
+            assert executor.stopped and executor.lease_lost
+            assert executor.control_loss_reason == "verification_error"
+        assert not await executor.claim_control()
+    finally:
+        await executor.aclose()
+    assert not path.with_name(path.name + "-wal").exists()
+    assert SQLiteRequestBudget(settings).snapshot().requests == 1
 
 
 def test_subprocess_lease_acquisition_has_exactly_one_winner(tmp_path):

@@ -102,10 +102,9 @@ async def test_soak_classifies_real_expired_lease_without_retry(monkeypatch):
 
 
 async def test_soak_distinguishes_sqlite_verification_error_from_expired_lease(monkeypatch):
-    import sqlite3
-
     from stackchan_autonomy import soak
     from stackchan_autonomy.control import ControlLease
+    from stackchan_autonomy.sqlite_runtime import sqlite3
 
     original_check = ControlLease.check
     original_decide = soak.MockDecisionProvider.decide

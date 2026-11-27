@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -10,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from stackchan_autonomy.async_storage import AsyncStorage
+from stackchan_autonomy.sqlite_runtime import sqlite3
 
 
 async def wait_thread(event):

@@ -1,4 +1,3 @@
-import sqlite3
 import subprocess
 import sys
 
@@ -6,6 +5,7 @@ import pytest
 
 from stackchan_autonomy.memory import Memory
 from stackchan_autonomy.models import EventKind, RobotStatus
+from stackchan_autonomy.sqlite_runtime import sqlite3
 
 
 def legacy(path, result="executed"):

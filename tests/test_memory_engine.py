@@ -1,5 +1,4 @@
 import asyncio
-import sqlite3
 import threading
 import time
 from types import SimpleNamespace
@@ -12,6 +11,7 @@ from stackchan_autonomy.memory import Memory
 from stackchan_autonomy.models import Decision, Event, EventKind, RobotStatus, State
 from stackchan_autonomy.robot import FakeRobotAdapter
 from stackchan_autonomy.settings import Settings
+from stackchan_autonomy.sqlite_runtime import sqlite3
 
 
 @pytest.mark.usefixtures("lease_timing_probe")

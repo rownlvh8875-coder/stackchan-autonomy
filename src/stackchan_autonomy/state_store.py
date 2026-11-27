@@ -1,10 +1,10 @@
 """Short, atomic SQLite transactions. No secrets or raw observations belong here."""
 
 import math
-import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+from .sqlite_runtime import WINDOWS_WAL, sqlite3
 from .timing_diagnostics import sqlite_timing
 
 
@@ -28,6 +28,33 @@ class SQLiteState:
         if str(path) == ":memory:":
             raise ValueError("coordination requires a persistent file")
         self.path = Path(path).expanduser().resolve()
+
+    def keep_wal_open(self) -> sqlite3.Connection | None:
+        """Retain the WAL across lease I/O until the owner drains its worker."""
+        if not WINDOWS_WAL:
+            return None
+        db = None
+        try:
+            # The keeper has no active transactions. The serial storage worker
+            # can start and close it on different executor threads.
+            with sqlite_timing("sqlite_connect"):
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                db = sqlite3.connect(
+                    self.path, timeout=0.25, isolation_level=None, check_same_thread=False
+                )
+                db.execute("PRAGMA synchronous=FULL")
+                mode = db.execute("PRAGMA journal_mode").fetchone()
+                if mode != ("wal",) and db.execute("PRAGMA journal_mode=WAL").fetchone() != (
+                    "wal",
+                ):
+                    raise StateUnavailable("coordination storage unavailable")
+                # Switching journal mode alone does not attach this connection to the WAL.
+                db.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
+            return db
+        except (sqlite3.Error, OSError):
+            if db is not None:
+                db.close()
+            raise StateUnavailable("coordination storage unavailable") from None
 
     @contextmanager
     def transaction(self):

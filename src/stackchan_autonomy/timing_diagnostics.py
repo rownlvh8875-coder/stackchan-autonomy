@@ -5,12 +5,13 @@ also includes OS descheduling; these numbers alone cannot identify physical I/O.
 """
 
 import contextvars
-import sqlite3
 import threading
 import time
 from collections import Counter, deque
 from contextlib import contextmanager
 from time import thread_time
+
+from .sqlite_runtime import sqlite3
 
 _probe = contextvars.ContextVar("stackchan_timing_probe", default=None)
 _trace = contextvars.ContextVar("stackchan_storage_trace", default=None)

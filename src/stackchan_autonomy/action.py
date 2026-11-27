@@ -39,6 +39,7 @@ class ActionExecutor:
             settings.state_path, settings.control_resource, ttl_s=settings.lease_ttl_s
         )
         self._lease_handle = None
+        self._lease_storage_keeper = None
         self._heartbeat: asyncio.Task | None = None
         self._storage = AsyncStorage()
         self._claim_lock = asyncio.Lock()
@@ -60,6 +61,10 @@ class ActionExecutor:
             self.on_control_lost()
 
     def _acquire_lease(self):
+        if self.stopped or self.faulted:
+            return None
+        if isinstance(self.lease, ControlLease) and self._lease_storage_keeper is None:
+            self._lease_storage_keeper = self.lease.store.keep_wal_open()
         if self.stopped or self.faulted:
             return None
         # Retain a late result inside the tracked worker, even if its caller cancels.
@@ -227,7 +232,12 @@ class ActionExecutor:
                     pass  # Leave expiry in place; never erase another owner's lease.
                 self._lease_handle = None
         finally:
-            await self._storage.aclose()
+            try:
+                if self._lease_storage_keeper is not None:
+                    await self._storage.call(self._lease_storage_keeper.close)
+                    self._lease_storage_keeper = None
+            finally:
+                await self._storage.aclose()
 
     async def _consume(self) -> None:
         while True:

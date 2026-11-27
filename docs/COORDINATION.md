@@ -44,6 +44,14 @@ CLI는 시작 시, ActionExecutor 직접 사용은 최초 명령 전에 획득�
 프로세스가 강제 종료되면 기본 10초 TTL까지 기다린다. 다른 프로세스 점유 중인 CLI는
 종료 코드 2와 제어권 안내 메시지를 출력한다. DB 오류도 코드 2이며 명령을 보내지 않는다.
 
+Windows CPython x86/x64에서는 첫 제어권 획득 때 기존 상태 파일을 SQLite WAL 모드로
+연다. WAL reset 결함을 수정한 SQLite 버전을 고정해 설치한다. 각 쓰기는 계속
+`BEGIN IMMEDIATE`와 `synchronous=FULL`을 사용한다. 실행 중에는 대기 중인 연결
+하나가 WAL을 유지하고, 모든 작업을 마친 뒤 닫는다. 실행 중인 DB의 `-wal`과
+`-shm`은 함께 관리한다. 실행 중에는 이 파일들을 삭제하거나 DB 본체만 복사하지
+않는다. 기존 예산과 제어권 기록은 같은 파일에서 유지한다.
+[SQLite WAL](https://www.sqlite.org/wal.html)
+
 **적용 범위:** 이 규약을 따르고 같은 DB/resource를 공유하는 프로그램끼리의 협력 제어다.
 다른 PC·다른 앱·출고 펌웨어 애니메이션은 통제하지 않는다. gateway가 generation을
 검증하는 fencing이 없으므로, 이미 전송된 작업이나 멈췄다가 재개한 외부 프로세스를
