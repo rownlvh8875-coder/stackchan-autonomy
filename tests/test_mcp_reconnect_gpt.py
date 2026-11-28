@@ -1,7 +1,9 @@
 """Real MCP/SDK cancellation and persistent quota across transport reconnects."""
 
 import asyncio
+import io
 import json
+import sys
 from contextlib import asynccontextmanager
 
 import httpx2 as httpx
@@ -126,3 +128,65 @@ async def test_disconnect_during_paid_call_closes_old_client_and_never_replays(
     assert all(chat.client.is_closed() and not chat._storage.pending for chat in chats)
     assert chats[-1].budget.snapshot().requests == 2
     assert "PRIVATE-OLD" not in str(lines) and "PRIVATE-NEW" not in str(lines)
+
+
+def test_headless_gpt_start_keeps_paid_budget_across_restarts(monkeypatch, tmp_path, capsys):
+    state = tmp_path / "persistent" / "autonomy.sqlite3"
+    monkeypatch.setenv("STACKCHAN_OFFICIAL_MCP_ENDPOINT", ENDPOINT)
+    monkeypatch.setenv("STACKCHAN_STATE_PATH", str(state))
+    monkeypatch.setenv("STACKCHAN_BUDGET_NAMESPACE", "openai:offline-test")
+    monkeypatch.setenv("STACKCHAN_REQUESTS_PER_MINUTE", "1")
+    monkeypatch.setenv("STACKCHAN_CLOUD_ENABLED", "true")
+    monkeypatch.setenv("STACKCHAN_OPENAI_MODEL", "account-selected-model")
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-headless-key")
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+
+    def forbidden_prompt(*_args, **_kwargs):
+        pytest.fail("headless service requested interactive input")
+
+    monkeypatch.setattr(official_mcp_cli.getpass, "getpass", forbidden_prompt)
+    original = gpt_chat.GPTChat
+    questions, sessions = [], []
+
+    def api(request):
+        questions.append(json.loads(request.content)["input"][-1]["content"])
+        return httpx.Response(200, json=response_payload("검증용 답변입니다."))
+
+    def make_chat(config):
+        assert config.state_path == state
+        client = AsyncOpenAI(
+            api_key=config.api_key.get_secret_value(),
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(api)),
+        )
+        return original(config, client=client, clock=lambda: 1_000)
+
+    async def session(endpoint, *, emit, gpt):
+        assert endpoint == ENDPOINT
+        emit("OFFICIAL_MCP_INITIALIZED")
+        sessions.append(gpt)
+        if len(sessions) == 1:
+            assert gpt.budget.snapshot().requests == 0
+            assert (await gpt.ask("offline-first-question"))["answer"] == "검증용 답변입니다."
+        else:
+            assert sessions[0].client.is_closed()
+            assert gpt.budget.snapshot().requests == 1
+            with pytest.raises(gpt_chat.GPTChatError, match="PC_GPT_BUDGET_EXHAUSTED"):
+                await gpt.ask("offline-budget-denied-question")
+
+    monkeypatch.setattr(gpt_chat, "GPTChat", make_chat)
+    monkeypatch.setattr(official_mcp_cli, "run_bridge", session)
+    for name in ("first-start", "restart"):
+        cwd = tmp_path / name
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        assert official_mcp_cli.main(["--gpt", "--reconnect"]) == 0
+        assert not (cwd / ".local/autonomy.sqlite3").exists()
+
+    assert state.is_file()
+    assert questions == ["offline-first-question"]
+    assert len(sessions) == 2 and all(chat.client.is_closed() for chat in sessions)
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    for private in (ENDPOINT, "offline-headless-key", *questions, "검증용 답변입니다."):
+        assert private not in output

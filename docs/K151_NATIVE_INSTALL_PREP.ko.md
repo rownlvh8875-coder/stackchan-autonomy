@@ -1,5 +1,72 @@
 # K151 native wake 설치 전 검토 자료
 
+## 2026-11-28 계측기 없이 검토한 상시 사용 경로
+
+### 순정 펌웨어와 기존 GPT 연결을 상시 호스트에서 실행
+
+기존 GPT 연결을 다른 상시 호스트에서 실행하면 Windows 노트북을
+꺼도 된다. K151은 순정 호출어와 재생 경로를 그대로 사용한다. 공식
+서비스가 음성을 인식하고 재생하며, GPT 연결은 전달받은 텍스트로 OpenAI
+Responses API를 호출한다. 모든 질문의 GPT 호출을 보장하지는 않는다.
+[기존 실물 GPT 연결](validation/2026-11-17-gpt-robot-reply-live.md) ·
+[M5Stack 순정 음성 및 MCP 안내](https://docs.m5stack.com/en/StackChan/)
+
+기존 `stackchan-pc-mcp --gpt --reconnect`는 터미널 입력이 없는 환경에서도
+비공개 프로세스 환경의 `STACKCHAN_OFFICIAL_MCP_ENDPOINT`와 API 설정을
+읽을 수 있다. 같은 호스트의 고정 절대 경로인 `STACKCHAN_STATE_PATH`와
+같은 `STACKCHAN_BUDGET_NAMESPACE`를 사용하면 작업 폴더가 달라져도
+SQLite 예약을 이어간다.
+오프라인 회귀는 실행기를 두 번 시작하고 두 번째 실행의 한도 초과 질문이
+OpenAI SDK의 모의 HTTP 전송부에 도달하지 않는 것을 확인했다.
+MCP·GPT·복구 회귀 146개를 통과했다. 새 호스트는 연결하거나 배포하지 않았다.
+
+### M5Stack ESPHome과 Home Assistant에서 OpenAI 음성 대화 실행
+
+M5Stack이 공개한 K151 음성 펌웨어의 소스에는 `Hi StackChan` 모델,
+본체 마이크·스피커와 Home Assistant Assist 연결, 재호출 시 대화 또는
+안내음을 중단하는 분기가 있다. 앞면 터치 중단의 실물 동작은 미확인이다.
+Home Assistant의 OpenAI 통합에서 음성 인식, 대화 에이전트, 음성 합성을
+선택할 수 있다. 상시 Home Assistant 호스트가 필요하고, 이 프로젝트의
+별도 유료 요청 한도는 그 통합에 자동으로 적용되지 않는다.
+[M5Stack 공개 음성 설정](https://github.com/m5stack/esphome-yaml/blob/ef4542ab698daf3ceca1784afd5947a344733162/common/stackchan-voice-assistant-base.yaml) ·
+[Home Assistant OpenAI 통합](https://www.home-assistant.io/integrations/openai_conversation/)
+
+공개 배포본만 내려받아 GitHub의 SHA-256, ESP32-S3 앱 봉투, 파티션 표
+체크섬을 확인했다. 각 `.ota.bin`은 같은 배포본의 `.factory.bin` 안
+`0x10000`에 정확히 들어 있었다.
+
+| 공개 배포 | factory 이미지 길이와 SHA-256 | 오프라인 모형에서 최초 쓰기 영향 범위 |
+| --- | --- | --- |
+| 2026.3.0 | 5,126,528바이트 · `25e16c82b0a239f3becf6bcc98e81790ff9168bf407651ca6c9d805c19bfbc53` | `[0x000000, 0x4E4000)` |
+| 2026.11.0 사전 공개판 | 3,293,584바이트 · `a4488b77b9e75d740efcae6c7a50a59af90fe513089f9a53f110c4fd711c2924` | `[0x000000, 0x325000)` |
+
+2026.3.0의 공개 파일은 릴리스 태그보다 늦게 첨부됐고 같은 태그에서
+음성 설정 소스를 찾지 못했다. 그 배포본의 소스 재현과 실물 동작은
+미검증이다.
+[M5Stack 2026.3.0](https://github.com/m5stack/esphome-yaml/releases/tag/2026.3.0) ·
+[M5Stack 2026.11.0](https://github.com/m5stack/esphome-yaml/releases/tag/2026.11.0)
+
+두 배포본 모두 순정 부트로더 범위와 파티션 표, 순정 NVS·OTA 선택
+데이터·PHY·OTA0를 덮는 범위다. 새 OTA 슬롯은 `0x10000` 및
+`0x7D0000`, 새 NVS는 `0xF90000`에서 시작한다. 검증한 16MiB 순정
+A/B 사본을 RAM에서 사용했다. 기존 한 턴용 OTA1·NVS 복구만 하면 파티션
+표가 돌아오지 않았다. 새 NVS에 쓰는 경우를 모사하자 최초 쓰기 범위만
+복구해도 전체가 일치하지 않았다. RAM에서 원본 전체를 복원하자 A/B
+기준과 일치했다. 실제 ESPHome 시험 전에는 전체 순정 복구 범위와 쓰기
+절차를 별도로 검토해야 한다.
+
+### 순정 음성 서버 변경과 K151 단독 경로
+
+고정 공개 Xiaozhi 소스에서 NVS의 OTA URL을 읽는 경로를 확인했다.
+순정 A/B의 두 앱 영역에도 관련 문자열이 있었다. 이 문자열만으로
+현재 순정 앱이 설정 변경을 지원하는지, 사설 음성 서버와 호환되는지는
+확정할 수 없다. 이 경로를 적용하더라도 호환 음성 서버가 필요하다.
+[고정 Xiaozhi의 OTA 설정 읽기](https://github.com/78/xiaozhi-esp32/blob/49b4380b3faa0ceadd28a3e78aaf0f311c46c57e/main/ota.cc#L56-L64)
+
+추가 호스트 없이 K151이 직접 OpenAI를 호출하는 작업에는 기존 독립
+펌웨어가 해당한다. 이번 작업은 다른 경로를 로컬에서 비교한 것이다.
+독립 펌웨어의 설치 판정은 HOLD다. 로봇 접속·쓰기와 유료 호출은 0회다.
+
 ## 2026-11-28 기존 기록으로 상시 재생 조건 확인
 
 기존 전원·스피커·STOP 진단 보고서 6개를 로컬에서 다시 확인했다.
