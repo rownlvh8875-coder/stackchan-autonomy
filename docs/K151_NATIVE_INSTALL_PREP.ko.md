@@ -35,10 +35,42 @@ Speech API를 사용한다. OpenAI의 종료 예정일은 이 모델이 **2027-0
 확인했다. Wyoming 구성요소의 테스트는 658개 통과, Windows 소켓
 차이로 1개 건너뜀이었고 한국어 추가 시험 1개도 통과했다. 공급자의
 Realtime 합성은 실험 기능이며 기본 로그에 전사·합성 텍스트 일부가
-포함될 수 있다. 현재 프로젝트의 지속 예산 또한 이 구성요소에 자동으로
-적용되지 않는다. 이 항목은 실제 자격 증명이나 음성으로 시험하기 전에
-해결해야 한다.
+포함될 수 있다. 이 구성요소의 기본 실행에는 프로젝트의 지속 예산이
+적용되지 않는다.
 [Wyoming 음성 처리 코드](https://github.com/roryeckel/wyoming_openai/blob/2f91ab5476b668e236eb846a63aa28b31eaf2f3a/src/wyoming_openai/handler.py)
+
+### 한국어 음성 서비스의 로그와 사용량 보호
+
+`python -m stackchan_autonomy.ha_voice`는 검토한 Wyoming 처리기를
+사용한다. `wyoming-openai==0.9.1`(커밋 `2f91ab5`),
+`wyoming==1.11.0`, `openai==3.44.0`으로 구성한 별도 Python 환경에서
+검증했다. Home Assistant가 같은 네트워크 네임스페이스에서
+`127.0.0.1:10300`에 연결하는 구성을 대상으로 한다.
+
+서비스 환경에서 `STACKCHAN_CLOUD_ENABLED`와
+`STACKCHAN_AUDIO_TRANSMISSION`을 모두 켜고 `OPENAI_API_KEY`를
+공급해야 시작할 수 있다. `STACKCHAN_STATE_PATH`는 재시작 뒤에도 같은
+파일을 쓰도록 절대 경로로 지정한다. 키는 서비스 환경에서 읽으며 작업
+폴더의 `.env`는 읽지 않는다.
+
+- STT 요청과 Realtime TTS 연결 전에 같은 SQLite 예산을 각각 한 건씩
+  예약한다. 기본 한도는 분당 2건, 시간당 30건, 24시간당 100건이다.
+  통상 음성 한 턴에 2건이며, 실패나 취소로 반환하지 않는다. 재시작
+  후에도 같은 경로와 예산 이름을 쓰면 집계가 유지된다. 저장소를 쓸 수
+  없거나 한도가 소진되면 해당 OpenAI 요청 전에 중단한다.
+- 이 서비스는 음성을 파일에 저장하지 않고, 공급자 및 Wyoming 로그를
+  끈다. 실패 상태는 고정 코드로 남기고 Home Assistant에 전달하는 오류
+  메시지에서 요청과 공급자 예외 내용을 제거한다.
+- Home Assistant의 GPT 대화 에이전트 호출은 이 예산 밖에 있다. Home
+  Assistant의 로그·음성 캐시 정책, 실물 STOP, 합성 음성의 실제 발음과
+  재생은 상시 적용 전 확인해야 한다.
+
+Home Assistant가 사용하는 이벤트 순서로 로컬 TCP의 서비스에 합성
+PCM을 보냈다. 모의 OpenAI로 한국어 전사, 24kHz PCM 응답, 한도 초과
+차단, 공급자 오류, 입력 길이 제한을 확인했다. 이 시험은 로봇을
+연결하거나 Home Assistant를 배포하거나 유료 API를 호출하지 않았다.
+[Home Assistant Wyoming STT 코드](https://github.com/home-assistant/core/blob/92da9f154079459b9e547126f9bd9fce726de16a/homeassistant/components/wyoming/stt.py) ·
+[Home Assistant Wyoming TTS 코드](https://github.com/home-assistant/core/blob/92da9f154079459b9e547126f9bd9fce726de16a/homeassistant/components/wyoming/tts.py)
 
 ### ESPHome 전환과 순정 전체 복구의 읽기 전용 검증
 
