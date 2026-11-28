@@ -40,11 +40,12 @@ def main():
     parser.add_argument("--idf", type=Path, required=True)
     parser.add_argument("--page-source", type=Path, required=True)
     parser.add_argument("--cxx", default="g++")
+    parser.add_argument("--cxx-arg", action="append", default=[])
     args = parser.parse_args()
     executable = shutil.which(args.cxx)
     if not executable:
         parser.error("a host C++ compiler is required")
-    compiler = str(Path(executable).resolve())
+    compiler = [str(Path(executable).resolve()), *args.cxx_arg]
 
     components = args.idf.resolve() / "components"
     nvs = components / "nvs_flash"
@@ -63,7 +64,7 @@ def main():
         rom = components / "esp_rom"
         subprocess.run(
             [
-                compiler,
+                *compiler,
                 "-O2",
                 "-x",
                 "c",
@@ -88,7 +89,7 @@ def main():
         ]
         subprocess.run(
             [
-                compiler,
+                *compiler,
                 "-std=c++20",
                 "-O2",
                 # The TEE allocator header uses libc malloc on the host.
