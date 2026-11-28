@@ -7,6 +7,7 @@ __pycache__/
 htmlcov/
 dist/
 build/
+/firmware/standalone/esp_app/build-conversation-review/
 *.egg-info/
 .env
 .env.*

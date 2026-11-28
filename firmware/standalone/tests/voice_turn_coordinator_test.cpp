@@ -12,6 +12,10 @@
 
 using namespace stackchan::standalone;
 
+namespace {
+std::atomic_bool* stop_during_allocation = nullptr;
+}
+
 struct FakeKv : AtomicKv {
   std::vector<uint8_t> profile, budget;
   ReadValue read(std::string_view key, size_t bound) override {
@@ -116,12 +120,13 @@ struct Fixture {
   WakeVoiceEntry entry{session, enrolled, ledger, api, speaker,
                        stop, consent, trusted, speaker_busy};
   MicFrameBridge bridge{mic, stop, speaker_busy};
-  VoiceTurnCoordinator controller{session, ledger, entry, bridge, audio,
-                                  stop, consent, speaker_busy};
+  VoiceTurnCoordinator controller;
   VoiceModelConfig models{"stt_test", "gpt_test", "tts_test", "voice_test"};
   uint64_t epoch = 0;
 
-  Fixture() {
+  explicit Fixture(QuestionCapture::Allocator allocate=QuestionCapture::allocate_host_pcm)
+      : controller{session, ledger, entry, bridge, audio, stop, consent,
+                   speaker_busy, allocate} {
     // Exercise the actual local MFCC/DTW wake matching path with a synthetic
     // frequency fixture; this is NOT an acoustic Korean recognizer trial.
     static const std::vector<int16_t> wake_pcm = [] {
@@ -155,6 +160,24 @@ struct Fixture {
 };
 
 int main() {
+  {
+    Fixture x([]() noexcept -> QuestionCapture::Buffer { return {nullptr,nullptr}; });
+    assert(!x.controller.arm(x.epoch,1120));
+    assert(x.controller.faulted() && x.session.state()==State::stopped);
+    assert(x.hardware.mic_on_calls==0 && x.mic.calls==0 && x.api.calls==0);
+    assert(x.ledger.reserved_conversations()==0);
+  }
+  {
+    Fixture x([]() noexcept {
+      stop_during_allocation->store(true);
+      return QuestionCapture::allocate_host_pcm();
+    });
+    stop_during_allocation=&x.stop;
+    assert(!x.controller.arm(x.epoch,1120));
+    assert(x.controller.faulted() && x.session.state()==State::stopped);
+    assert(x.hardware.mic_on_calls==0 && x.mic.calls==0 && x.api.calls==0);
+    stop_during_allocation=nullptr;
+  }
   {
     Fixture x;
     assert(!x.controller.arm(x.epoch + 1, 1120));

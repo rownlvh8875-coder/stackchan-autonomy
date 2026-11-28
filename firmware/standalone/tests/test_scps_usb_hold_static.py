@@ -37,3 +37,20 @@ def test_sas_display_requires_explicit_lvgl_mutex_evidence():
     assert "bool poll_once(uint64_t now_ms,bool lvgl_lock_held)" in header
     assert "trusted_lcd_,true,lvgl_lock_held" in source
     assert "process(*received.frame,now,lvgl_lock_held)" in source
+
+
+def test_only_the_physical_lcd_review_can_arm_head_confirmation():
+    root = Path(__file__).resolve().parents[1]
+    usb = (root / "esp_app" / "main" / "k151_scps_usb.cpp").read_text()
+    usb_header = (root / "esp_app" / "main" / "k151_scps_usb.hpp").read_text()
+    view_header = (root / "esp_app" / "main" / "k151_setup_lvgl.hpp").read_text()
+    process = usb.split("::process(", 1)[1].split("::poll_once(", 1)[0]
+    poll = usb.split("::poll_once(", 1)[1].split("::finalize_after_touch(", 1)[0]
+    assert "begin_pairing_review(" in process
+    assert "start_scps_final_touch(" not in process
+    assert "arm_second_touch(" not in usb_header
+    assert "poll_pairing_review(" not in view_header.split(" private:", 1)[0]
+    assert poll.index("display_.poll_pairing_review(") < poll.index(
+        "touch_.start_scps_final_touch("
+    )
+    assert "review==K151SetupLvgl::ReviewResult::approved" in poll

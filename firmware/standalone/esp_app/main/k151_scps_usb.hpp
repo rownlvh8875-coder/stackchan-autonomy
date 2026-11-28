@@ -15,6 +15,10 @@
 
 namespace stackchan::standalone {
 
+#ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
+bool k151_probe_scps_tx();
+#endif
+
 class K151ScpsUsbPort final {
  public:
   static const char* compiled_link_marker();
@@ -36,14 +40,13 @@ class K151ScpsUsbPort final {
   // PC hello is processed. False means no display update and a hard fault.
   bool poll_once(uint64_t now_ms,bool lvgl_lock_held);
 
-  // NEVER called from received USB frames. Only a trusted *local* screen
-  // controller, after human SAS comparison, may begin the second hold.
-  bool arm_second_touch(uint64_t now_ms,bool local_ui_reviewed);
   // Only the owner task calls this after polling Si12T and consuming a real
   // 3-second head-touch gesture. Sole path to RAM-only credential commit.
   bool finalize_after_touch(uint64_t now_ms);
+  // Deliver the terminal reply and give up USB before the voice handoff.
+  bool close_completed_transport();
 
-  bool shutdown();   // Must occur on installing core, may drop queued TX.
+  bool shutdown();   // Returns resource release status, even after a protocol fault.
   bool running() const { return running_ && !faulted_; }
   bool completed() const { return state_==State::complete; }
   bool faulted() const { return faulted_; }

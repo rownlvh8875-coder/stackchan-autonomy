@@ -1,0 +1,259 @@
+{
+  "status": "PREPARED_NOT_INSTALLED",
+  "image": {
+    "app_version": "c991ec9523d6",
+    "image_sha256": "128969c002b9b1242679baf1658b66951fe7c7c076b00e573dd221d34ff5aa17",
+    "elf_sha256_bound_to_image": "7d18bf169b9292812636c9df022616425f345b62903f28d5f6f079e70a85a9c4",
+    "write_offset": 5308416,
+    "write_bytes": 185744,
+    "erase_span_bytes": 188416,
+    "slot_bytes": 5177344,
+    "slot_occupied_by_factory_app": true,
+    "active_or_spare_slot_proven": false,
+    "partition_table_changed": false,
+    "nvs_otadata_assets_changed": false,
+    "install_authorized": false,
+    "operating_admission": false,
+    "physical_boot_inference_or_tls_validated": false,
+    "selected_partition": "ota_1",
+    "selected_partition_type": 0,
+    "selected_partition_subtype": 17,
+    "build_partition_csv_sha256": "9c6759d2e82ba2433c41ce0eba252fb0a2870b09ff44bd6269845de32c0e6815",
+    "selected_write_matches_build_slot": true,
+    "current_device_table_verified": false,
+    "kind": "READONLY_BOARD_PROBE_NOT_OPERATIONAL",
+    "device_configuration_writes": false,
+    "gpio_mux_changes_after_start": true,
+    "hardware_readback_validated": false,
+    "power_mute_or_audio_readiness_proven": false,
+    "source_head": "c991ec9523d6a82c6908c9aa4bade5b8fdb62991",
+    "code_head": "36c4e98ed1b41aa04e80c7d662986649f29259e5",
+    "idf_commit": "fff9895c82d744c7237be8847347bdd1b07c6643",
+    "artifact_id": 14682032410,
+    "artifact_zip_sha256": "b208f8b2928f776a0c6081649112f12a4446bce908305f9b78b915ad1abd2b86",
+    "license_notices_verified": 50,
+    "device_accessed": false
+  },
+  "ci": {
+    "code_head": "36c4e98ed1b41aa04e80c7d662986649f29259e5",
+    "passed": 8,
+    "total": 9,
+    "runs": [
+      {
+        "run_id": 44844335376,
+        "jobs": [
+          {
+            "job_id": 136660231144,
+            "name": "ubuntu-24.04 / Python 3.11",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          },
+          {
+            "job_id": 136660231453,
+            "name": "ubuntu-24.04 / Python 3.12",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          },
+          {
+            "job_id": 136660231536,
+            "name": "windows-latest / Python 3.11",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          },
+          {
+            "job_id": 136660231539,
+            "name": "windows-latest / Python 3.12",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          }
+        ]
+      },
+      {
+        "run_id": 44844341081,
+        "jobs": [
+          {
+            "job_id": 136660250179,
+            "name": "windows-latest / Python 3.11",
+            "status": "completed",
+            "conclusion": "failure",
+            "failed_steps": [
+              "Offline test suite"
+            ]
+          },
+          {
+            "job_id": 136660250357,
+            "name": "ubuntu-24.04 / Python 3.11",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          },
+          {
+            "job_id": 136660250400,
+            "name": "windows-latest / Python 3.12",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          },
+          {
+            "job_id": 136660255206,
+            "name": "ubuntu-24.04 / Python 3.12",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          }
+        ]
+      },
+      {
+        "run_id": 44844341123,
+        "jobs": [
+          {
+            "job_id": 136660249862,
+            "name": "ESP-IDF v6.1 / ESP32-S3 (never install)",
+            "status": "completed",
+            "conclusion": "success",
+            "failed_steps": []
+          }
+        ]
+      }
+    ],
+    "failed_job": 136660250179,
+    "failure": {
+      "test": "test_live_heartbeat_renews_ownership_until_close",
+      "error": "StateUnavailable",
+      "passed_tests": 494,
+      "failed_tests": 1,
+      "skipped_tests": 2,
+      "wall_s": 187.42,
+      "phase": "Offline test suite; virtual soak not run",
+      "sqlite_errorcode_or_stage_available": false,
+      "root_cause_confirmed": false
+    },
+    "windows_soaks": [
+      {
+        "job": 136660231536,
+        "passed": true,
+        "cycles": 2880,
+        "wall_elapsed_s": 218.20299999999997,
+        "cloud_requests": 0,
+        "remaining_tasks": 0,
+        "interruption_count": 0,
+        "sqlite_commit_max_s": 0.8370055999999977,
+        "loop_lag_max_s": 0.04929220000002488
+      },
+      {
+        "job": 136660231539,
+        "passed": true,
+        "cycles": 2880,
+        "wall_elapsed_s": 232.10900000000004,
+        "cloud_requests": 0,
+        "remaining_tasks": 0,
+        "interruption_count": 1,
+        "sqlite_commit_max_s": 0.8569171000000324,
+        "loop_lag_max_s": 1.9834357000000864
+      },
+      {
+        "job": 136660250400,
+        "passed": true,
+        "cycles": 2880,
+        "wall_elapsed_s": 259.92100000000005,
+        "cloud_requests": 0,
+        "remaining_tasks": 0,
+        "interruption_count": 0,
+        "sqlite_commit_max_s": 1.8915976000000683,
+        "loop_lag_max_s": 0.0443124000000239
+      }
+    ],
+    "event_loop_interruption": [
+      {
+        "operation": "lease_renew",
+        "stage": "sqlite_body",
+        "elapsed_s": 0.022916300000019874
+      }
+    ],
+    "reruns": 0
+  },
+  "local_mock": {
+    "passed": true,
+    "cycles": 120,
+    "measured_cycles": 20,
+    "wall_elapsed_s": 3.2969999999986612,
+    "cloud_requests": 0,
+    "remaining_tasks": 0,
+    "failure": null,
+    "max_cycle_duration_s": 0.04700000000593718,
+    "max_cycle_gap_s": 0.06300000000192085,
+    "stages": {
+      "sqlite_begin": 0.0007027999963611364,
+      "sqlite_body": 0.002157199996872805,
+      "sqlite_close": 0.00026839999918593094,
+      "sqlite_commit": 0.0033570999949006364,
+      "sqlite_connect": 0.0024515000040992163,
+      "sqlite_schema": 8.879999950295314e-05,
+      "storage_delivery": 0.0008709000030648895,
+      "storage_executor_wait": 0.007613199995830655,
+      "storage_operation": 0.014840499999991152,
+      "storage_serial_wait": 3.119999746559188e-05
+    },
+    "loop_lag_max_s": 0.037292500004696194,
+    "interruption_count": 0,
+    "ci_stall_reproduced": false,
+    "device_accessed": false,
+    "new_write_authorized": false
+  },
+  "controlled_contention": {
+    "kind": "CONTROLLED_MOCK_CONTENTION_NOT_CI_ROOT_CAUSE",
+    "denied": true,
+    "elapsed_s": 0.35899999999674037,
+    "errors": [
+      {
+        "operation": "BEGIN",
+        "sqlite_errorcode": 5,
+        "sqlite_errorname": "SQLITE_BUSY"
+      }
+    ],
+    "timing": {
+      "stages": {
+        "sqlite_begin": {
+          "count": 1,
+          "total_s": 0.34899310000037076,
+          "max_s": 0.34899310000037076
+        },
+        "sqlite_close": {
+          "count": 1,
+          "total_s": 5.6400000175926834e-05,
+          "max_s": 5.6400000175926834e-05
+        },
+        "sqlite_connect": {
+          "count": 1,
+          "total_s": 0.0005826000051456504,
+          "max_s": 0.0005826000051456504
+        }
+      },
+      "operations": {},
+      "interruption_count": 0,
+      "interruptions": [],
+      "loop_lag_max_s": 0.0,
+      "loop_samples": 0
+    },
+    "device_accessed": false,
+    "limits_changed": false
+  },
+  "local_root": [
+    495,
+    2
+  ],
+  "local_standalone": [
+    550,
+    5
+  ],
+  "device_accessed": false,
+  "paid_api_called": false,
+  "real_audio_recorded": false,
+  "physical_wake_or_standalone_gpt_validated": false,
+  "new_install_approved": false,
+  "fresh_factory_face_observed": false
+}

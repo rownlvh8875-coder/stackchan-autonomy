@@ -3,6 +3,7 @@
 #pragma once
 #include "voice_api_bridge.hpp"
 #include "k151_https_voice.hpp"
+#include "k151_realtime_speech.hpp"
 #include "k151_wifi_time.hpp"
 #include "k151_voice_decode.hpp"
 #include <atomic>
@@ -17,8 +18,9 @@ class K151HttpChannel final : public VoiceHttpChannel {
  public:
   K151HttpChannel(const K151WifiTimePort& network,
                   const std::atomic_bool& owner_consent,
+                  const std::atomic_bool& local_owner,
                   const std::atomic_bool& physical_stop)
-      : network_(network), consent_(owner_consent), stop_(physical_stop) {}
+      : network_(network), consent_(owner_consent), owner_(local_owner), stop_(physical_stop) {}
   static const char* compiled_link_marker();
   bool post_once(const VoiceApiRequest& request,
                  const std::function<bool()>& spend_dispatch,
@@ -27,8 +29,10 @@ class K151HttpChannel final : public VoiceHttpChannel {
  private:
   const K151WifiTimePort& network_;
   const std::atomic_bool& consent_;
+  const std::atomic_bool& owner_;
   const std::atomic_bool& stop_;
   K151HttpsVoicePort http_;
+  K151RealtimeSpeechPort realtime_;
 };
 
 class K151ReplyCodec final : public VoiceReplyCodec {
@@ -45,12 +49,12 @@ class K151ReplyCodec final : public VoiceReplyCodec {
   }
 };
 
-// A future owner-controlled runtime may construct a single session-scoped
-// instance. No device startup path or model configuration is supplied here.
+// The local runtime owns a single session-scoped instance.
 class K151VoiceApiAdapter final {
  public:
   K151VoiceApiAdapter(const K151WifiTimePort& network,
                       const std::atomic_bool& consent,
+                      const std::atomic_bool& local_owner,
                       const std::atomic_bool& stop);
   static const char* compiled_link_marker();
   VoiceApiPort& api() { return binding_; }

@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     control_resource: str = Field(default="stackchan:default", min_length=1, max_length=200)
     lease_ttl_s: float = Field(default=10, ge=0.1, le=300)
     budget_namespace: str = Field(default="openai:default", min_length=1, max_length=200)
+    budget_require_existing: bool = False
     mcp_url: str = "http://127.0.0.1:8767/mcp"
 
     @classmethod

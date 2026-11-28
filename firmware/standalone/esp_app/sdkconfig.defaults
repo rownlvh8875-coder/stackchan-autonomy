@@ -1,6 +1,9 @@
-# Development target only. This generated partition layout is NOT K151 stock.
+# Development target only. Check size against the observed K151 slot geometry.
+# Never flash the generated partition table or the HOLD image.
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../board_probe/partitions.csv"
 # No Wi-Fi credentials, API keys, OTA, or flashing options are baked in.
 
 # Keep SCFG USB Serial/JTAG separate from console and logs.
@@ -10,6 +13,9 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 # HTTPS certificate-chain + hostname validation in dormant fixed-host transport.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
+CONFIG_WS_TRANSPORT=y
 
 # The Wi-Fi adapter additionally sets WIFI_STORAGE_RAM + init.nvs_enable=0.
 CONFIG_ESP_WIFI_NVS_ENABLED=n
+# Renew wall time before the 15-minute admission window expires.
+CONFIG_LWIP_SNTP_UPDATE_DELAY=600000

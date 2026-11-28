@@ -1,0 +1,166 @@
+{
+  "kind": "K151_SYNTHETIC_WIRE_MEMORY_LIVE",
+  "date_kst": "2026-11-21",
+  "source_head": "f4878fa8b91b8b0b2d2514c81dc1fc1f37355f6b",
+  "actual_ci_checkout": "69fbc67c9bdbd6e04af22da11699bf5683465910",
+  "image": {
+    "sha256": "8f10313f9a086f5f5a515f1dff0f2492f9af968e41b8892834a5d4a71e6ad9a5",
+    "bytes": 633408,
+    "write_offset": "0x510000",
+    "write_exclusive_end": "0x5AAA40",
+    "erase_exclusive_end": "0x5AB000",
+    "erase_bytes": 634880,
+    "write_seconds": 11.062,
+    "independent_verify": true
+  },
+  "restore": {
+    "sha256": "39280cbec8d01362c559cedce7d8cd088d951096a5d8f045ead27fe6bf9038fb",
+    "bytes": 5177344,
+    "span": "[0x510000,0xA00000)",
+    "write_seconds": 86.109,
+    "independent_verify": true,
+    "three_point_partition_table_and_ota_digest_match": true,
+    "factory_boot_requested": true,
+    "factory_ui_status": "PENDING_USER_UI_CONFIRMATION",
+    "usb_pnp_after_reboot": {
+      "port": "COM3",
+      "status": "OK"
+    }
+  },
+  "backups": {
+    "matching_full_copies": 3,
+    "each_bytes": 16777216,
+    "sha256": "c1241a7c87145ee8b9569cfbcfbb1f8c289641856f9b9b5ddf2ccd565019543e"
+  },
+  "scope": {
+    "flash_write_commands": 2,
+    "commanded_resets": 4,
+    "local_starts": 1,
+    "serial_body_saved": false,
+    "real_audio_captured": false,
+    "paid_api_requests": 0
+  },
+  "heap": {
+    "speech_overlap_vs_model_resident_psram_used": 2318348,
+    "samples": [
+      {
+        "stage": "baseline",
+        "psram_free": 8385164,
+        "internal_min": 306696,
+        "psram_largest": 8257536,
+        "internal_free": 371427,
+        "internal_largest": 249856,
+        "psram_min": 8385164
+      },
+      {
+        "stage": "model_resident",
+        "psram_free": 8047576,
+        "internal_min": 346259,
+        "psram_largest": 7995392,
+        "internal_free": 354283,
+        "internal_largest": 241664,
+        "psram_min": 8046228
+      },
+      {
+        "stage": "model_question_json_decoded",
+        "psram_free": 7400400,
+        "internal_min": 346259,
+        "psram_largest": 7077888,
+        "internal_free": 354283,
+        "internal_largest": 241664,
+        "psram_min": 6867912
+      },
+      {
+        "wire_probe": "json",
+        "body_bytes": 262144,
+        "decoded_pcm_capacity_bytes": 0,
+        "body_capacity_bytes": 262144,
+        "body_in_psram": true,
+        "decoded_pcm_in_psram": false
+      },
+      {
+        "stage": "model_question_wire_and_decoded_pcm",
+        "psram_free": 5729228,
+        "internal_min": 346259,
+        "psram_largest": 5636096,
+        "internal_free": 354283,
+        "internal_largest": 241664,
+        "psram_min": 5729228
+      },
+      {
+        "wire_probe": "speech",
+        "body_bytes": 960000,
+        "decoded_pcm_capacity_bytes": 960000,
+        "body_capacity_bytes": 960000,
+        "body_in_psram": true,
+        "decoded_pcm_in_psram": true
+      },
+      {
+        "stage": "model_question_tts",
+        "psram_free": 6694860,
+        "internal_min": 346259,
+        "psram_largest": 6684672,
+        "internal_free": 354283,
+        "internal_largest": 241664,
+        "psram_min": 5729228
+      },
+      {
+        "chunk_samples": 512,
+        "tts_bytes": 960000,
+        "question_bytes": 384000,
+        "tts_in_psram": true,
+        "question_in_psram": true
+      },
+      {
+        "stage": "synthetic_inference",
+        "psram_free": 6694860,
+        "internal_min": 346259,
+        "psram_largest": 6684672,
+        "internal_free": 354283,
+        "internal_largest": 241664,
+        "psram_min": 5729228
+      },
+      {
+        "result": "FINITE_BENCH_COMPLETED",
+        "max_detect_us": 7143,
+        "over_100ms": 0,
+        "chunks": 64,
+        "synthetic_matches": 0,
+        "tls_measured": false,
+        "operating_admission": false,
+        "wire_decoders_exercised": true
+      },
+      {
+        "stage": "after_cleanup",
+        "psram_free": 8385136,
+        "internal_min": 346259,
+        "psram_largest": 8257536,
+        "internal_free": 371339,
+        "internal_largest": 249856,
+        "psram_min": 5729228
+      },
+      {
+        "bench": "HOLD_UNTIL_RESET",
+        "operating_admission": false
+      }
+    ]
+  },
+  "limits": {
+    "tls_measured": false,
+    "physical_audio_measured": false,
+    "physical_stop_measured": false,
+    "actual_wake_recognition_measured": false,
+    "standalone_gpt_turn_measured": false,
+    "operating_admission": false
+  },
+  "firmware_source_ci": {
+    "head": "f4878fa8b91b8b0b2d2514c81dc1fc1f37355f6b",
+    "status": "8/9",
+    "target": "PASS",
+    "windows_pr_3_12_soak": {
+      "job": 136716500604,
+      "cycle": 911,
+      "reason": "renew_timeout"
+    }
+  }
+}

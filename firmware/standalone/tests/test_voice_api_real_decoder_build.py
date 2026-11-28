@@ -29,6 +29,8 @@ def test_voice_api_real_decoder_host(tmp_path):
             str(root / "core"),
             "-I",
             str(root / "esp_app" / "main"),
+            "-I",
+            str(root / "resource_bench" / "main"),
             str(root / "esp_app" / "main" / "k151_voice_decode.cpp"),
             str(root / "tests" / "voice_api_real_decoder_test.cpp"),
             "-lcjson",

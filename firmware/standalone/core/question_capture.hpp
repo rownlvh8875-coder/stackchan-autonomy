@@ -3,15 +3,18 @@
 // A calibrated acoustic VAD and real microphone driver are still required.
 #pragma once
 
+#include "audio_wipe.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <new>
 #include <span>
-#include <vector>
 
 namespace stackchan::standalone {
 
-enum class CaptureResult { listening, speech_started, ready, rejected };
+enum class CaptureResult { listening, speech_started, ready, rejected, awaiting_quiet };
 
 class QuestionCapture final {
  public:
@@ -19,10 +22,32 @@ class QuestionCapture final {
   static constexpr size_t kMaxSamples = 192000; // 8s, same as voice API
   static constexpr size_t kMaxFrames = kMaxSamples / kFrame;
   static constexpr size_t kStartFrames = 3; // 60ms continuous energy
-  static constexpr size_t kEndFrames = 25; // 500ms silence
+  static constexpr size_t kEndFrames = 25; // 500ms below the energy threshold
+  static constexpr size_t kInitialQuietFrames = kEndFrames;
+  static constexpr uint32_t kDefaultMinRms = 300;
+  enum class Start { immediate, after_quiet };
+  using Buffer = std::unique_ptr<int16_t[], void (*)(int16_t*)>;
+  // Return exactly kMaxSamples with their matching deleter, or an empty buffer.
+  using Allocator = Buffer (*)() noexcept;
+
+  static Buffer allocate_host_pcm() noexcept {
+    return {new (std::nothrow) int16_t[kMaxSamples],
+            [](int16_t* pcm) { delete[] pcm; }};
+  }
+
   // Fixed energy threshold is only a synthetic-test policy; site calibration
   // and background-noise immunity are not provided by this class.
-  explicit QuestionCapture(uint32_t min_rms = 300) : min_rms_(min_rms) {}
+  explicit QuestionCapture(uint32_t min_rms = kDefaultMinRms,
+                           Allocator allocate = allocate_host_pcm,
+                           Start start = Start::immediate)
+      : min_rms_(min_rms), allocate_(allocate), start_(start), state_(initial_state()) {}
+  ~QuestionCapture() { wipe_pcm(used_samples()); }
+
+  bool prepare() {
+    if (state_ == CaptureResult::rejected || min_rms_ == 0) return false;
+    if (!samples_ && allocate_) samples_ = allocate_();
+    return static_cast<bool>(samples_);
+  }
 
   CaptureResult push(std::span<const int16_t> pcm, bool stop,
                      bool speaker_active) {
@@ -40,26 +65,34 @@ class QuestionCapture final {
     }
     const bool voiced = sum_sq / kFrame >=
         static_cast<uint64_t>(min_rms_) * min_rms_;
+    if (state_ == CaptureResult::awaiting_quiet) {
+      // Discard transition input. The qualifying quiet frames count against
+      // the same capture limit and are never retained as part of a question.
+      if (voiced) quiet_frames_ = 0;
+      else if (++quiet_frames_ == kInitialQuietFrames) state_ = CaptureResult::listening;
+      return state_;
+    }
+    if (!started_ && !voiced) {
+      wipe_pcm(used_samples());
+      used_ = consecutive_voice_ = 0;
+      return CaptureResult::listening;
+    }
+    if (used_ > kMaxSamples - pcm.size() || !prepare()) return reject();
+    std::copy(pcm.begin(), pcm.end(), samples_.get() + used_);
+    used_ += pcm.size();
     if (!started_) {
-      if (!voiced) {
-        consecutive_voice_ = 0;
-        return CaptureResult::listening;
-      }
-      if (consecutive_voice_ == 0) pending_.clear();
-      pending_.insert(pending_.end(), pcm.begin(), pcm.end());
       if (++consecutive_voice_ < kStartFrames) return CaptureResult::listening;
       started_ = true;
-      captured_.swap(pending_);
       state_ = CaptureResult::speech_started;
       return state_;
     }
-    if (captured_.size() > kMaxSamples - pcm.size()) return reject();
-    captured_.insert(captured_.end(), pcm.begin(), pcm.end());
     if (voiced) {
       consecutive_silence_ = 0;
     } else if (++consecutive_silence_ >= kEndFrames) {
-      captured_.resize(captured_.size() - kEndFrames * kFrame);
-      if (captured_.empty()) return reject();
+      constexpr size_t tail = kEndFrames * kFrame;
+      wipe_pcm(used_samples().last(tail));
+      used_ -= tail;
+      if (used_ == 0) return reject();
       state_ = CaptureResult::ready;
     }
     return state_;
@@ -67,32 +100,42 @@ class QuestionCapture final {
 
   std::span<const int16_t> audio() const {
     return state_ == CaptureResult::ready ?
-        std::span<const int16_t>(captured_) : std::span<const int16_t>{};
+        std::span<const int16_t>(samples_.get(), used_) : std::span<const int16_t>{};
   }
   CaptureResult status() const { return state_; }
+  Start start_policy() const { return start_; }
+  void reset(Start start) {
+    start_ = start;
+    reset();
+  }
   void reset() {
-    std::fill(captured_.begin(), captured_.end(), 0);
-    std::fill(pending_.begin(), pending_.end(), 0);
-    captured_.clear();
-    pending_.clear();
-    frames_seen_ = consecutive_voice_ = consecutive_silence_ = 0;
+    wipe_pcm(used_samples());
+    samples_.reset();
+    used_ = frames_seen_ = quiet_frames_ = consecutive_voice_ = consecutive_silence_ = 0;
     started_ = false;
-    state_ = CaptureResult::listening;
+    state_ = initial_state();
   }
  private:
+  CaptureResult initial_state() const {
+    return start_ == Start::after_quiet ? CaptureResult::awaiting_quiet : CaptureResult::listening;
+  }
+  std::span<int16_t> used_samples() { return {samples_.get(), used_}; }
   CaptureResult reject() {
     reset();
     state_ = CaptureResult::rejected;
     return state_;
   }
   uint32_t min_rms_;
-  std::vector<int16_t> captured_;
-  std::vector<int16_t> pending_;
+  Allocator allocate_;
+  Start start_;
+  Buffer samples_{nullptr, nullptr};
+  size_t used_ = 0;
   size_t frames_seen_ = 0;
+  size_t quiet_frames_ = 0;
   size_t consecutive_voice_ = 0;
   size_t consecutive_silence_ = 0;
   bool started_ = false;
-  CaptureResult state_ = CaptureResult::listening;
+  CaptureResult state_;
 };
 
 }  // namespace stackchan::standalone

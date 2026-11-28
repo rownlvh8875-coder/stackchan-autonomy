@@ -9,8 +9,24 @@ def test_hardware_hold_is_marker_only_in_app_entrypoint():
     cmake = (root / "esp_app" / "main" / "CMakeLists.txt").read_text()
     source = (root / "esp_app" / "main" / "k151_install_hold.cpp").read_text()
     guard = (root / "core" / "hardware_hold.hpp").read_text()
+    bootstrap = (root / "esp_app" / "main" / "k151_voice_bootstrap.cpp").read_text()
     assert "K151InstallHold::compiled_link_marker()" in boot
     assert '"k151_install_hold.cpp"' in cmake
+    assert '"k151_voice_bootstrap.cpp"' in cmake
+    assert '"k151_display_stop.cpp"' in cmake
+    assert "K151DisplayStop::arm(" not in boot
+    assert "K151DisplayStop::arm(board_bus_, panel_)" in bootstrap
+    assert boot.count("K151VoiceBootstrap::") == 1
+    assert "K151VoiceBootstrap::compiled_link_marker()" in boot
+    assert "K151VoiceBootstrap " not in boot
+    assert "K151OwnerSession::compiled_link_marker()" in boot
+    assert "K151OwnerSession " not in boot
+    assert '"k151_conversation_owner.cpp"' in cmake
+    assert boot.count("K151ConversationOwner::") == 1
+    assert "K151ConversationOwner::compiled_link_marker()" in boot
+    assert "init_without_erase(" not in boot
+    assert "restore_profile(" not in boot
+    assert "!K151InstallHold::device_activation_allowed()" in bootstrap
     assert "PeripheralStopSupervisor supervisor" not in boot
     assert "esp_ota_set_boot_partition(" not in boot
     assert "esp_partition_write(" not in boot

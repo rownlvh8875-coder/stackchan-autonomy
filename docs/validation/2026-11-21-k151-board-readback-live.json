@@ -1,0 +1,475 @@
+{
+  "status": "BOARD_READBACK_COMPLETE_FACTORY_SLOT_RESTORED_AND_UI_CONFIRMED",
+  "date": "2026-11-21",
+  "timezone": "Asia/Seoul",
+  "code_head": "36c4e98ed1b41aa04e80c7d662986649f29259e5",
+  "actual_ci_checkout": "c991ec9523d6a82c6908c9aa4bade5b8fdb62991",
+  "app_version": "c991ec9523d6",
+  "approved_image": {
+    "bytes": 185744,
+    "sha256": "128969c002b9b1242679baf1658b66951fe7c7c076b00e573dd221d34ff5aa17"
+  },
+  "approval": {
+    "user_message": "\uc815\uc0c1\uc774\uc57c \ub2e4\uc74c\ub2e8\uacc4\uc9c4\ud589\ud574",
+    "scope": "ONE_BOARD_READBACK_AND_FULL_ORIGINAL_SAME_SLOT_RESTORE",
+    "fresh_factory_ui_before_trial": true
+  },
+  "preflight": {
+    "flash_mb": 16,
+    "current_table_matches_original": true,
+    "current_otadata_matches_original": true,
+    "metadata_bytes_read": 12288,
+    "same_chip_each_command": true,
+    "operations": [
+      {
+        "operation": "flash-id-prewrite",
+        "returncode": 0,
+        "elapsed_s": 0.776
+      },
+      {
+        "operation": "read-table-prewrite",
+        "returncode": 0,
+        "elapsed_s": 0.794
+      },
+      {
+        "operation": "read-ota-prewrite",
+        "returncode": 0,
+        "elapsed_s": 1.015
+      }
+    ]
+  },
+  "original_slot_prewrite_verify": {
+    "original_entire_slot1_verified": true,
+    "offset": 5308416,
+    "bytes": 5177344,
+    "elapsed_s": 9.546,
+    "returncode": 0,
+    "writes_before_this_gate": 0
+  },
+  "install": {
+    "approved_scope": "ONE_BOARD_READBACK_AND_SAME_SLOT_RESTORE",
+    "offset": 5308416,
+    "write_bytes": 185744,
+    "erase_bytes": 188416,
+    "sha256": "128969c002b9b1242679baf1658b66951fe7c7c076b00e573dd221d34ff5aa17",
+    "automatic_retry": false,
+    "returncode": 0,
+    "elapsed_s": 3.936,
+    "implicit_digest_verified": true
+  },
+  "install_independent_verify": {
+    "independent_app_verify_passed": true,
+    "bytes": 185744,
+    "elapsed_s": 0.931,
+    "returncode": 0
+  },
+  "readback": {
+    "kind": "APPROVED_ONE_BOARD_READBACK",
+    "port": "COM3",
+    "fresh_nonce_observed": true,
+    "start_commands": 1,
+    "stop_commands": 0,
+    "observed_hold": true,
+    "events": [
+      {
+        "partition_present": true,
+        "running_offset": 5308416,
+        "running_size": 5177344,
+        "chip_model": 9,
+        "chip_revision": 2
+      },
+      {
+        "probe": "READBACK_COMPLETED",
+        "elapsed_us": 7142,
+        "ack": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "pmic_id_valid": 1,
+        "pmic_id": 74,
+        "pmic_ldo_valid": 1,
+        "pmic_regs": [
+          144,
+          148,
+          149,
+          151,
+          153
+        ],
+        "pmic_values": [
+          191,
+          28,
+          28,
+          28,
+          26
+        ],
+        "aw_id_valid": 1,
+        "aw_id": 35,
+        "aw_outputs_valid": 1,
+        "aw_outputs": [
+          7,
+          131
+        ],
+        "aw_directions_valid": 1,
+        "aw_directions": [
+          24,
+          12
+        ],
+        "touch_valid": 1,
+        "touch_version": [
+          100,
+          1,
+          1,
+          18,
+          0,
+          17
+        ],
+        "operating_admission": false
+      },
+      {
+        "probe": "HOLD_UNTIL_RESET",
+        "operating_admission": false
+      }
+    ],
+    "raw_serial_saved": false,
+    "real_audio_captured": false,
+    "paid_api_requests": 0,
+    "status": "READBACK_COMPLETED",
+    "elapsed_s": 0.0728,
+    "ignored_lines": 29
+  },
+  "restore_gates": {
+    "same_chip_security_size": true,
+    "table_unchanged": true,
+    "otadata_unchanged": true,
+    "diagnostic_app_unchanged": true,
+    "explicit_reset_commands_so_far": 3,
+    "metadata_bytes_read_so_far": 24576,
+    "operations": [
+      {
+        "operation": "security-before-restore",
+        "returncode": 0,
+        "elapsed_s": 0.745
+      },
+      {
+        "operation": "flash-id-before-restore",
+        "returncode": 0,
+        "elapsed_s": 0.614
+      },
+      {
+        "operation": "postbench-table-read",
+        "returncode": 0,
+        "elapsed_s": 0.824
+      },
+      {
+        "operation": "postbench-ota-read",
+        "returncode": 0,
+        "elapsed_s": 1.09
+      },
+      {
+        "operation": "postbench-app-verify",
+        "returncode": 0,
+        "elapsed_s": 0.926
+      }
+    ]
+  },
+  "restore": {
+    "offset": 5308416,
+    "bytes": 5177344,
+    "end_exclusive": 10485760,
+    "sha256": "39280cbec8d01362c559cedce7d8cd088d951096a5d8f045ead27fe6bf9038fb",
+    "same_original_slot_only": true,
+    "automatic_retry": false,
+    "returncode": 0,
+    "elapsed_s": 85.838,
+    "implicit_digest_verified": true
+  },
+  "restore_proof": {
+    "full_original_slot1_independently_verified": true,
+    "table_unchanged_all_three_points": true,
+    "otadata_unchanged_all_three_points": true,
+    "metadata_bytes_read_total": 36864,
+    "same_chip_every_command": true,
+    "operations": [
+      {
+        "operation": "restore-independent-verify",
+        "returncode": 0,
+        "elapsed_s": 9.707
+      },
+      {
+        "operation": "postrestore-table-read",
+        "returncode": 0,
+        "elapsed_s": 0.898
+      },
+      {
+        "operation": "postrestore-ota-read",
+        "returncode": 0,
+        "elapsed_s": 1.126
+      }
+    ]
+  },
+  "final_status": {
+    "returncode": 0,
+    "factory_flash_boot_reset_requested": true,
+    "explicit_reset_commands_total": 4,
+    "flash_write_commands_total": 2,
+    "full_original_slot1_restored_and_verified": true,
+    "postrestore_factory_face_observed": true,
+    "port_inventory": [
+      {
+        "port": "COM3",
+        "vid": "0x303a",
+        "pid": "0x1001"
+      }
+    ],
+    "factory_face_user_reply": "\uc5bc\uad74/\uba54\ub274\uac00 \ub3cc\uc544\uc654\uc5b4\uc694"
+  },
+  "previous_document_ci": {
+    "head": "e13124f1c80b20fd9fc0afae720f2ecc9b869ede",
+    "success": 8,
+    "total": 9,
+    "push": {
+      "run": 44845779127,
+      "success": 4,
+      "total": 4,
+      "jobs": [
+        {
+          "id": 136665007438,
+          "conclusion": "success"
+        },
+        {
+          "id": 136665007673,
+          "conclusion": "success"
+        },
+        {
+          "id": 136665007847,
+          "conclusion": "success"
+        },
+        {
+          "id": 136665007866,
+          "conclusion": "success"
+        }
+      ]
+    },
+    "pr": {
+      "run": 44845785204,
+      "success": 3,
+      "total": 4,
+      "jobs": [
+        {
+          "id": 136665029538,
+          "conclusion": "success"
+        },
+        {
+          "id": 136665029720,
+          "conclusion": "success"
+        },
+        {
+          "id": 136665029854,
+          "conclusion": "failure"
+        },
+        {
+          "id": 136665029948,
+          "conclusion": "success"
+        }
+      ]
+    },
+    "s3": {
+      "run": 44845784950,
+      "success": 1,
+      "total": 1,
+      "jobs": [
+        {
+          "id": 136665028302,
+          "conclusion": "success"
+        }
+      ]
+    },
+    "failure": {
+      "job": 136665029854,
+      "test": "test_stop_cancels_inflight_command_and_drains_waiters",
+      "phase": "FIRST_COMMAND_ENTRY_WAIT_BEFORE_STOP",
+      "error": "TimeoutError",
+      "deadline_s": 1,
+      "root_pass": 494,
+      "root_fail": 1,
+      "root_skip": 2,
+      "root_wall_s": 163.98,
+      "virtual_soak_run": false,
+      "underlying_cause_confirmed": false
+    },
+    "reruns": 0
+  },
+  "local_focused_ci_diagnostics": {
+    "test_live_heartbeat_renews_ownership_until_close": {
+      "stages": {
+        "sqlite_begin": {
+          "count": 10,
+          "total_s": 0.0018524000188335776,
+          "max_s": 0.0004961000013281591
+        },
+        "sqlite_body": {
+          "count": 10,
+          "total_s": 0.011367800012521911,
+          "max_s": 0.002242499998828862
+        },
+        "sqlite_close": {
+          "count": 10,
+          "total_s": 0.0007211999909486622,
+          "max_s": 0.00013199999375501648
+        },
+        "sqlite_commit": {
+          "count": 10,
+          "total_s": 0.022040299998479895,
+          "max_s": 0.0030860999977448955
+        },
+        "sqlite_connect": {
+          "count": 10,
+          "total_s": 0.008769100000790786,
+          "max_s": 0.0013144999975338578
+        },
+        "sqlite_schema": {
+          "count": 50,
+          "total_s": 0.0004689000124926679,
+          "max_s": 7.999999797903001e-05
+        },
+        "storage_delivery": {
+          "count": 8,
+          "total_s": 0.00185980000969721,
+          "max_s": 0.0003131000048597343
+        },
+        "storage_executor_wait": {
+          "count": 8,
+          "total_s": 0.0010394999844720587,
+          "max_s": 0.0004124999977648258
+        },
+        "storage_operation": {
+          "count": 8,
+          "total_s": 0.038007199989806395,
+          "max_s": 0.006008600001223385
+        },
+        "storage_serial_wait": {
+          "count": 8,
+          "total_s": 7.290001667570323e-05,
+          "max_s": 2.59000007645227e-05
+        }
+      },
+      "operations": {
+        "lease_acquire": 1,
+        "lease_renew": 6,
+        "other": 1
+      },
+      "interruption_count": 0,
+      "interruptions": [],
+      "loop_lag_max_s": 0.01825990000361344,
+      "loop_samples": 105
+    },
+    "test_stop_cancels_inflight_command_and_drains_waiters": {
+      "stages": {
+        "sqlite_begin": {
+          "count": 3,
+          "total_s": 0.0007942999945953488,
+          "max_s": 0.00046209999709390104
+        },
+        "sqlite_body": {
+          "count": 3,
+          "total_s": 0.0018415000013192184,
+          "max_s": 0.001248400003532879
+        },
+        "sqlite_close": {
+          "count": 3,
+          "total_s": 0.00021910000214120373,
+          "max_s": 0.0001021999996737577
+        },
+        "sqlite_commit": {
+          "count": 3,
+          "total_s": 0.007784099994751159,
+          "max_s": 0.003877199997077696
+        },
+        "sqlite_connect": {
+          "count": 3,
+          "total_s": 0.0028175999977975152,
+          "max_s": 0.0012009000056423247
+        },
+        "sqlite_schema": {
+          "count": 15,
+          "total_s": 0.0002980000135721639,
+          "max_s": 0.00010939999629044905
+        },
+        "storage_delivery": {
+          "count": 3,
+          "total_s": 0.0007464999944204465,
+          "max_s": 0.00029459999495884404
+        },
+        "storage_executor_wait": {
+          "count": 3,
+          "total_s": 0.002481999996234663,
+          "max_s": 0.002248700002382975
+        },
+        "storage_operation": {
+          "count": 3,
+          "total_s": 0.014004600008775014,
+          "max_s": 0.006047000002581626
+        },
+        "storage_serial_wait": {
+          "count": 3,
+          "total_s": 1.7800004570744932e-05,
+          "max_s": 8.09999619377777e-06
+        }
+      },
+      "operations": {
+        "lease_acquire": 1,
+        "lease_check": 1,
+        "other": 1
+      },
+      "interruption_count": 0,
+      "interruptions": [],
+      "loop_lag_max_s": 0.002030600000580307,
+      "loop_samples": 1
+    }
+  },
+  "local_focused_tests": {
+    "pass": 2,
+    "warning": 1,
+    "elapsed_s": 3.88,
+    "ci_failure_reproduced": false
+  },
+  "observed_erase_ranges": [
+    [
+      5308416,
+      5496832
+    ],
+    [
+      5308416,
+      10485760
+    ]
+  ],
+  "limits": {
+    "i2c_readback_only": true,
+    "device_configuration_writes": 0,
+    "raw_app_serial_saved": false,
+    "voice_capture_or_upload": false,
+    "mic_i2s_initialized": false,
+    "speaker_model_wifi_nvs_initialized": false,
+    "paid_api_requests": 0,
+    "nvs_read_or_write": false,
+    "partition_table_otadata_efuse_writes": 0,
+    "ram_stub_uploads": 0,
+    "full_flash_restore": false,
+    "diagnostic_repeats": 0,
+    "physical_voltage_mute_stop_verified": false,
+    "real_wake_recognition_verified": false,
+    "standalone_gpt_turn_verified": false,
+    "operating_admission": false,
+    "production_app_main": "HOLD",
+    "runtime_gap_limit_ms": 100,
+    "wake_chunk_bounds": [
+      160,
+      2048
+    ],
+    "scope": "EXPLICIT_SESSION_COMMANDS_AND_DIAGNOSTIC_APP",
+    "factory_firmware_internal_storage_writes_observed": false
+  }
+}

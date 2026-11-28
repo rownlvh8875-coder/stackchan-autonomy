@@ -84,7 +84,7 @@ bool K151SecurePcSetup::device_hello(uint64_t now,bool owner_window,
   const psa_status_t made=psa_generate_key(&attributes,&private_key_);
   psa_reset_key_attributes(&attributes);
   if(made!=PSA_SUCCESS) return fail();
-  device_hello_[0]='K';device_hello_[1]='S';device_hello_[2]='D';device_hello_[3]='1';
+  std::copy(kDeviceMagic.begin(),kDeviceMagic.end(),device_hello_.begin());
   device_hello_[4]=kProtocolVersion;
   size_t written=0;
   if(psa_export_public_key(private_key_,device_hello_.data()+5,65,&written)!=PSA_SUCCESS ||

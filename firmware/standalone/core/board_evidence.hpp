@@ -19,16 +19,90 @@ enum class Device : std::size_t {
 
 enum class PanelHint { unknown, ili9342e_candidate };
 
+// IDF uses seven-bit addresses. esp_codec_dev 1.6.2's ES7210 (0x80)
+// and AW88298 (0x6c) constants are eight-bit and its own adapter shifts them.
+constexpr std::array<std::uint16_t, 5> kProbeAddresses{0x34, 0x58, 0x38, 0x40, 0x36};
+// Only known configuration registers, not interrupt/input/clear-on-read state.
+constexpr std::array<std::uint8_t, 5> kPmicLdoRegisters{0x90, 0x94, 0x95, 0x97, 0x99};
+// The CoreS3 drawing routes ALDO1/2 to VDD_1V8/VDDA_3V3.
+constexpr std::array<std::uint8_t, 2> kPmicAldo12Registers{0x92, 0x93};
+constexpr std::uint8_t kAw9523P0ModeRegister = 0x12;
+
+// Dedicated diagnostic scope, never a board identity or audio authorization.
+constexpr bool board_probe_location_allowed(std::uint32_t address, std::size_t bytes,
+                                            bool esp32s3, std::uint16_t revision) {
+  return address == 0x510000 && bytes == 0x4f0000 && esp32s3 && revision == 2;
+}
+
 struct ReadOnlyEvidence {
   bool bus_opened = false;
   std::array<bool, static_cast<std::size_t>(Device::count)> acknowledged{};
   bool touch_version_read = false;
   std::array<std::uint8_t, 6> touch_version{};
+  bool pmic_id_read = false;
+  std::uint8_t pmic_id = 0;
+  bool pmic_ldo_read = false;
+  std::array<std::uint8_t, 5> pmic_ldo{};
+  bool pmic_aldo12_read = false;
+  std::array<std::uint8_t, 2> pmic_aldo12{};
+  bool aw9523_id_read = false;
+  std::uint8_t aw9523_id = 0;
+  bool aw9523_outputs_read = false;
+  std::array<std::uint8_t, 2> aw9523_outputs{};
+  bool aw9523_directions_read = false;
+  std::array<std::uint8_t, 2> aw9523_directions{};
+  bool aw9523_p0_mode_read = false;
+  std::uint8_t aw9523_p0_mode = 0;
   bool finished_without_bus_error = false;
+};
+
+enum class PowerSample : std::uint8_t {
+  not_seen, id_mismatch, disabled, powered_down, reset_value, invalid, sampled,
+  not_requested, skipped, read_failed,
+};
+
+struct VoltageReading {
+  PowerSample state = PowerSample::not_requested;
+  std::uint16_t mv = 0;
+};
+
+constexpr VoltageReading decode_aw88298_vdd(unsigned code) {
+  if (!code || code > 0x3ff) return {PowerSample::invalid};
+  if (code == 0x263) return {PowerSample::reset_value};
+  return {PowerSample::sampled, static_cast<std::uint16_t>((code * 6025 + 511) / 1023)};
+}
+
+constexpr const char* power_sample_name(PowerSample sample) {
+  switch (sample) {
+    case PowerSample::not_seen: return "not_seen";
+    case PowerSample::id_mismatch: return "id_mismatch";
+    case PowerSample::disabled: return "disabled";
+    case PowerSample::powered_down: return "powered_down";
+    case PowerSample::reset_value: return "reset_value";
+    case PowerSample::invalid: return "invalid";
+    case PowerSample::sampled: return "sampled";
+    case PowerSample::not_requested: return "not_requested";
+    case PowerSample::skipped: return "skipped";
+    case PowerSample::read_failed: return "read_failed";
+  }
+  return nullptr;
+}
+
+struct PowerReadback {
+  PowerSample pmic_vsys = PowerSample::not_seen;
+  std::uint16_t pmic_vsys_mv = 0;
+  PowerSample amp_vdd = PowerSample::not_seen;
+  std::uint16_t amp_vdd_mv = 0;
+  bool amp_uvls_valid = false;
+  bool amp_uvls = false;
 };
 
 constexpr std::size_t index(Device device) {
   return static_cast<std::size_t>(device);
+}
+
+constexpr bool ft6336_9342e_signature(const std::array<std::uint8_t, 6>& version) {
+  return version[0] != 0 && version[3] == 0x12 && version[5] == 0x11;
 }
 
 // M5Stack official source reads FT6336 at register 0xA3 (six bytes).
@@ -37,12 +111,10 @@ constexpr std::size_t index(Device device) {
 constexpr PanelHint panel_hint(const ReadOnlyEvidence& evidence) {
   if (!evidence.finished_without_bus_error ||
       !evidence.acknowledged[index(Device::touch_ft6336)] ||
-      !evidence.touch_version_read || evidence.touch_version[0] == 0 ||
-      evidence.touch_version[5] == 0) {
+      !evidence.touch_version_read) {
     return PanelHint::unknown;
   }
-  if (evidence.touch_version[3] == 0x12 &&
-      evidence.touch_version[5] == 0x11) {
+  if (ft6336_9342e_signature(evidence.touch_version)) {
     return PanelHint::ili9342e_candidate;
   }
   // Never infer ILI9342C from a failed/mismatched read.

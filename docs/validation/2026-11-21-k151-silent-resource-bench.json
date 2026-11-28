@@ -1,0 +1,186 @@
+{
+  "kind": "ACTUAL_K151_ONE_SILENT_SYNTHETIC_RESOURCE_BENCH_THEN_SLOT_RESTORE",
+  "date_local": "2026-11-21",
+  "timezone": "Asia/Seoul",
+  "approval": {
+    "user_message": "진행해 승인",
+    "scope": "temporary diagnostic ota_1 install; one synthetic run; same original slot restore",
+    "at": "2026-11-21T06:18:58.6180790+09:00"
+  },
+  "source_head": "ebed42c82dfc0bb661b99d9573724ac5381ce401",
+  "ci_checkout": "3510d171cc8dae81011b359d0fe258c6ef3880cd",
+  "sdk": {
+    "idf": "6.1",
+    "idf_commit": "fff9895c82d744c7237be8847347bdd1b07c6643",
+    "esp_sr": "2.4.7",
+    "model": "wn9l_histackchan_tts3",
+    "mode": "DET_MODE_90",
+    "input_hz": 16000,
+    "channels": 1,
+    "bits": 16,
+    "chunk_samples": 512
+  },
+  "hardware": {
+    "usb_vid": "303A",
+    "usb_pid": "1001",
+    "port": "COM3",
+    "chip": "ESP32-S3 QFN56 rev0.2",
+    "flash_bytes": 16777216,
+    "secure_boot": "Disabled",
+    "flash_encryption": "Disabled"
+  },
+  "backup": {
+    "original_a_b_and_separate_disk_copy_rehashed": true,
+    "full_bytes_each": 16777216,
+    "full_sha256": "c1241a7c87145ee8b9569cfbcfbb1f8c289641856f9b9b5ddf2ccd565019543e",
+    "slot1_bytes": 5177344,
+    "slot1_sha256": "39280cbec8d01362c559cedce7d8cd088d951096a5d8f045ead27fe6bf9038fb",
+    "occupied_slot1_device_digest_matched_original_before_write": true,
+    "uploaded": false
+  },
+  "installation": {
+    "write_commands": 1,
+    "offset": 5308416,
+    "file_bytes": 625968,
+    "erase_end_exclusive": 5935104,
+    "erase_bytes": 626688,
+    "app_sha256": "465cf701b8af7679dcdec7e1645cf24dc7acf180b760d3dfae2d834c96d5a21b",
+    "write_seconds_reported": 8.2,
+    "implicit_digest_verify": true,
+    "independent_verify": true
+  },
+  "bench": {
+    "status": "FINITE_BENCH_COMPLETED",
+    "elapsed_s": 1.8039,
+    "start_commands": 1,
+    "stop_commands": 0,
+    "observed_hold": true,
+    "inference": {
+      "result": "FINITE_BENCH_COMPLETED",
+      "max_detect_us": 7615,
+      "synthetic_matches": 0,
+      "chunks": 64,
+      "over_100ms": 0,
+      "tls_measured": false,
+      "operating_admission": false
+    },
+    "placement": {
+      "tts_bytes": 960000,
+      "question_bytes": 384000,
+      "chunk_samples": 512,
+      "tts_in_psram": true,
+      "question_in_psram": true
+    },
+    "heap": {
+      "baseline": {
+        "stage": "baseline",
+        "psram_min": 8385164,
+        "internal_largest": 249856,
+        "psram_largest": 8257536,
+        "internal_min": 306696,
+        "psram_free": 8385164,
+        "internal_free": 371427
+      },
+      "model_resident": {
+        "stage": "model_resident",
+        "psram_min": 8046228,
+        "internal_largest": 241664,
+        "psram_largest": 7995392,
+        "internal_min": 346259,
+        "psram_free": 8047576,
+        "internal_free": 354283
+      },
+      "model_question_tts": {
+        "stage": "model_question_tts",
+        "psram_min": 6694860,
+        "internal_largest": 241664,
+        "psram_largest": 6684672,
+        "internal_min": 346259,
+        "psram_free": 6694860,
+        "internal_free": 354283
+      },
+      "synthetic_inference": {
+        "stage": "synthetic_inference",
+        "psram_min": 6694860,
+        "internal_largest": 241664,
+        "psram_largest": 6684672,
+        "internal_min": 346259,
+        "psram_free": 6694860,
+        "internal_free": 354283
+      },
+      "after_cleanup": {
+        "stage": "after_cleanup",
+        "psram_min": 6694860,
+        "internal_largest": 249856,
+        "psram_largest": 8257536,
+        "internal_min": 346259,
+        "psram_free": 8385136,
+        "internal_free": 371339
+      }
+    },
+    "sanitized_receive_sha256": "b767029e806900d7b35801ce1195f7caf0fbd24d80515b058708edeed6c6ad6a",
+    "raw_serial_saved": false
+  },
+  "derived_heap_deltas_bytes": {
+    "baseline_to_model_internal_free_reduction": 17144,
+    "baseline_to_model_psram_free_reduction": 337588,
+    "model_to_pcm_psram_free_reduction": 1352716,
+    "post_cleanup_internal_free_difference_from_baseline": 88,
+    "post_cleanup_psram_free_difference_from_baseline": 28
+  },
+  "restoration": {
+    "write_commands": 1,
+    "offset": 5308416,
+    "bytes": 5177344,
+    "end_exclusive": 10485760,
+    "write_seconds_reported": 69.6,
+    "implicit_digest_verify": true,
+    "independent_verify": true,
+    "partition_table_and_otadata_equal_prewrite_postbench_postrestore": true,
+    "final_flash_boot_reset_command_passed": true,
+    "post_reset_com3_present_ok": true,
+    "factory_face_return": "CONFIRMED_BY_USER_BEFORE_SUBSEQUENT_BOARD_TRIAL",
+    "full16mb_restore_performed": false,
+    "factory_face_followup": {
+      "date": "2026-11-21",
+      "user_message": "정상이야 다음단계진행해"
+    }
+  },
+  "limits": {
+    "real_wake_phrase_recognition_tested": false,
+    "microphone_initialized": false,
+    "speaker_or_motor_commands": 0,
+    "wifi_or_real_tls_tested": false,
+    "paid_api_requests": 0,
+    "real_voice_files": 0,
+    "real_voice_uploaded": false,
+    "question_tls_tts_combined_peak_measured": false,
+    "operating_admission": false,
+    "production_app_main": "HOLD",
+    "runtime_gap_limit_ms_unchanged": 100,
+    "chunk_bounds_unchanged": [
+      160,
+      2048
+    ]
+  },
+  "device_totals": {
+    "flash_write_commands": 2,
+    "explicit_chip_reset_commands": 4,
+    "raw_metadata_read_bytes": 36864,
+    "nvs_read": false,
+    "nvs_or_partition_table_or_efuse_writes": 0,
+    "ram_stub_uploads": 0,
+    "bench_repeats": 0
+  },
+  "audit_note": "Original slot digest verification succeeded. Wrapper initially expected the word verified, falsely rejected Verification successful (digest matched); corrected from saved successful log without a device verify rerun.",
+  "ci_for_executed_code": {
+    "success": 8,
+    "failure": 1,
+    "push_run": 44769990066,
+    "pr_run": 44770003494,
+    "s3_run": 44770003545,
+    "failed_windows_job": 136404806243,
+    "reason": "cycle2763 renew_timeout; lease_renew interrupted inside SQLite COMMIT6.6713888s; I/O vs OS descheduling unresolved",
+    "rerun": false
+  }
+}

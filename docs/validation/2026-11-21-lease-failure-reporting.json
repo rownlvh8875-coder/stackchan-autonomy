@@ -1,0 +1,152 @@
+{
+  "record_kind": "actual_8a34bc1_failure_and_pre_push_reporting_validation",
+  "date": "2026-11-21",
+  "firmware_source_head": "8a34bc1793ecb7846c264605100d19fd1f3f09c4",
+  "original_ci_result": "7/9 success",
+  "runs": [
+    {
+      "run": 44857963485,
+      "jobs": [
+        {
+          "id": 136704484345,
+          "name": "windows-latest / Python 3.12",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "id": 136704484538,
+          "name": "ubuntu-24.04 / Python 3.11",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 136704484565,
+          "name": "windows-latest / Python 3.11",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 136704484683,
+          "name": "ubuntu-24.04 / Python 3.12",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 44857968647,
+      "jobs": [
+        {
+          "id": 136704501914,
+          "name": "ubuntu-24.04 / Python 3.12",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 136704502071,
+          "name": "ubuntu-24.04 / Python 3.11",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 136704502081,
+          "name": "windows-latest / Python 3.11",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 136704502085,
+          "name": "windows-latest / Python 3.12",
+          "status": "completed",
+          "conclusion": "failure"
+        }
+      ]
+    },
+    {
+      "run": 44857968630,
+      "jobs": [
+        {
+          "id": 136704501371,
+          "name": "ESP-IDF v6.1 / ESP32-S3 (never install)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "root_failure": {
+    "job": 136704484345,
+    "test": "test_valid_verification_uses_remaining_lifetime_not_a_fixed_fraction",
+    "exception": "StateUnavailable control verification timed out",
+    "pass": 494,
+    "fail": 1,
+    "skip": 2,
+    "seconds": 148.74,
+    "ttl_s": 1.5,
+    "injected_sleep_s": 0.6,
+    "stage_trace_unavailable": true
+  },
+  "soak_failure": {
+    "job": 136704502085,
+    "passed": false,
+    "cycle": 1618,
+    "wall_s": 190.359,
+    "reason": "check_timeout",
+    "violations": [
+      "engine_failure"
+    ],
+    "completed_commit_max_s": 3.0079481,
+    "loop_lag_max_s": 0.0504251,
+    "interrupted_commit_elapsed_s": 4.4934378,
+    "check_serial_wait_elapsed_s": 2.1306888,
+    "cloud_requests": 0,
+    "remaining_tasks": 0
+  },
+  "target": {
+    "job": 136704501371,
+    "compile_link": "PASS",
+    "build_completions": 3,
+    "pinned_idf": "fff9895c82d744c7237be8847347bdd1b07c6643",
+    "installed": false
+  },
+  "local_probe": {
+    "invocations": 1,
+    "result": "PASS, not reproduced",
+    "seconds": 0.95,
+    "ttl_s": 1.5,
+    "check_sleep_s": 0.6,
+    "sqlite_check_wall_s": 0.0032959,
+    "sqlite_check_thread_cpu_s": 0,
+    "commit_max_s": 0.0031756,
+    "loop_lag_max_s": 0.0123574,
+    "interruption": "closing heartbeat cancellation, not CI cause"
+  },
+  "reporting_delta": {
+    "original_assertions_and_limits_changed": false,
+    "production_changed": false,
+    "opt_in_test": "test_valid_verification_uses_remaining_lifetime_not_a_fixed_fraction",
+    "failure_only": true,
+    "skip_and_xfail_emit": false,
+    "operation_data_emitted": false,
+    "unconditional_print_negative_control": true,
+    "focused": {
+      "pass": 6,
+      "seconds": 4.14
+    },
+    "final_root_with_compiler": {
+      "pass": 500,
+      "skip": 2,
+      "seconds": 91.07
+    },
+    "firmware_standalone_unchanged": {
+      "pass": 625,
+      "skip": 5,
+      "seconds": 103.07
+    },
+    "ci_at_recording": "NOT_YET_PUSHED; final exact-head results in PR3/checks"
+  },
+  "failed_job_reruns": 0,
+  "device_operations": 0,
+  "paid_api": 0,
+  "root_cause": "Unresolved: physical I/O versus worker/loop OS descheduling not established"
+}

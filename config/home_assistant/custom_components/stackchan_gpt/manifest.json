@@ -1,0 +1,12 @@
+{
+  "domain": "stackchan_gpt",
+  "name": "StackChan GPT",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["conversation"],
+  "documentation": "https://github.com/rownlvh8875-coder/stackchan-autonomy",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}

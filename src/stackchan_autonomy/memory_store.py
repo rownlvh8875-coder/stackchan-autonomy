@@ -1,6 +1,5 @@
 """Versioned optional memory storage, independent of coordination and API quota."""
 
-import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from .models import (
     MemorySnapshot,
     ObservedRobotState,
 )
+from .sqlite_runtime import sqlite3
 from .state_store import finite_time
 
 

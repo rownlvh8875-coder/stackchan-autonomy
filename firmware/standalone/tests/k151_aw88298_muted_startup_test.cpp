@@ -1,0 +1,371 @@
+// SPDX-License-Identifier: MIT
+// Real AW88298 codec from esp_codec_dev 1.6.2 with an emulated I2C device.
+#include "k151_codec_control.hpp"
+#include <aw88298_dac.h>
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <string_view>
+
+using namespace stackchan::standalone;
+namespace {
+audio_codec_ctrl_if_t i2c{};
+std::array<uint16_t, 256> registers{};
+std::string_view scenario;
+int writes = 0;
+bool power_seen = false, mute_seen = false, volume_seen = false;
+bool standby_request = false;
+int standby_mute_writes = 0;
+bool activating = false;
+bool allowed = true;
+bool unmuted = false;
+int64_t now_us = 0;
+uint16_t injected_clock_protection = 0;
+
+bool is_open(const audio_codec_ctrl_if_t* h) { return h == &i2c; }
+int read(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* output, int bytes) {
+  assert(h == &i2c && address_bytes == 1 && bytes == 2);
+  if (activating) assert(reg != 0x02); // Leave clear-on-read SYSINT untouched.
+  if (scenario == "read_failure" && reg == 0x05) return ESP_CODEC_DEV_READ_FAIL;
+  if (activating && reg == 0x01 && (registers[0x04] & 0x43) == 0x42 &&
+      scenario == "start_clock_read_failure")
+    return ESP_CODEC_DEV_READ_FAIL;
+  if (standby_request && scenario == "standby_mute_read_fail" && reg == 0x05)
+    return ESP_CODEC_DEV_READ_FAIL;
+  auto value = registers.at(reg);
+  if (activating && reg == 0x01 && (registers[0x04] & 0x43) == 0x42 &&
+      scenario.starts_with("start_uvls_")) {
+    if (now_us == 0) now_us = scenario == "start_uvls_at_settle_boundary" ? 2000 : 570;
+    if (now_us < 1709 || scenario == "start_uvls_persists" ||
+        scenario == "start_uvls_at_settle_boundary")
+      value |= 0x4000;
+  }
+  if (activating && reg == 0x05 && now_us >= 2000 &&
+      (scenario == "start_uvls_reasserts_before_amp" || scenario == "start_late_uvls_without_transient"))
+    registers[0x01] |= 0x4000;
+  if (activating && reg == 0x04 && (value & 0x43) == 0x43) {
+    if (scenario == "start_revoked_at_i2s_readback") allowed = false;
+    if (scenario == "start_i2s_readback_mismatch") value &= ~0x40;
+  }
+  if (activating && reg == 0x01 && scenario.starts_with("uvls_") &&
+      (registers[0x04] & 0x43) == 0x42) {
+    now_us = scenario == "uvls_no_budget" ? 71'000 :
+             scenario == "uvls_other_protection" || scenario == "uvls_switching" ? 1200 : 2000;
+    value = scenario == "uvls_other_protection" ? 0x4019 :
+            scenario == "uvls_switching" ? 0x4111 : 0x4011;
+  }
+  if (scenario == "readback_mismatch" && reg == 0x05) value &= ~0x10;
+  auto* data = static_cast<uint8_t*>(output);
+  data[0] = static_cast<uint8_t>(value >> 8);
+  data[1] = static_cast<uint8_t>(value);
+  return ESP_CODEC_DEV_OK;
+}
+int write(const audio_codec_ctrl_if_t* h, int reg, int address_bytes, void* input, int bytes) {
+  assert(h == &i2c && address_bytes == 1 && bytes == 2);
+  ++writes;
+  const auto* data = static_cast<const uint8_t*>(input);
+  const auto word = static_cast<uint16_t>((data[0] << 8) | data[1]);
+  if (activating && reg == 0x04 && (word & 0x43) != 0x03) {
+    assert((word & ~0x43) == (registers[0x04] & ~0x43));
+    assert((registers[0x05] & 0x10) != 0 && allowed);
+    if ((word & 0x43) == 0x43) {
+      assert((registers[0x04] & 0x43) == 0x03);
+    } else if ((word & 0x43) == 0x42) {
+      assert((registers[0x04] & 0x43) == 0x43);
+      if (scenario != "start_no_clock" && scenario != "start_frozen_clock")
+        registers[0x01] = 0x0011;
+      if (scenario == "start_reference_missing") registers[0x01] = 0x0020;
+      if (scenario == "start_clock_unstable") registers[0x01] = 0x0001;
+      if (scenario == "start_clock_protection")
+        registers[0x01] = 0x2091 | injected_clock_protection; // Also ADPS and CLIPS.
+      if (scenario == "start_early_switching") registers[0x01] = 0x0111;
+    } else {
+      assert((word & 0x43) == 0x40);
+      assert((registers[0x04] & 0x43) == 0x42 && (registers[0x01] & 0x31) == 0x11);
+      assert(now_us >= 2000);
+      if (scenario != "start_no_switching") registers[0x01] |= 0x0100;
+      if (scenario == "start_fault") registers[0x01] |= 0x0008;
+      if (scenario == "start_uvls_reasserts_after_amp") registers[0x01] |= 0x4000;
+      if (scenario == "start_mute_lost") registers[0x05] &= ~0x10;
+    }
+  } else if (activating && reg == 0x05 && (word & 0x10) == 0) {
+    assert(word == (registers[0x05] & ~0x10));
+    assert((registers[0x01] & 0x0131) == 0x0111 && allowed && now_us >= 4000);
+    assert((registers[0x0c] >> 8) >= 0x60 && (registers[0x0c] >> 8) <= 0xc0);
+    unmuted = true;
+    if (scenario == "start_revoked_at_unmute") allowed = false;
+    if (scenario == "start_clock_lost_at_unmute") registers[0x01] = 0x0120;
+  } else if (scenario != "raw") {
+    if (reg == 0x04) assert((word & 0x43) == 0x03);
+    if (reg == 0x05) assert((word & 0x10) != 0);
+    if (reg == 0x0c) assert((word >> 8) >= 0x60 && (word >> 8) <= 0xc0);
+  }
+  if (scenario == "write_failure" && reg == 0x05) return ESP_CODEC_DEV_WRITE_FAIL;
+  if (standby_request && reg == 0x05) {
+    assert(!power_seen);
+    ++standby_mute_writes;
+    if (scenario == "standby_mute_write_fail") return ESP_CODEC_DEV_WRITE_FAIL;
+  }
+  if (standby_request && reg == 0x04) {
+    if (scenario == "standby_power_write_fail") return ESP_CODEC_DEV_WRITE_FAIL;
+    if (scenario != "standby_still_switching") registers[0x01] &= ~0x0100;
+  }
+  if (reg == 0x04) power_seen = true;
+  if (reg == 0x05) mute_seen = true;
+  if (reg == 0x0c) volume_seen = true;
+  registers.at(reg) = word;
+  return ESP_CODEC_DEV_OK;
+}
+int info(const audio_codec_ctrl_if_t* h, audio_codec_ctrl_info_t* out) {
+  assert(h == &i2c);
+  out->type = AUDIO_CODEC_CTRL_I2C;
+  return ESP_CODEC_DEV_OK;
+}
+}
+extern "C" void esp_codec_dev_sleep(int) { assert(false && "AW9523 owns amp reset"); }
+
+int main(int argc, char** argv) {
+  assert(argc == 2 || argc == 3);
+  scenario = argv[1];
+  if (scenario == "start_clock_protection") {
+    assert(argc == 3);
+    injected_clock_protection = static_cast<uint16_t>(std::strtoul(argv[2], nullptr, 16));
+    assert(injected_clock_protection);
+  }
+  i2c.is_open = is_open;
+  i2c.read_reg = read;
+  i2c.write_reg = write;
+  i2c.get_info = info;
+  K151CodecControl guarded{scenario == "raw" ? K151CodecControl::Profile::observe
+                                            : K151CodecControl::Profile::aw88298_muted_startup};
+  assert(guarded.attach(&i2c));
+  const auto* bus = guarded.interface();
+  aw88298_codec_cfg_t config{};
+  config.ctrl_if = bus;
+  config.reset_pin = -1;
+  config.hw_gain.pa_voltage = 5.0f;
+  config.hw_gain.codec_dac_voltage = 3.3f;
+  config.hw_gain.pa_gain = 1.0f;
+  const auto* amp = aw88298_codec_new(&config);
+  if (scenario == "raw") {
+    assert(amp && (registers[0x04] & 0x43) == 0x40 && (registers[0x05] & 0x10) == 0);
+  } else if (scenario == "read_failure" || scenario == "readback_mismatch" || scenario == "write_failure") {
+    assert(!amp && guarded.faulted() && !guarded.muted_startup_verified());
+    assert(power_seen && !volume_seen);
+    // Best-effort power-down is available to the owner, but the fault stays latched.
+    guarded.begin_cleanup();
+    const int before = writes;
+    uint8_t power_write[]{0x40, 0x40};
+    assert(bus->write_reg(bus, 0x04, 1, power_write, 2) == ESP_CODEC_DEV_OK);
+    assert(writes == before + 1 && power_write[1] == 0x40 && guarded.faulted());
+    return 0;
+  } else {
+    assert(amp && guarded.muted_startup_verified() && power_seen && mute_seen && volume_seen);
+    assert(amp->enable(amp, true) == ESP_CODEC_DEV_OK);
+    assert(amp->mute(amp, false) == ESP_CODEC_DEV_OK);
+    assert(amp->set_vol(amp, 0.0f) == ESP_CODEC_DEV_OK);
+    assert(guarded.muted_startup_verified());
+    assert((registers[0x04] & 0x43) == 0x03 && (registers[0x05] & 0x10) != 0);
+    assert((registers[0x0c] >> 8) >= 0x60);
+    if (scenario.starts_with("uvls_")) {
+      using Stage = K151SpeakerStartupStage;
+      using Power = k151::PowerSample;
+      int reads = 0;
+      int followup_reads = 0;
+      registers[0x00] = 0x1852;
+      const bool standby_uvls = scenario == "uvls_already_in_standby";
+      const bool vdd_observed = standby_uvls || scenario == "uvls_observed" ||
+                                scenario.starts_with("uvls_followup_");
+      registers[0x01] = standby_uvls ? 0x4000 : 0;
+      activating = true;
+      const auto result = guarded.start_aw88298_low_volume(
+          [] { return allowed; }, [] { return now_us; }, [] { assert(false); }, [&] {
+            ++reads;
+            assert((registers[0x04] & 0x43) == 0x42 && (registers[0x05] & 0x10));
+            if (scenario == "uvls_stop_during_read") allowed = false;
+            if (scenario == "uvls_clock_deadline") now_us = 100'000;
+            if (scenario == "uvls_clock_regression") --now_us;
+            if (vdd_observed) now_us += 700;
+            if (scenario == "uvls_followup_no_budget") now_us = 90'001;
+            if (scenario == "uvls_followup_invalid_vdd")
+              return k151::VoltageReading{Power::reset_value};
+            return k151::VoltageReading{Power::sampled, 2497};
+          }, [&]() -> std::optional<bool> {
+            ++followup_reads;
+            assert(reads == 1 && allowed && !unmuted);
+            assert((registers[0x04] & 0x43) == 0x42 && (registers[0x05] & 0x10));
+            if (scenario == "uvls_followup_stop") allowed = false;
+            if (scenario == "uvls_followup_deadline") now_us = 100'000;
+            else if (scenario == "uvls_followup_regression") --now_us;
+            else now_us += 600;
+            return true;
+          });
+      assert(!unmuted && result.stage == Stage::wait_clock);
+      assert(result.clock_wait_exit == K151ClockWaitExit::protection_active);
+      assert((result.protection_flags & 0x4000) != 0);
+      assert(result.standby_uvls == standby_uvls);
+      const bool early_unsafe = scenario == "uvls_other_protection" || scenario == "uvls_switching";
+      assert(result.uvls_after_clock_us == (scenario == "uvls_no_budget" ? 71'000 :
+                                           early_unsafe ? 1200 : 2000));
+      const bool forbidden = scenario == "uvls_no_budget" || scenario == "uvls_other_protection" ||
+                             scenario == "uvls_switching";
+      assert(reads == (forbidden ? 0 : 1));
+      if (vdd_observed) {
+        const bool invalid = scenario == "uvls_followup_invalid_vdd";
+        assert(result.vdd.state == (invalid ? Power::reset_value : Power::sampled));
+        assert(result.vdd.mv == (invalid ? 0 : 2497));
+        assert(result.vdd_after_uvls_us == (scenario == "uvls_followup_no_budget" ? 88'001 : 700));
+      } else {
+        assert(result.vdd.state == Power::skipped && result.vdd.mv == 0);
+        assert(result.vdd_after_uvls_us == -1);
+      }
+      const bool followup_attempted = vdd_observed && scenario != "uvls_followup_no_budget" &&
+                                     scenario != "uvls_followup_invalid_vdd";
+      assert(followup_reads == (followup_attempted ? 1 : 0));
+      if (standby_uvls || scenario == "uvls_observed") {
+        assert(result.uvls_after_vdd == true && result.uvls_after_vdd_us == 600);
+      } else {
+        assert(!result.uvls_after_vdd && result.uvls_after_vdd_us == -1);
+      }
+      activating = false;
+      standby_request = true;
+      power_seen = false;
+      assert(guarded.request_aw88298_standby());
+      standby_request = false;
+      assert(guarded.aw88298_standby_verified());
+    }
+    if (scenario.starts_with("start_")) {
+      registers[0x00] = 0x1852;
+      registers[0x01] = 0;
+      registers[0x05] |= 0x2000; // Unrelated bits must survive the masked writes.
+      if (scenario == "start_excess_gain") registers[0x0c] = 0x5f64;
+      if (scenario == "start_revoked_initially") allowed = false;
+      const int before = writes;
+      activating = true;
+      using Stage = K151SpeakerStartupStage;
+      using Exit = K151ClockWaitExit;
+      using Sample = K151ClockWaitSample;
+      const auto startup = guarded.start_aw88298_low_volume(
+          [] { return allowed; }, [] { return now_us; }, [] {
+            if (scenario == "start_clock_reversed") --now_us;
+            else if (scenario != "start_frozen_clock")
+              now_us += scenario == "start_no_clock" ? 1200 : 1000;
+            if (scenario == "start_revoked_while_muted" || scenario == "start_uvls_stop") allowed = false;
+          });
+      activating = false;
+      const bool success = scenario == "start_low_volume" ||
+                           scenario == "start_uvls_clears_while_muted";
+      const bool side_effect = success || scenario == "start_revoked_at_unmute" ||
+                               scenario == "start_clock_lost_at_unmute";
+      const auto stage = startup.stage;
+      assert((stage == Stage::none) == success && unmuted == side_effect);
+      const auto check_wait = [&](Exit reason, Sample sample) {
+        assert(stage == Stage::wait_clock && startup.clock_wait_exit == reason &&
+               startup.clock_wait_last == sample);
+      };
+      if (scenario == "start_late_uvls_without_transient") {
+        assert(stage == Stage::pre_amplifier_status && writes == before + 2);
+        assert(startup.settling_uvls_us == -1 && startup.clock_ready_after_uvls_us == -1);
+      }
+      if (scenario.starts_with("start_uvls_")) {
+        assert(startup.settling_uvls_us == (scenario == "start_uvls_at_settle_boundary" ? -1 : 570));
+        const bool ready = success || scenario == "start_uvls_reasserts_after_amp";
+        assert(startup.clock_ready_after_uvls_us == (ready ? 2570 : -1));
+        if (scenario == "start_uvls_persists" || scenario == "start_uvls_at_settle_boundary")
+          check_wait(Exit::protection_active, Sample::stable);
+        if (scenario == "start_uvls_stop") check_wait(Exit::admission_lost, Sample::stable);
+        if (scenario == "start_uvls_reasserts_before_amp")
+          assert(stage == Stage::pre_amplifier_status && writes == before + 2);
+        if (scenario == "start_uvls_reasserts_after_amp") assert(stage == Stage::wait_switching);
+      }
+      if (scenario == "start_no_clock") check_wait(Exit::startup_deadline, Sample::pll_unlocked);
+      if (scenario == "start_reference_missing")
+        check_wait(Exit::poll_limit, Sample::reference_missing);
+      if (scenario == "start_clock_unstable")
+        check_wait(Exit::poll_limit, Sample::internal_unstable);
+      if (scenario == "start_clock_protection") {
+        check_wait(Exit::protection_active, Sample::stable);
+        assert((registers[0x04] & 0x43) == 0x42 && (registers[0x05] & 0x10) != 0);
+        assert(writes == before + 2 && startup.protection_flags == injected_clock_protection);
+      } else {
+        const bool uvls = (scenario.starts_with("start_uvls_") && !success &&
+                           scenario != "start_uvls_stop") ||
+                          scenario == "start_late_uvls_without_transient";
+        assert(startup.protection_flags == (scenario == "start_fault" ? 0x0008 : uvls ? 0x4000 : 0));
+        const bool rejected_at_wait = uvls && stage == Stage::wait_clock;
+        assert(startup.standby_uvls.has_value() == rejected_at_wait);
+      }
+      if (scenario == "start_revoked_at_i2s_readback" || scenario == "start_i2s_readback_mismatch") {
+        assert(stage == Stage::i2s_enable && writes == before + 1);
+        assert((registers[0x04] & 0x43) == 0x43 && (registers[0x05] & 0x10) != 0);
+      }
+      if (scenario == "start_early_switching") check_wait(Exit::early_switching, Sample::stable);
+      if (scenario == "start_clock_read_failure")
+        check_wait(Exit::status_read_failed, Sample::unobserved);
+      if (scenario == "start_clock_reversed") check_wait(Exit::timer_regressed, Sample::stable);
+      if (scenario == "start_frozen_clock") check_wait(Exit::poll_limit, Sample::pll_unlocked);
+      if (scenario == "start_revoked_while_muted") check_wait(Exit::admission_lost, Sample::stable);
+      if (stage != Stage::wait_clock)
+        assert(startup.clock_wait_exit == Exit::none && startup.clock_wait_last == Sample::none);
+      if (scenario == "start_no_switching" || scenario == "start_fault")
+        assert(stage == Stage::wait_switching);
+      if (scenario == "start_excess_gain") assert(stage == Stage::attenuation);
+      if (scenario == "start_revoked_initially") assert(stage == Stage::muted_admission);
+      if (scenario == "start_clock_lost_at_unmute") assert(stage == Stage::post_unmute_status);
+      if (scenario == "start_revoked_initially") assert(writes == before);
+      if (success) {
+        assert((registers[0x04] & 0x43) == 0x40 && (registers[0x05] & 0x10) == 0);
+        assert(!guarded.aw88298_standby_verified());
+      }
+      power_seen = false;
+      standby_request = true;
+      assert(guarded.request_aw88298_standby());
+      standby_request = false;
+      assert(guarded.aw88298_standby_verified() == (scenario != "start_clock_read_failure"));
+      if (scenario == "start_clock_read_failure") guarded.begin_cleanup();
+    }
+    if (scenario.starts_with("standby")) {
+      // Begin with an emulated active register state. No physical amp is opened.
+      constexpr uint16_t active_power = 0x40c4, active_mute = 0x26a8;
+      registers[0x00] = 0x1852;
+      registers[0x01] = 0x0100;
+      registers[0x04] = active_power;
+      registers[0x05] = active_mute;
+      const auto attenuation = registers[0x0c];
+      if (scenario == "standby_after_fault") {
+        uint8_t invalid_width = 0;
+        assert(bus->write_reg(bus, 0x05, 1, &invalid_width, 1) != ESP_CODEC_DEV_OK);
+        assert(guarded.faulted());
+      }
+      power_seen = false;
+      standby_request = true;
+      const bool requested = guarded.request_aw88298_standby();
+      standby_request = false;
+      const bool mute_failed =
+          scenario == "standby_mute_read_fail" || scenario == "standby_mute_write_fail";
+      const bool power_failed = scenario == "standby_power_write_fail";
+      assert(requested == (!mute_failed && !power_failed));
+      assert(power_seen == !power_failed);
+      assert(registers[0x04] == (power_failed ? active_power : (active_power & ~0x43) | 0x03));
+      assert(registers[0x05] == (mute_failed ? active_mute : active_mute | 0x10));
+      assert(standby_mute_writes == (scenario == "standby_mute_read_fail" ? 0 : 1));
+      assert(registers[0x0c] == attenuation);
+      assert(guarded.faulted() == (mute_failed || power_failed || scenario == "standby_after_fault"));
+      assert(guarded.aw88298_standby_verified() == (scenario == "standby"));
+      guarded.begin_cleanup();
+    }
+    if (scenario == "unknown_width") {
+      uint8_t data = 0x08;
+      const int before = writes;
+      assert(bus->write_reg(bus, 0x05, 1, &data, 1) != ESP_CODEC_DEV_OK && writes == before);
+      assert(!guarded.muted_startup_verified() && guarded.faulted());
+      guarded.begin_cleanup();
+    } else if (scenario == "reset") {
+      assert(amp->set_reg(amp, 0x00, 0x55aa) == ESP_CODEC_DEV_OK);
+      assert(!guarded.muted_startup_verified() && !guarded.faulted());
+    }
+  }
+  (void)amp->close(amp);
+  std::free(const_cast<audio_codec_if_t*>(amp));
+}

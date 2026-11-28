@@ -10,19 +10,21 @@
 
 namespace stackchan::standalone {
 
-// Raw peak bytes only: one 8s question may coexist with one 20s TTS buffer.
-// std::vector capacity, TLS, JSON, wake scratch and decoder memory ADD overhead.
+// The question remains live while the decoder reads the HTTP speech body and
+// builds the playback PCM. TLS, JSON and allocator overhead are measured separately.
 inline constexpr size_t kQuestionPcmBytes =
     OfflineVoiceCycle::kMaxRecordedFrames * sizeof(int16_t); // 384000B
 inline constexpr size_t kSynthPcmBytes =
     OfflineVoiceCycle::kMaxSynthFrames * sizeof(int16_t);   // 960000B
 inline constexpr size_t kRawConcurrentPcmBytes =
     kQuestionPcmBytes + kSynthPcmBytes;                     // 1344000B
+inline constexpr size_t kConcurrentSpeechPayloadBytes =
+    kRawConcurrentPcmBytes + kSynthPcmBytes;                // 2304000B
 
 // Deliberately conservative *policy margins*, not measured K151 heap usage.
 inline constexpr size_t kUnmeasuredOverheadReserve = 512 * 1024;
 inline constexpr size_t kRequiredPsramFree =
-    kRawConcurrentPcmBytes + kUnmeasuredOverheadReserve;
+    kConcurrentSpeechPayloadBytes + kUnmeasuredOverheadReserve;
 inline constexpr size_t kRequiredLargestPsramBlock =
     kSynthPcmBytes + 128 * 1024;
 inline constexpr size_t kRequiredInternalFree = 128 * 1024;
@@ -71,5 +73,41 @@ inline MemoryPreflight check_audio_memory_preflight(
 // No externally supplied booleans, measurements or fabricated simulator
 // readings may override the hard K151 output/flash HOLD.
 inline constexpr bool kAudioMemoryReadinessCanAuthorizeInstall = false;
+
+// Observations must come from the local owner while the *actual model remains
+// allocated*. Its memory has already been subtracted from after_model free
+// bytes; do not substitute app size or subtract model flash bytes as RAM.
+// The combined watermark includes question, TLS/JSON and TTS allocations with
+// their actual allocator capabilities, not just the nominal raw PCM sizes.
+struct NativeAudioMemorySnapshot {
+  AudioMemorySnapshot after_model;
+  bool model_resident_during_measurement = false;
+  bool question_tls_tts_peak_measured = false;
+  size_t concurrent_internal_peak = 0;
+  size_t concurrent_psram_peak = 0;
+};
+enum class NativeMemoryPreflight {
+  model_unmeasured, combined_peak_unmeasured, invalid_peak, audio_budget_rejected,
+  internal_peak_insufficient, psram_peak_insufficient, diagnostic_ready,
+};
+inline NativeMemoryPreflight check_native_audio_memory_preflight(
+    const NativeAudioMemorySnapshot& e) {
+  if (!e.model_resident_during_measurement)
+    return NativeMemoryPreflight::model_unmeasured;
+  if (!e.question_tls_tts_peak_measured)
+    return NativeMemoryPreflight::combined_peak_unmeasured;
+  if (e.concurrent_internal_peak == 0 ||
+      e.concurrent_psram_peak < kConcurrentSpeechPayloadBytes)
+    return NativeMemoryPreflight::invalid_peak;
+  if (check_audio_memory_preflight(e.after_model) !=
+      MemoryPreflight::diagnostic_budget_satisfied_not_install_approval)
+    return NativeMemoryPreflight::audio_budget_rejected;
+  // Subtraction after the baseline check avoids overflow with corrupt metrics.
+  if (e.concurrent_internal_peak > e.after_model.internal_free - 32 * 1024)
+    return NativeMemoryPreflight::internal_peak_insufficient;
+  if (e.concurrent_psram_peak > e.after_model.psram_free - 128 * 1024)
+    return NativeMemoryPreflight::psram_peak_insufficient;
+  return NativeMemoryPreflight::diagnostic_ready;
+}
 
 } // namespace stackchan::standalone

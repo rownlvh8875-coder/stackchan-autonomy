@@ -287,3 +287,25 @@ gateway fencing, 이미 보낸 명령의 취소, 물리적 정지는 보장하�
 | Windows 및 Python 3.11 실행 | 후속 CI PASS: 네 조합 설치/테스트/빌드/wheel; Windows fork/libopus는 SKIP |
 | Phase 5 | 오프라인 음성/API 어댑터·변환은 Mock 검증, Windows PC Mock 실제24h PASS; 실제 음성/face tracking/dashboard/실물24h 운영은 미검증 |
 | 게시된 이전 snapshot 복원 | PASS: 새 환경에서 파일·의존성과 기존 60개 테스트 확인; 이번 후속 변경은 미게시 |
+
+## 2026-11-20 “조수” PC 실제 목소리 진단·등록 경로
+
+[이번 검증 상세](validation/2026-11-20-josu-human-mic-diagnostics.md): 기존 Python487PASS2SKIP, standalone271PASS7SKIP, PC진단/등록65PASS3Windows-onlySKIP, Ruff 및 독립 wheel 설치 검증 PASS. 새 Windows/Linux/ESP32 CI는 정확한 head로 후속 기록한다. 실제 사용자 발화와 K151 마이크는 미검증이고, synth재생 시험을 독립 사람 인식률로 계산하지 않았다. raw음성 저장/실제API/기기쓰기/환경게시는 수행하지 않았다.
+
+## 2026-11-20 무발화 배경 활동 경계 거부 후속 수정
+
+[이번 검증 상세](validation/2026-11-20-josu-background-activity.md): Python **487PASS2SKIP**, standalone **284PASS7SKIP**, PC 진단·등록 **78PASS3Windows-onlySKIP**, Ruff check/format315files PASS. 분리된 약한 활동을 진단하고 연속된 약한 끝음은 보존한다. quiet의 실제 오탐을 평가하고 helper의 일관성 오류를 실패시킨다. 단일 독립 검토 Important3건은 회귀 RED→GREEN으로 수정했다. 새 정확한 head의 Windows/Linux/ESP compile-only CI 결과는 [PR#3](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3)에 기록한다. 실제 사용자 인식/마이크의 물리적 원인/K151 적용은 미검증이며 장치용 core/esp_app 변경과 기기 설치·유료 API·환경 게시는 없다.
+
+## 2026-11-20 조수 보정 거부 진단
+
+[검증 상세](validation/2026-11-20-josu-calibration-diagnostics.md): root487PASS2SKIP / standalone306PASS7SKIP / PC100PASS3Windows-onlySKIP / Ruff318files PASS. 실제 C++의 호출·비호출 분리 거부와 문턱 표현 범위 거부를 구분하고 검증한 항목 번호/거리만 CLI로 전달한다. 원본/특징/과거 실행 원인은 복구하지 못하며 이 결과가 실제 목소리 인식 성공을 뜻하지 않는다. 정확한 새 head의 nativeWindows/Linux/ESP compile-only CI는 [PR#3](https://github.com/rownlvh8875-coder/stackchan-autonomy/pull/3)에 기록한다.
+
+단일 독립 검토 뒤 중복 JSON key 거부5개 RED→GREEN 및 실패 연산/향후 확정 진단 문구를 수정했다. 최종 로컬 root487PASS2SKIP / standalone311PASS7SKIP / PC105PASS3Windows-onlySKIP / Ruff318files PASS. 검토 Minor2건과 판단/비용은 해당 검증 기록에 보존했다.
+
+## 2026-11-20 K151 기본 호출어 지원 검증
+
+[기술 기록](validation/2026-11-20-k151-builtin-wakenet-preflight.md) 및 [JSON 증거](validation/2026-11-20-k151-builtin-wakenet-preflight.json): 고정 IDF6.1/ESP-SR2.4.7/Hi StackChan의 실제 ESP32-S3 빌드·링크·모델 패킹 PASS. 임시 HOLD app334688bytes, model292607bytes, 실제pack 모델1/파일3 및 SHA 검증. 정적 DIRAM65482bytes이며 runtime heap/PSRAM/인식/독립 GPT 대화는 미검증이다. 제품 코드·기기·API는 변경/실행하지 않았다. 이 작업은 문서/증거 변경이며 기존 code base330946a의 CI9/9와 새 문서 head 검증을 구분한다.
+
+## 2026-11-20 기본 호출어 → 공통 음성 대화 연결
+
+[검증 기록](validation/2026-11-20-native-wake-voice-bridge.md): 검토 수정 후 신규 focused70PASS, root487PASS2SKIP / 선택 의존성을 포함한 standalone381PASS7Windows-onlySKIP / PC선택 NumPy105PASS3SKIP. 실제 pinned IDF6.1/ESP-SR2.4.7 ESP32-S3 compile/link PASS, HOLDapp325792bytes/staticDIRAM59030bytes. Stream DSP·bounded chunk·local hit epoch admission·질문/Mock STT/GPT/TTS·cooldown을 검증하며 기존 개인 SWK1 경로를 보존한다. app_main은 marker만 추가했고 실제 모델/기기/API/설치를 실행하지 않았다. 실제 추론/동적 자원/복구/독립 대화는 미검증이다. 이전1412660 Windows3.12 soak의 check_timeout 및 재실행 renew_timeout 실패를 보존하며 새 head CI와 구분한다.

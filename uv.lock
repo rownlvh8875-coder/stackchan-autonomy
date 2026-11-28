@@ -835,6 +835,24 @@ wheels = [
 ]
 
 [[package]]
+name = "pysqlite3"
+version = "0.6.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/a5/4987f812f5dc6e7d37c333e889586aa2b01cba9c86b1dd7f712c871f5d88/pysqlite3-0.6.2.tar.gz", hash = "sha256:67b4a2c3e0f3b780cc8e5ac0efdc55a2bb99a63027070b4541eb8acd3dfb55ff", size = 41074, upload-time = "2026-11-05T14:55:47.763Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/28/c67cd08041a87d3c5b577ad6c4f8460595b73ed3f3af989a28df9d068191/pysqlite3-0.6.2-cp311-cp311-win32.whl", hash = "sha256:670093cb14f227f447dc286c92c419046c557f157dd1eddf15e12fb73eceecc1", size = 748406, upload-time = "2026-11-05T14:55:14.561Z" },
+    { url = "https://files.pythonhosted.org/packages/16/0d/c5c9c8c84b33af5b7287d4f3712a286988f35177f813eef7f2e2ec988cd5/pysqlite3-0.6.2-cp311-cp311-win_amd64.whl", hash = "sha256:5304e75efce065df2977e920d7865758e7f23258ad290efb240b8053be4bc195", size = 953806, upload-time = "2026-11-05T14:55:15.788Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/ea/b3edf0111aefe1c95851b887d96110b90b7ea29efe892e797412ad0d84b1/pysqlite3-0.6.2-cp312-cp312-win32.whl", hash = "sha256:f489cf38157954dd4b237fa8b7a839bfc7ff2a5bca4d7fca3d8888e9fe5d5789", size = 748882, upload-time = "2026-11-05T14:55:20.44Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/1d/7647edeae4573731f84fd1351f8060f6571a09e80a6e1d71599f1a3b7eab/pysqlite3-0.6.2-cp312-cp312-win_amd64.whl", hash = "sha256:2002e06f965e44e47359f4a8cf243e4630b387eedbc293875c4a3c41f31ffa1b", size = 954506, upload-time = "2026-11-05T14:55:21.643Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/98/751c1b2978b2f15e196833c2c32e86f92767a7d1c59eab807c07ad02cdab/pysqlite3-0.6.2-cp313-cp313-win32.whl", hash = "sha256:7e61d5646348beb7dce7879c8281b5c17c6967d9bea6c1c091890761b6ab201c", size = 748665, upload-time = "2026-11-05T14:55:26.965Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/6f/006f019ab5474d57bfa051accd348b051b60671d223edf800de73cd1bbd2/pysqlite3-0.6.2-cp313-cp313-win_amd64.whl", hash = "sha256:d10ebb894b215987a65602f48844fc9fd4060ecea86bb286a7e88717b8ea70d7", size = 953978, upload-time = "2026-11-05T14:55:28.036Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/b5/484a221c521cd8b47d7c454fc188d56827b959462dbbb98756515905ab3b/pysqlite3-0.6.2-cp314-cp314-win32.whl", hash = "sha256:893c65d47a99352b7d60dcc99338b7e40f6c228282f9786afa335cf9dd139cac", size = 764475, upload-time = "2026-11-05T14:55:32.822Z" },
+    { url = "https://files.pythonhosted.org/packages/22/20/cd69747953241a06bc05ab83fd82586d2ecdaa1d2c8854ad4ac48b15e0cf/pysqlite3-0.6.2-cp314-cp314-win_amd64.whl", hash = "sha256:942c4c96f1127fe2226717815f4faf5078c6e026579b1a6660db00ae563aab87", size = 983665, upload-time = "2026-11-05T14:55:34.075Z" },
+    { url = "https://files.pythonhosted.org/packages/21/b8/68a2cbaf4de7d5266268ec4fce10170d2fc757b96927cb1f3ef551ffe906/pysqlite3-0.6.2-cp315-cp315-win32.whl", hash = "sha256:b50c75f52cc13904ee58cae91c5265a20dec04f491b3e4c46c339baf11fd3b71", size = 764477, upload-time = "2026-11-05T14:55:39.157Z" },
+    { url = "https://files.pythonhosted.org/packages/15/eb/ac18e901c9821d99a9b23148f1dae0b605cbab7b33510c4d303ed9a4b6e1/pysqlite3-0.6.2-cp315-cp315-win_amd64.whl", hash = "sha256:37af46e0bf270d641227c344a23abd0d0f8629cc1fd1728b51caf60e9e1ce3cb", size = 983717, upload-time = "2026-11-05T14:55:40.247Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1165,7 +1183,10 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyserial" },
+    { name = "pysqlite3", marker = "(implementation_name == 'cpython' and platform_machine == 'AMD64' and sys_platform == 'win32') or (implementation_name == 'cpython' and platform_machine == 'x86' and sys_platform == 'win32')" },
     { name = "pyyaml" },
+    { name = "starlette" },
+    { name = "uvicorn" },
     { name = "websockets" },
 ]
 
@@ -1184,7 +1205,10 @@ requires-dist = [
     { name = "pydantic", specifier = "==2.14.3" },
     { name = "pydantic-settings", specifier = "==2.16.2" },
     { name = "pyserial", specifier = "==3.5" },
+    { name = "pysqlite3", marker = "(implementation_name == 'cpython' and platform_machine == 'AMD64' and sys_platform == 'win32') or (implementation_name == 'cpython' and platform_machine == 'x86' and sys_platform == 'win32')", specifier = "==0.6.2" },
     { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "starlette", specifier = "==1.10.0" },
+    { name = "uvicorn", specifier = "==0.54.0" },
     { name = "websockets", specifier = "==15.0.1" },
 ]
 

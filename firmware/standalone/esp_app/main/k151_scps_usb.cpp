@@ -15,8 +15,42 @@ namespace {
 constexpr size_t kUsbReadChunk=96;
 constexpr uint32_t kTxBuffer=512,kRxBuffer=512;
 constexpr uint32_t kTxTicks=0;
+constexpr uint32_t kFinalTxMs=250;
 constexpr uint64_t kSessionMaxMs=120000;
+
+#if !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
+bool open_scps_driver() {
+  usb_serial_jtag_driver_config_t cfg{};
+  cfg.tx_buffer_size=kTxBuffer;
+  cfg.rx_buffer_size=kRxBuffer;
+  return usb_serial_jtag_driver_install(&cfg)==ESP_OK;
 }
+#endif
+
+bool send_scps_frame(scpswire::Op op,std::span<const uint8_t> payload) {
+  const auto framed=scpswire::encode(op,payload);
+  if(!framed)return false;
+  const int count=usb_serial_jtag_write_bytes(framed->data(),framed->size(),kTxTicks);
+  // Driver enqueue != proof of physical receipt; never automatically retry.
+  return count==static_cast<int>(framed->size());
+}
+}
+
+#ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
+bool k151_probe_scps_tx() {
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
+  return false;
+#else
+  if(usb_serial_jtag_is_driver_installed() || !open_scps_driver())return false;
+  // The shape and TX path match DEVICE_HELLO. Zero bytes cannot supply a
+  // valid key exchange, and this diagnostic never accepts host input.
+  const std::array<uint8_t,scpswire::kHelloBytes> fixture{};
+  const bool drained=send_scps_frame(scpswire::Op::device_hello,fixture) &&
+      usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(kFinalTxMs)+1)==ESP_OK;
+  return usb_serial_jtag_driver_uninstall()==ESP_OK && drained;
+#endif
+}
+#endif
 
 const char* K151ScpsUsbPort::compiled_link_marker() {
   return "SCPW encrypted USB setup with local second-touch gate compiled; NOT STARTED";
@@ -33,12 +67,7 @@ void K151ScpsUsbPort::scrub_pending() {
 }
 
 bool K151ScpsUsbPort::send(scpswire::Op op,std::span<const uint8_t> payload) {
-  const auto framed=scpswire::encode(op,payload);
-  if(!running_ || !framed)return false;
-  const int count=usb_serial_jtag_write_bytes(framed->data(),
-                                             framed->size(),kTxTicks);
-  // Driver enqueue != proof of physical receipt; never automatically retry.
-  return count==static_cast<int>(framed->size());
+  return running_ && send_scps_frame(op,payload);
 }
 
 bool K151ScpsUsbPort::start(uint64_t now,bool exact_board_verified,
@@ -47,6 +76,8 @@ bool K151ScpsUsbPort::start(uint64_t now,bool exact_board_verified,
   if(attempted_ || stop_.load() || !exact_board_verified ||
      !trusted_lcd_verified || !uart_console_verified ||
      !usb_exclusively_owned || !display_.attached() ||
+     &stop_!=&touch_.stop_ || &stop_!=&display_.stop_ || &stop_!=&setup_.stop_ ||
+     &touch_.owner_mode_!=&setup_.owner_ ||
      !touch_.owner_window_open(now))return false;
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED)
   // Never multiplex console, SCFG and secret setup over the same USB bytes.
@@ -58,10 +89,7 @@ bool K151ScpsUsbPort::start(uint64_t now,bool exact_board_verified,
   if(!pairing_.device_hello(now,touch_.owner_window_open(now),
                             trusted_lcd_verified,hello))return fault();
 
-  usb_serial_jtag_driver_config_t cfg={};
-  cfg.tx_buffer_size=kTxBuffer;
-  cfg.rx_buffer_size=kRxBuffer;
-  if(usb_serial_jtag_driver_install(&cfg)!=ESP_OK)return fault();
+  if(!open_scps_driver())return fault();
   running_=true;
   trusted_lcd_=trusted_lcd_verified;
   began_ms_=now;
@@ -91,6 +119,7 @@ bool K151ScpsUsbPort::process(const scpswire::Frame& f,uint64_t now,
   if(state_==State::wait_sealed && f.kind==scpswire::Op::sealed_credentials) {
     if(!pending_.empty() || f.payload.size()>K151SecurePcSetup::kMaxSealedBytes)
       return fault();
+    if(!display_.begin_pairing_review(now,lvgl_lock_held))return fault();
     pending_=f.payload; // ciphertext only; validated later via AES-GCM.
     state_=State::pending_local_review;
     return send(scpswire::Op::pending_touch) || fault();
@@ -122,18 +151,14 @@ bool K151ScpsUsbPort::poll_once(uint64_t now,bool lvgl_lock_held) {
       if(!accepted)return false;
     }
   }
-  return true;
-}
-
-bool K151ScpsUsbPort::arm_second_touch(
-    uint64_t now,bool local_ui_reviewed) {
-  if(!running_ || stop_.load() || !local_ui_reviewed ||
-     !trusted_lcd_ || !display_.attached() ||
-     state_!=State::pending_local_review ||
-     !touch_.owner_window_open(now) ||
-     pending_.empty())return false;
-  if(!touch_.start_scps_final_touch(true,now))return fault();
-  state_=State::waiting_touch;
+  if(state_==State::pending_local_review) {
+    const auto review=display_.poll_pairing_review(now,lvgl_lock_held);
+    if(review==K151SetupLvgl::ReviewResult::fault)return fault();
+    if(review==K151SetupLvgl::ReviewResult::approved) {
+      if(!touch_.start_scps_final_touch(true,now))return fault();
+      state_=State::waiting_touch;
+    }
+  }
   return true;
 }
 
@@ -161,8 +186,16 @@ bool K151ScpsUsbPort::finalize_after_touch(uint64_t now) {
   credentials.clear();
   if(!confirmed || !setup_.ready())return fault();
   state_=State::complete;
-  // ACK only after local sensor-owned confirmation + RAM provisioning.
-  return send(scpswire::Op::completed) || fault();
+  return true;
+}
+
+bool K151ScpsUsbPort::close_completed_transport() {
+  if (!running_ || state_ != State::complete || !setup_.ready() || stop_.load())
+    return fault();
+  if (!send(scpswire::Op::completed) ||
+      usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(kFinalTxMs) + 1) != ESP_OK ||
+      stop_.load() || !shutdown()) return fault();
+  return true;
 }
 
 bool K151ScpsUsbPort::fault() {
@@ -176,17 +209,18 @@ bool K151ScpsUsbPort::fault() {
 }
 
 bool K151ScpsUsbPort::shutdown() {
-  const bool was_running=running_;
-  running_=false;
   frames_.invalidate();
   scrub_pending();
   pairing_.stop();
   if(state_!=State::complete || stop_.load())setup_.stop();
   if(state_!=State::complete || stop_.load())touch_.revoke();
   state_=state_==State::complete?State::complete:State::stopped;
-  if(was_running && usb_serial_jtag_driver_uninstall()!=ESP_OK)
+  if(running_ && usb_serial_jtag_driver_uninstall()!=ESP_OK) {
     faulted_=true;
-  return !faulted_;
+    return false;
+  }
+  running_=false;
+  return true;
 }
 
 } // namespace stackchan::standalone

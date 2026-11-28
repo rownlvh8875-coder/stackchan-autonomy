@@ -47,5 +47,6 @@ def test_scps_cpp_python_byte_for_byte(tmp_path):
         encode(Frame(Op.SEALED, sealed)).hex(),
         encode(Frame(Op.COMPLETED)).hex(),
         encode(Frame(Op.STOP)).hex(),
+        encode(Frame(Op.LOCAL_SETUP_FAULT, b"\x04")).hex(),
     ]
     assert lines == expected

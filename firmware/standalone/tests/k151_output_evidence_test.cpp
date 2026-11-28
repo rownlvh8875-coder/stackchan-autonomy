@@ -1,12 +1,83 @@
 // SPDX-License-Identifier: MIT
 // No device access: fail-closed K151 power/reset and DMA policy fixtures.
 #include "k151_output_evidence.hpp"
+#include "k151_dma_tx_tail.hpp"
 #include <cassert>
 #include <iostream>
 
 using namespace stackchan::standalone;
 
 int main() {
+  const auto at = [](DmaTxTail& tail, int64_t now) {
+    return tail.poll([now] { return now; });
+  };
+  {
+    DmaTxTail tail;
+    using Result = DmaTxTail::Result;
+    int descriptors[DmaTxTail::kDescriptorCount]{};
+    constexpr size_t mono_bytes = 240 * sizeof(int16_t);
+    tail.on_sent(&descriptors[0], mono_bytes);
+    assert(at(tail, 1000) == Result::idle);
+    assert(tail.arm(mono_bytes, 1000));
+    int64_t now = 1000;
+    for (const auto& descriptor : descriptors) {
+      tail.on_sent(&descriptor, mono_bytes);
+      now += 10000;
+      assert(at(tail, now) == Result::waiting);
+    }
+    tail.on_sent(&descriptors[0], mono_bytes);
+    assert(at(tail, now + 10000) == Result::observed);
+
+    // A subsequent playback gets a fresh fence, including a new slot layout.
+    assert(tail.arm(2 * mono_bytes, 101000));
+    assert(at(tail, 101000) == Result::waiting);
+    tail.on_sent(&descriptors[1], 2 * mono_bytes);
+    tail.abandon();
+    for (const auto& descriptor : descriptors)
+      tail.on_sent(&descriptor, 2 * mono_bytes);
+    assert(at(tail, 121000) == Result::failed && !tail.arm(mono_bytes, 121000));
+    tail.reset_after_release();
+    assert(tail.arm(mono_bytes, 131000) && at(tail, 131000) == Result::waiting);
+  }
+  for (int malformed = 0; malformed < 4; ++malformed) {
+    DmaTxTail tail;
+    int descriptors[DmaTxTail::kDescriptorCount]{};
+    constexpr size_t stereo_bytes = 240 * 2 * sizeof(int16_t);
+    assert(tail.arm(stereo_bytes, 1000));
+    if (malformed == 0) {
+      tail.on_sent(nullptr, stereo_bytes);
+    } else if (malformed == 1) {
+      tail.on_sent(&descriptors[0], stereo_bytes / 2);
+    } else if (malformed == 2) {
+      tail.on_sent(&descriptors[0], stereo_bytes);
+      tail.on_sent(&descriptors[0], stereo_bytes);
+    } else {
+      for (const auto& descriptor : descriptors) tail.on_sent(&descriptor, stereo_bytes);
+      tail.on_sent(&descriptors[1], stereo_bytes);
+    }
+    assert(at(tail, 2000) == DmaTxTail::Result::failed);
+  }
+  {
+    DmaTxTail tail;
+    constexpr size_t mono_bytes = 240 * sizeof(int16_t);
+    assert(!tail.arm(mono_bytes, -1));
+    assert(tail.arm(mono_bytes, 1000));
+    assert(at(tail, 100999) == DmaTxTail::Result::waiting);
+    int descriptors[DmaTxTail::kDescriptorCount]{};
+    for (const auto& descriptor : descriptors) tail.on_sent(&descriptor, mono_bytes);
+    tail.on_sent(&descriptors[0], mono_bytes);
+    assert(at(tail, 101000) == DmaTxTail::Result::failed); // Late EOF cannot win.
+  }
+  {
+    DmaTxTail tail;
+    constexpr size_t mono_bytes = 240 * sizeof(int16_t);
+    int descriptors[DmaTxTail::kDescriptorCount]{};
+    assert(tail.arm(mono_bytes, 1000));
+    for (const auto& descriptor : descriptors) tail.on_sent(&descriptor, mono_bytes);
+    assert(at(tail, 61000) == DmaTxTail::Result::waiting);
+    tail.on_sent(&descriptors[0], mono_bytes);
+    assert(at(tail, 60000) == DmaTxTail::Result::failed);
+  }
   K151OutputEvidence e;
   assert(assess_k151_output(e) == OutputBlock::board_unknown);
   assert(!may_enable_k151_output(e));

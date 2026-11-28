@@ -11,8 +11,14 @@ class K151ReadOnlyProbe final {
   static const char* compiled_link_marker();
   // Requires an explicit operator-level approval in a future hardware build.
   // A physical STOP must be independently implemented; polling is not a hard
-  // real-time stop guarantee. No caller exists in the current build.
+  // real-time stop guarantee. HOLD never calls it; a separate diagnostic can
+  // supply live, revocable permission. Cleanup is attempted after cancellation.
+  bool observe_once(const std::atomic_bool& explicitly_authorized,
+                    const std::atomic_bool& stop,
+                    k151::ReadOnlyEvidence& out) const;
   bool observe_once(bool explicitly_authorized, const std::atomic_bool& stop,
                     k151::ReadOnlyEvidence& out) const;
+  bool observe_power_once(const std::atomic_bool& owner, const std::atomic_bool& stop,
+                          k151::PowerReadback& out) const;
 };
 }  // namespace stackchan::standalone

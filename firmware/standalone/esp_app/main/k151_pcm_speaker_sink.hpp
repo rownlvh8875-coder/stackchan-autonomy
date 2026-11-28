@@ -21,33 +21,39 @@ namespace stackchan::standalone {
 class K151PcmSpeakerSink final : public VoiceSpeakerPort {
  public:
   K151PcmSpeakerSink(K151CodecPort& codec, const std::atomic_bool& stop,
-                     const std::atomic_bool& consent)
-      : codec_(codec), stop_(stop), consent_(consent) {}
+                     const std::atomic_bool& consent,
+                     const std::atomic_bool& local_owner)
+      : codec_(codec), stop_(stop), consent_(consent), owner_(local_owner) {}
 
   VoicePlaybackResult play_pcm24k(std::span<const int16_t> pcm,
                                   uint64_t started_ms) override {
     // Codec remains hard-disabled in the factory-incompatible HOLD image.
-    if (!codec_.prepared()) return {};
+    if (!owner_.load() || !codec_.prepared()) return {};
     // The caller MUST use the same esp_timer-based monotonic millisecond
     // clock for started_ms; no conversion from UTC or another timer.
     const auto finished = stream_pcm_chunks_guarded(
         pcm, started_ms, stop_, consent_,
         [this](std::span<const int16_t> chunk) {
-          return codec_.prepared() && codec_.play_mono_24k(chunk);
+          return owner_.load() && codec_.prepared() && codec_.play_mono_24k(chunk);
         },
         []() -> std::optional<uint64_t> {
           const int64_t now_us = esp_timer_get_time();
           if (now_us < 0) return std::nullopt;
           return static_cast<uint64_t>(now_us / 1000);
         });
-    if (!finished) return {};
-    return {true, *finished};
+    if (!finished || !codec_.wait_for_tx_tail(owner_, consent_, stop_)) return {};
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us < 0 || !owner_.load() || !consent_.load() || stop_.load()) return {};
+    const auto observed_ms = static_cast<uint64_t>(now_us / 1000);
+    return observed_ms >= *finished ? VoicePlaybackResult{true, observed_ms} :
+                                      VoicePlaybackResult{};
   }
 
  private:
   K151CodecPort& codec_;
   const std::atomic_bool& stop_;
   const std::atomic_bool& consent_;
+  const std::atomic_bool& owner_;
 };
 
 } // namespace stackchan::standalone

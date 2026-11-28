@@ -1,0 +1,330 @@
+"""The receive-only review package must bind its own app and embedded model."""
+
+import hashlib
+
+import pytest
+from test_resource_bench_image import ELF_SHA, bench, image
+
+SLOT_CSV = "ota_1,app,ota_1,0x510000,0x4f0000,\n"
+PROJECT = b"k151_mic_wake_trial"
+
+
+@pytest.fixture
+def model_fixture(monkeypatch):
+    model = b"test-trial-model"
+    monkeypatch.setattr(bench, "PACK_PREFIX", model)
+    monkeypatch.setattr(bench, "PACK_BYTES", len(model))
+    monkeypatch.setattr(bench, "PACK_SHA256", hashlib.sha256(model).hexdigest())
+    return model
+
+
+def test_receive_only_scope(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    app = image(model_fixture, project=PROJECT)
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV)
+    assert manifest["write_offset"] == 0x510000 and manifest["write_bytes"] == len(app)
+    assert manifest["selected_partition"] == "ota_1"
+    assert manifest["model_in_readonly_app_segment"] is True
+    assert manifest["capture_deadline_ms"] == 5000
+    assert manifest["usb_exports_pcm"] is False
+    assert manifest["install_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    ("protocol", "challenge", "progress"),
+    [
+        ("K151_SPEAKER_STOP_V1", b"WAIT_SPEAKER_SCREEN_STOP_START\0", b""),
+        (
+            "K151_SPEAKER_STOP_V2",
+            b"WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START\0",
+            b'"SPEAKER_STOP_PLAYING"\0"pcm_blocks"\0"dma_complete"\0"standby_confirmed"\0',
+        ),
+        (
+            "K151_SPEAKER_STOP_V3",
+            b"WAIT_SPEAKER_SCREEN_STOP_SHUTDOWN_START\0",
+            b'"SPEAKER_STOP_PLAYING"\0"pcm_blocks"\0"dma_complete"\0"standby_confirmed"\0'
+            b'"stop_diagnostic"\0"screen_stop_sampled"\0"pcm_write_rejected"\0"cleanup_stage"\0'
+            b'"reset_latch_verified"\0"tx_idle_observed"\0"sample_to_reset_idle_us"\0',
+        ),
+    ],
+)
+def test_speaker_stop_requires_its_own_app_and_marker(model_fixture, protocol, challenge, progress):
+    from check_mic_wake_image import inspect_image
+
+    project = b"k151_speaker_stop_probe"
+    markers = (
+        b"K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL\0"
+        + challenge
+        + protocol.encode()
+        + b'"\0"SPEAKER_STOP_ARMED"\0"sample_to_standby_us"\0'
+        + progress
+    )
+    app = image(markers, project=project)
+    proof = inspect_image(app, ELF_SHA, SLOT_CSV, speaker_stop=True)
+    assert proof["expected_protocol"] == protocol
+    assert proof["tone_samples"] == 60_000
+    assert proof["electrical_stop_mute_verified"] is proof["install_authorized"] is False
+    with pytest.raises(ValueError):
+        inspect_image(app, ELF_SHA, SLOT_CSV, speaker=True)
+    if progress:
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers[: -len(progress)], project=project),
+                ELF_SHA,
+                SLOT_CSV,
+                speaker_stop=True,
+            )
+    for foreign in (model_fixture, b"api.openai.com\0", b"K151_SPEAKER_V13"):
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers + foreign, project=project), ELF_SHA, SLOT_CSV, speaker_stop=True
+            )
+
+
+def test_question_trial_requires_separate_project_and_scope(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    app = image(model_fixture, project=b"k151_mic_question_trial")
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV, question=True)
+    assert manifest["kind"] == "RECEIVE_ONLY_MIC_QUESTION_TRIAL_NOT_OPERATIONAL"
+    assert manifest["question_capture_deadline_ms"] == 8000
+    assert manifest["question_initial_quiet_ms"] == 500
+    assert manifest["combined_start_window_ms"] == 10000
+    assert manifest["usb_exports_pcm"] is False
+    assert manifest["install_authorized"] is False
+    with pytest.raises(ValueError):
+        inspect_image(app, ELF_SHA, SLOT_CSV)
+    with pytest.raises(ValueError):
+        inspect_image(image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, question=True)
+
+
+def test_aec_reference_stop_has_its_own_project_and_authorization(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    markers = (
+        b"K151_AEC_STOP_TRIAL_NOT_OPERATIONAL\0WAIT_AEC_STOP_REFERENCE_LOCAL_START\0"
+        b'"K151_AEC_REFERENCE_STOP_V1"\0"SPEAKER_STOP_PLAYING"\0"reference_timing"\0'
+        b'"rx_eof_us"\0"operating_admission":false\0"failure_stage"\0'
+    )
+    project = b"k151_aec_stop_trial"
+    app = image(markers, project=project)
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV, aec_stop=True)
+    assert manifest["expected_protocol"] == "K151_AEC_REFERENCE_STOP_V1"
+    assert manifest["preparation_failure_stage"] is True
+    assert manifest["adc_reference_slot"] == 1
+    assert manifest["install_authorized"] is manifest["raw_pcm_exported"] is False
+    with pytest.raises(ValueError):
+        inspect_image(app, ELF_SHA, SLOT_CSV, speaker_stop=True)
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(markers.replace(b'"failure_stage"', b""), project=project),
+            ELF_SHA,
+            SLOT_CSV,
+            aec_stop=True,
+        )
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(markers + model_fixture, project=project), ELF_SHA, SLOT_CSV, aec_stop=True
+        )
+
+
+def test_wake_only_control_has_distinct_identity_and_short_observation(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    app = image(model_fixture, project=b"k151_wake_only_control")
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV, wake_only_control=True)
+    assert manifest["kind"] == "RECEIVE_ONLY_WAKE_ONLY_CONTROL_NOT_OPERATIONAL"
+    assert manifest["observation_frames_20ms"] == 75
+    assert manifest["observation_pcm_ms"] == 1500
+    assert manifest["combined_start_window_ms"] == 10000
+    assert manifest["install_authorized"] is False
+    with pytest.raises(ValueError):
+        inspect_image(app, ELF_SHA, SLOT_CSV, question=True)
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, wake_only_control=True
+        )
+
+
+@pytest.mark.parametrize("failure", ["other_project", "other_slot", "dup_pack", "ram_pack"])
+def test_deny_other_app_or_invalid_pack(model_fixture, failure):
+    from check_mic_wake_image import inspect_image
+
+    table = SLOT_CSV
+    app = image(model_fixture, project=PROJECT)
+    if failure == "other_project":
+        app = image(model_fixture)
+    elif failure == "other_slot":
+        table = table.replace("0x510000", "0x20000")
+    elif failure == "dup_pack":
+        app = image(model_fixture * 2, project=PROJECT)
+    elif failure == "ram_pack":
+        app = image(model_fixture, address=0x3FC90000, project=PROJECT)
+    with pytest.raises(ValueError):
+        inspect_image(app, ELF_SHA, table)
+
+
+def test_question_only_image_has_own_identity_and_no_model(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    project = b"k151_question_only"
+    markers = b"QUESTION_ONLY_NOW\0MIC_QUESTION_ONLY_TRIAL_V1\0"
+    app = image(markers, project=project)
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV, question_only=True)
+    assert manifest["kind"] == "RECEIVE_ONLY_QUESTION_ONLY_NOT_OPERATIONAL"
+    assert manifest["wake_model_bundled"] is False
+    assert manifest["question_capture_deadline_ms"] == 8000
+    assert manifest["combined_start_window_ms"] == 10000
+    assert manifest["install_authorized"] is False
+    for unexpected in (model_fixture, b"LISTEN_NOW\0", b"MIC_WAKE_TRIAL_V4\0"):
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers + unexpected, project=project), ELF_SHA, SLOT_CSV, question_only=True
+            )
+    with pytest.raises(ValueError):
+        inspect_image(image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, question_only=True)
+
+
+def test_silent_tx_image_is_distinct_and_has_no_voice_trial(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    project = b"k151_silent_tx_probe"
+    markers = b"WAIT_SILENT_TX_LOCAL_START\0K151_SILENT_TX_V1\0"
+    manifest = inspect_image(image(markers, project=project), ELF_SHA, SLOT_CSV, silent_tx=True)
+    assert manifest["kind"] == "GPIO_ISOLATED_SILENT_TX_NOT_OPERATIONAL"
+    assert manifest["routes_audio_pins"] is False
+    assert manifest["tx_descriptor_count"] == 2
+    assert manifest["amplifier_or_fifo_drain_verified"] is False
+    assert manifest["install_authorized"] is False
+    for unexpected in (model_fixture, b"LISTEN_NOW\0", b"QUESTION_ONLY_NOW\0"):
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers + unexpected, project=project), ELF_SHA, SLOT_CSV, silent_tx=True
+            )
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(markers, project=b"k151_question_only"), ELF_SHA, SLOT_CSV, silent_tx=True
+        )
+
+
+@pytest.mark.parametrize(
+    "protocol",
+    [f"K151_SPEAKER_V{version}" for version in range(1, 14)],
+)
+def test_speaker_probe_image_has_separate_identity_and_scope(model_fixture, protocol):
+    from check_mic_wake_image import inspect_image
+
+    challenge = {
+        "K151_SPEAKER_V1": b"WAIT_SPEAKER_LOCAL_START\0",
+        "K151_SPEAKER_V2": b'WAIT_SPEAKER_STARTUP_LOCAL_START\0"startup_stage"\0',
+        "K151_SPEAKER_V3": (
+            b'WAIT_SPEAKER_CLOCK_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0'
+        ),
+        "K151_SPEAKER_V4": (
+            b'WAIT_SPEAKER_PROTECTION_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+        ),
+        "K151_SPEAKER_V5": (
+            b'WAIT_SPEAKER_VDD_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"uvls_after_clock_us"\0"vdd_after_uvls_us"\0"startup_vdd"\0"startup_vdd_mv"\0'
+        ),
+        "K151_SPEAKER_V6": (
+            b'WAIT_SPEAKER_STANDBY_UVLS_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"uvls_after_clock_us"\0"vdd_after_uvls_us"\0"startup_vdd"\0"startup_vdd_mv"\0'
+            b'"standby_uvls"\0'
+        ),
+        "K151_SPEAKER_V7": (
+            b'WAIT_SPEAKER_RESET_UVLS_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"uvls_after_clock_us"\0"vdd_after_uvls_us"\0"startup_vdd"\0"startup_vdd_mv"\0'
+            b'"standby_uvls"\0"reset_uvls"\0'
+        ),
+        "K151_SPEAKER_V8": (
+            b'WAIT_SPEAKER_VDD_FOLLOWUP_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"standby_uvls"\0"reset_uvls"\0"vdd"\0'
+        ),
+        "K151_SPEAKER_V9": (
+            b'WAIT_SPEAKER_SETTLING_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0'
+        ),
+        "K151_SPEAKER_V10": (
+            b'WAIT_SPEAKER_CLEANUP_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0"end"\0'
+        ),
+        "K151_SPEAKER_V11": (
+            b'WAIT_SPEAKER_STANDBY_CHECK_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0"end"\0'
+        ),
+        "K151_SPEAKER_V12": (
+            b'WAIT_SPEAKER_MUTE_SETTLE_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0"end"\0'
+        ),
+        "K151_SPEAKER_V13": (
+            b'WAIT_SPEAKER_AMP_OFF_LOCAL_START\0"startup_stage"\0'
+            b'"clock_wait_exit"\0"clock_wait_last"\0"protection"\0'
+            b'"standby_uvls"\0"reset_uvls"\0"vdd"\0"settling_uvls"\0"end"\0'
+        ),
+    }[protocol]
+    markers = b"K151_SPEAKER_PROBE_NOT_OPERATIONAL\0" + challenge + protocol.encode() + b"\0"
+    project = b"k151_speaker_probe"
+    manifest = inspect_image(image(markers, project=project), ELF_SHA, SLOT_CSV, speaker=True)
+    assert manifest["kind"] == "SYNTHETIC_SPEAKER_PROBE_NOT_OPERATIONAL"
+    assert manifest["microphone_enabled"] is False
+    assert manifest["cloud_enabled"] is False
+    assert manifest["tone_samples"] == 6000
+    assert manifest["tone_peak_pcm16"] == 4096
+    assert manifest["install_authorized"] is False
+    assert manifest["expected_protocol"] == protocol
+    required_fields = []
+    if protocol not in ("K151_SPEAKER_V1", "K151_SPEAKER_V2", "K151_SPEAKER_V3"):
+        required_fields.append(b'"protection"\0')
+    if protocol not in (
+        "K151_SPEAKER_V1",
+        "K151_SPEAKER_V2",
+        "K151_SPEAKER_V3",
+        "K151_SPEAKER_V4",
+        "K151_SPEAKER_V5",
+    ):
+        required_fields.append(b'"standby_uvls"\0')
+    version = int(protocol.removeprefix("K151_SPEAKER_V"))
+    if version >= 7:
+        required_fields.append(b'"reset_uvls"\0')
+    if version >= 8:
+        required_fields.append(b'"vdd"\0')
+    if version >= 9:
+        required_fields.append(b'"settling_uvls"\0')
+    if version >= 10:
+        required_fields.append(b'"end"\0')
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers + b"K151_SPEAKER_V1\0", project=project),
+                ELF_SHA,
+                SLOT_CSV,
+                speaker=True,
+            )
+    for field in required_fields:
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers.replace(field, b""), project=project),
+                ELF_SHA,
+                SLOT_CSV,
+                speaker=True,
+            )
+    for unexpected in (model_fixture, b"LISTEN_NOW\0", b"QUESTION_ONLY_NOW\0", b"api.openai.com\0"):
+        with pytest.raises(ValueError):
+            inspect_image(
+                image(markers + unexpected, project=project), ELF_SHA, SLOT_CSV, speaker=True
+            )
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(markers, project=b"k151_silent_tx_probe"), ELF_SHA, SLOT_CSV, speaker=True
+        )

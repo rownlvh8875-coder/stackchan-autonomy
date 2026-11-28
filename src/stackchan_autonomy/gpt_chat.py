@@ -153,7 +153,7 @@ class GPTChat:
 
         await finish_cleanup(asyncio.create_task(close()))
 
-    async def ask(self, question: str) -> dict[str, object]:
+    async def ask(self, question: str, *, remember: bool = True) -> dict[str, object]:
         try:
             question = _text(question, 1200)
         except (ValueError, TypeError):
@@ -162,7 +162,7 @@ class GPTChat:
             if self._closed:
                 raise GPTChatError("PC_GPT_UNAVAILABLE")
             with private_library_logs():
-                return await self._ask(question)
+                return await self._ask(question, remember=remember)
 
     async def observe(self, question, observation) -> dict[str, object]:
         from .observer_protocol import ObserverError, VerifiedObservation
@@ -181,9 +181,11 @@ class GPTChat:
             with private_library_logs():
                 return await self._ask(question, observation=observation)
 
-    async def _ask(self, question: str, *, observation=None) -> dict[str, object]:
+    async def _ask(
+        self, question: str, *, observation=None, remember: bool = True
+    ) -> dict[str, object]:
         instructions = _INSTRUCTIONS
-        inputs = [*self._history, {"role": "user", "content": question}]
+        inputs = [*(self._history if remember else []), {"role": "user", "content": question}]
         if observation is not None:
             # Freshness and source validation precede the persistent paid reservation.
             observation.recheck()
@@ -268,7 +270,7 @@ class GPTChat:
             except StateUnavailable:
                 pass
             raise GPTChatError("PC_GPT_UNAVAILABLE") from None
-        if observation is None:
+        if observation is None and remember:
             self._history.extend(
                 [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
             )

@@ -1,0 +1,43 @@
+{
+  "record_kind": "pre_push_offline_validation",
+  "date": "2026-11-21",
+  "base_sha": "4829b33a9c20795af066a3ee96fb211d66c55de6",
+  "branch": "feat/wakeword-josu",
+  "pr": 3,
+  "failing_channel_release_tests_before_fix": 4,
+  "already_correct_ambiguous_bus_regressions": 2,
+  "aw88298_truncation_negative_controls": 2,
+  "local": {
+    "root": {"pass": 495, "skip": 2, "seconds": 92.89},
+    "standalone_optional": {"pass": 625, "skip": 5, "seconds": 103.07},
+    "focused_codec": {"pass": 66, "seconds": 11.20},
+    "compiler": "Zig0.15.2/Clang20.1.2 -O2 assertions ON",
+    "ruff_and_format": "PASS",
+    "owned_diff_check": "PASS",
+    "original_sdk_files_byte_equal": 15
+  },
+  "review": {
+    "fresh_reviewers": 1,
+    "critical": 0,
+    "important": 1,
+    "important_resolution": "Split test-double statements for GNU warning portability; formatting only, actual pre-fix GCC warning not locally reproduced",
+    "minor_resolution": "Correct stale plan bus ownership sentence"
+  },
+  "ci_at_recording": "NOT_YET_PUSHED; exact-head final results in PR3/checks",
+  "device_operations": 0,
+  "flash_writes": 0,
+  "real_voice": 0,
+  "paid_api": 0,
+  "operating_app": "HOLD marker only",
+  "cloud_default": "OFF",
+  "physical_output_enabled": false,
+  "dma_drain_ready": false,
+  "unresolved": [
+    "Ambiguous failed I2C bus deletion can leave an unreclaimed bus; no reaccess or recovery is attempted",
+    "SDK control destructor ignores low-level device-removal result",
+    "Persistent I2S release failure can survive the destructor final best-effort attempt",
+    "Physical power, channel mapping, STOP, mute, DMA drain",
+    "Combined TLS peak, live admission, real wake recognition and standalone GPT turn",
+    "Windows physical I/O versus OS descheduling attribution"
+  ]
+}

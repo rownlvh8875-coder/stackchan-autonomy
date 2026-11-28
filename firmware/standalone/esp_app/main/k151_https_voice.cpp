@@ -168,8 +168,12 @@ bool K151HttpsVoicePort::post_once(
      !send_exact(c.ptr,multipart->suffix.data(),multipart->suffix.size(),gate))
     return false;
  }else if(!send_exact(c.ptr,body.data(),body.size(),gate))return false;
- if(!gate.allowed(static_cast<uint64_t>(monotonic_ms())))return false;
- const int64_t declared=esp_http_client_fetch_headers(c.ptr);
+ int64_t declared;
+ do {
+  if(!gate.allowed(static_cast<uint64_t>(monotonic_ms())))return false;
+  // ESP-IDF retains the parser and connection after a receive timeout.
+  declared=esp_http_client_fetch_headers(c.ptr);
+ } while(declared==-ESP_ERR_HTTP_EAGAIN);
  if(declared<0||headers.duplicate||esp_http_client_get_status_code(c.ptr)!=200||
     esp_http_client_get_transport_type(c.ptr)!=HTTP_TRANSPORT_OVER_SSL)return false;
  const bool chunked=esp_http_client_is_chunked_response(c.ptr);
@@ -181,6 +185,7 @@ bool K151HttpsVoicePort::post_once(
  for(;;){
   if(!gate.allowed(static_cast<uint64_t>(monotonic_ms())))return false;
   const int count=esp_http_client_read(c.ptr,chunk.data(),chunk.size());
+  if(count==-ESP_ERR_HTTP_EAGAIN)continue;
   if(count<0||count>static_cast<int>(chunk.size()))return false;
   if(count==0)break;
   if(!receiver.append(std::span<const uint8_t>(

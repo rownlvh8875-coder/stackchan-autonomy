@@ -41,7 +41,332 @@ jobs:
             --elf firmware/standalone/esp_app/build/stackchan_standalone_hold.elf \
             --bin firmware/standalone/esp_app/build/stackchan_standalone_hold.bin \
             --idf-head "$IDF_SHA" \
+            --check-realtime \
             --out firmware/standalone/esp_app/validation-manifest.json
+      - name: Build unarmed standalone conversation for review (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          python3 firmware/standalone/tools/prepare_wakenet_assets.py \
+            --source firmware/standalone/esp_app/managed_components/espressif__esp-sr/model/wakenet_model/wn9l_histackchan_tts3 \
+            --out firmware/standalone/resource_bench/main/srmodels.bin
+          APP=firmware/standalone/esp_app
+          OUT="$GITHUB_WORKSPACE/$APP/build-conversation-review"
+          idf.py -C "$APP" -B "$OUT" -DK151_CONVERSATION_REVIEW=ON \
+            -DK151_CONVERSATION_PRIVATE_POLICY= -DSDKCONFIG="$OUT/sdkconfig" \
+            -DIDF_TARGET=esp32s3 -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          grep -Eq 'libnvs_flash\.a\(k151_nvs_page\.cpp\.(o|obj)\)' "$OUT/k151_conversation_review.map"
+          python3 firmware/standalone/tools/check_nvs_power_loss.py --idf "$IDF_PATH" \
+            --page-source "$OUT/k151_nvs_recovery/k151_nvs_page.cpp"
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_conversation_image.py \
+            --elf "$OUT/k151_conversation_review.elf" --bin "$OUT/k151_conversation_review.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --sdkconfig "$OUT/sdkconfig" \
+            --out "$OUT/validation-manifest.json"
+      - name: Compile AEC synthetic self-test (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          PROBE=firmware/standalone/aec_stop_probe
+          OUT="$GITHUB_WORKSPACE/$PROBE/build"
+          idf.py -C "$PROBE" -B "$OUT" -DIDF_TARGET=esp32s3 \
+            -DSDKCONFIG="$OUT/sdkconfig" build
+          grep -aFq 'K151_AEC_STOP_SYNTHETIC_ONLY_HOLD' "$OUT/k151_aec_stop_selftest.bin"
+      - name: Publish unarmed conversation SHA and size proof (NO firmware binary)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-conversation-review-NO-RELEASE-proof
+          path: firmware/standalone/esp_app/build-conversation-review/validation-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build panel and screen STOP diagnostics (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          PROBE=firmware/standalone/panel_probe
+          build_probe() {
+            local out="$GITHUB_WORKSPACE/$PROBE/$1" app="$2" scope="$3" stop_only="$4"
+            idf.py -C "$PROBE" -B "$out" -DSDKCONFIG="$out/sdkconfig" \
+              -DIDF_TARGET=esp32s3 -DPROJECT_VER="${SOURCE_HEAD:0:12}" \
+              -DK151_PANEL_STOP_ONLY="$stop_only" build
+            python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+              "$out/partition_table/partition-table.bin" "$out/BUILT-PARTITIONS-NEVER-FLASH.csv"
+            python3 firmware/standalone/tools/check_board_probe.py "$scope" \
+              --nm xtensa-esp32s3-elf-nm \
+              --elf "$out/$app.elf" --bin "$out/$app.bin" \
+              --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+              --write-offset 0x510000 --partition-csv "$out/BUILT-PARTITIONS-NEVER-FLASH.csv" \
+              --out "$out/validation-manifest.json"
+            cp "$IDF_PATH/LICENSE" "$out/ESP-IDF-LICENSE"
+            cp "$PROBE/managed_components/lvgl__lvgl/LICENCE.txt" "$out/LVGL-LICENSE"
+            cp firmware/standalone/esp_app/main/M5STACK-MIT-LICENSE.txt "$out/M5STACK-MIT-LICENSE.txt"
+          }
+          build_probe build k151_panel_probe --panel OFF
+          build_probe build-stop k151_screen_stop_probe --screen-stop-only ON
+      - name: Upload panel probe for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-panel-probe-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/panel_probe/build/k151_panel_probe.bin
+            firmware/standalone/panel_probe/build/k151_panel_probe.elf
+            firmware/standalone/panel_probe/build/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/panel_probe/build/validation-manifest.json
+            firmware/standalone/panel_probe/build/ESP-IDF-LICENSE
+            firmware/standalone/panel_probe/build/LVGL-LICENSE
+            firmware/standalone/panel_probe/build/M5STACK-MIT-LICENSE.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload screen STOP-only probe for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-screen-stop-probe-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/panel_probe/build-stop/k151_screen_stop_probe.bin
+            firmware/standalone/panel_probe/build-stop/k151_screen_stop_probe.elf
+            firmware/standalone/panel_probe/build-stop/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/panel_probe/build-stop/validation-manifest.json
+            firmware/standalone/panel_probe/build-stop/ESP-IDF-LICENSE
+            firmware/standalone/panel_probe/build-stop/LVGL-LICENSE
+            firmware/standalone/panel_probe/build-stop/M5STACK-MIT-LICENSE.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build GPIO-isolated silent TX probe (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          PROBE=firmware/standalone/silent_tx_probe
+          OUT="$PROBE/build"
+          idf.py -C "$PROBE" -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
+          idf.py -C "$PROBE" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_mic_wake_image.py --silent-tx \
+            --elf "$OUT/k151_silent_tx_probe.elf" --bin "$OUT/k151_silent_tx_probe.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
+          cp "$IDF_PATH/LICENSE" "$OUT/ESP-IDF-LICENSE"
+      - name: Publish silent TX probe for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-silent-tx-probe-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/silent_tx_probe/build/k151_silent_tx_probe.bin
+            firmware/standalone/silent_tx_probe/build/k151_silent_tx_probe.elf
+            firmware/standalone/silent_tx_probe/build/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/silent_tx_probe/build/validation-manifest.json
+            firmware/standalone/silent_tx_probe/build/ESP-IDF-LICENSE
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build one-shot synthetic speaker probe (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          PROBE=firmware/standalone/speaker_probe
+          OUT="$PROBE/build"
+          idf.py -C "$PROBE" -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
+          idf.py -C "$PROBE" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_mic_wake_image.py --speaker \
+            --elf "$OUT/k151_speaker_probe.elf" --bin "$OUT/k151_speaker_probe.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
+          cp "$IDF_PATH/LICENSE" "$OUT/ESP-IDF-LICENSE"
+          cp firmware/standalone/tests/sdk_esp_codec_dev_1_6_2/LICENSE "$OUT/ESP-CODEC-DEV-LICENSE"
+      - name: Publish synthetic speaker probe for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-speaker-probe-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/speaker_probe/build/k151_speaker_probe.bin
+            firmware/standalone/speaker_probe/build/k151_speaker_probe.elf
+            firmware/standalone/speaker_probe/build/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/speaker_probe/build/validation-manifest.json
+            firmware/standalone/speaker_probe/build/ESP-IDF-LICENSE
+            firmware/standalone/speaker_probe/build/ESP-CODEC-DEV-LICENSE
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build 24 kHz ES7210 reference STOP diagnostic (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          PROBE=firmware/standalone/speaker_stop_probe
+          OUT="$GITHUB_WORKSPACE/$PROBE/build-aec-reference"
+          idf.py -C "$PROBE" -B "$OUT" -DSDKCONFIG="$OUT/sdkconfig" \
+            -DIDF_TARGET=esp32s3 -DPROJECT_VER="${SOURCE_HEAD:0:12}" -DK151_AEC_REFERENCE=ON build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_mic_wake_image.py --aec-stop \
+            --elf "$OUT/k151_aec_stop_trial.elf" --bin "$OUT/k151_aec_stop_trial.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
+      - name: Build question-only diagnostic for review (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          TRIAL=firmware/standalone/question_only_trial
+          OUT="$TRIAL/build"
+          idf.py -C "$TRIAL" -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
+          idf.py -C "$TRIAL" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_mic_wake_image.py --question-only \
+            --elf "$OUT/k151_question_only.elf" --bin "$OUT/k151_question_only.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
+          mkdir -p "$OUT/review-notices"
+          cp "$IDF_PATH/LICENSE" "$OUT/review-notices/ESP-IDF-LICENSE"
+          cp firmware/standalone/tests/sdk_esp_codec_dev_1_6_2/LICENSE "$OUT/review-notices/ESP-CODEC-DEV-LICENSE"
+      - name: Publish question-only diagnostic for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-question-only-trial-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/question_only_trial/build/k151_question_only.bin
+            firmware/standalone/question_only_trial/build/k151_question_only.elf
+            firmware/standalone/question_only_trial/build/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/question_only_trial/build/validation-manifest.json
+            firmware/standalone/question_only_trial/build/review-notices/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build separate silent resource bench (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          # checkout's temporary HOME is not inherited by export.sh. Permit only
+          # this CI checkout for this command; fail before building on Git error.
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          test "${#SOURCE_HEAD}" = 40
+          idf.py -C firmware/standalone/resource_bench -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
+          idf.py -C firmware/standalone/resource_bench -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python3 firmware/standalone/tools/check_resource_bench.py \
+            --elf firmware/standalone/resource_bench/build/k151_resource_bench.elf \
+            --bin firmware/standalone/resource_bench/build/k151_resource_bench.bin \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" \
+            --source-head "$SOURCE_HEAD" \
+            --out firmware/standalone/resource_bench/validation-manifest.json
+          mkdir -p firmware/standalone/resource_bench/review-notices
+          cp "$IDF_PATH/LICENSE" firmware/standalone/resource_bench/review-notices/ESP-IDF-LICENSE
+          cp "$IDF_PATH/components/mbedtls/mbedtls/LICENSE" firmware/standalone/resource_bench/review-notices/Mbed-TLS-LICENSE
+          cp firmware/standalone/tests/sdk_esp_sr_2_4_7/LICENSE firmware/standalone/resource_bench/review-notices/ESP-SR-LICENSE
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          source = Path("firmware/standalone/resource_bench/managed_components")
+          dest = Path("firmware/standalone/resource_bench/review-notices/components")
+          for notice in source.rglob("*"):
+              if notice.is_file() and notice.name.startswith(("LICENSE", "NOTICE")):
+                  target = dest / notice.relative_to(source)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(notice, target)
+          PY
+      - name: Build separate read-only board probe (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          test "${#SOURCE_HEAD}" = 40
+          idf.py -C firmware/standalone/board_probe -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
+          idf.py -C firmware/standalone/board_probe -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            firmware/standalone/board_probe/build/partition_table/partition-table.bin \
+            firmware/standalone/board_probe/BUILT-PARTITIONS-NEVER-FLASH.csv
+          python3 firmware/standalone/tools/check_board_probe.py \
+            --elf firmware/standalone/board_probe/build/k151_board_probe.elf \
+            --bin firmware/standalone/board_probe/build/k151_board_probe.bin \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" \
+            --source-head "$SOURCE_HEAD" \
+            --write-offset 0x510000 \
+            --partition-csv firmware/standalone/board_probe/BUILT-PARTITIONS-NEVER-FLASH.csv \
+            --out firmware/standalone/board_probe/validation-manifest.json
+          python3 firmware/standalone/tools/collect_board_probe_notices.py \
+            --idf "$IDF_PATH" --out firmware/standalone/board_probe/review-notices
+      - name: Build separate read-only power probe (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          PROBE=firmware/standalone/board_probe
+          OUT="$GITHUB_WORKSPACE/.local/power-ci"
+          idf.py -C "$PROBE" -B "$OUT" -DSDKCONFIG="$OUT/sdkconfig" -DK151_POWER_READBACK=ON \
+            -DIDF_TARGET=esp32s3 -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_board_probe.py --power-readback \
+            --nm xtensa-esp32s3-elf-nm --write-offset 0x510000 \
+            --elf "$OUT/k151_power_readback.elf" --bin "$OUT/k151_power_readback.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$OUT/validation-manifest.json"
+      - name: Build one-shot microphone trial for review (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          TRIAL=firmware/standalone/mic_wake_trial
+          cp firmware/standalone/resource_bench/main/srmodels.bin "$TRIAL/main/srmodels.bin"
+          idf.py -C "$TRIAL" -DPROJECT_VER="${SOURCE_HEAD:0:12}" set-target esp32s3
+          idf.py -C "$TRIAL" -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+            "$TRIAL/build/partition_table/partition-table.bin" "$TRIAL/BUILT-PARTITIONS-NEVER-FLASH.csv"
+          python3 firmware/standalone/tools/check_mic_wake_image.py \
+            --elf "$TRIAL/build/k151_mic_wake_trial.elf" \
+            --bin "$TRIAL/build/k151_mic_wake_trial.bin" \
+            --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+            --partition-csv "$TRIAL/BUILT-PARTITIONS-NEVER-FLASH.csv" \
+            --out "$TRIAL/validation-manifest.json"
+          cp -r firmware/standalone/board_probe/review-notices "$TRIAL/review-notices"
+          cp firmware/standalone/tests/sdk_esp_sr_2_4_7/LICENSE "$TRIAL/review-notices/ESP-SR-LICENSE"
+          cp firmware/standalone/tests/sdk_esp_codec_dev_1_6_2/LICENSE "$TRIAL/review-notices/ESP-CODEC-DEV-LICENSE"
+      - name: Build question and wake-only control trials (NO INSTALL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          SOURCE_HEAD="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)"
+          test "$SOURCE_HEAD" = "$GITHUB_SHA"
+          TRIAL=firmware/standalone/mic_wake_trial
+          build_trial() {
+            local out="$TRIAL/$1" option="$2" project="$3" check_mode="$4"
+            idf.py -C "$TRIAL" -B "$GITHUB_WORKSPACE/$out" "-D$option=ON" -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+            python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+              "$out/partition_table/partition-table.bin" "$out/BUILT-PARTITIONS-NEVER-FLASH.csv"
+            python3 firmware/standalone/tools/check_mic_wake_image.py "$check_mode" \
+              --elf "$out/$project.elf" --bin "$out/$project.bin" \
+              --idf-head "$(git -C "$IDF_PATH" rev-parse HEAD)" --source-head "$SOURCE_HEAD" \
+              --partition-csv "$out/BUILT-PARTITIONS-NEVER-FLASH.csv" --out "$out/validation-manifest.json"
+          }
+          build_trial build-question K151_QUESTION_TRIAL k151_mic_question_trial --question
+          build_trial build-wake-only-control K151_WAKE_ONLY_CONTROL k151_wake_only_control --wake-only-control
       - name: Publish SHA/size proof only (NO firmware binary)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -50,3 +375,62 @@ jobs:
           path: firmware/standalone/esp_app/validation-manifest.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Publish generic bench image for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-silent-resource-bench-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/resource_bench/build/k151_resource_bench.bin
+            firmware/standalone/resource_bench/build/k151_resource_bench.elf
+            firmware/standalone/resource_bench/validation-manifest.json
+            firmware/standalone/resource_bench/review-notices/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish readback image for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-readonly-board-probe-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/board_probe/build/k151_board_probe.bin
+            firmware/standalone/board_probe/build/k151_board_probe.elf
+            firmware/standalone/board_probe/validation-manifest.json
+            firmware/standalone/board_probe/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/board_probe/review-notices/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish microphone trial for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-mic-wake-trial-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/mic_wake_trial/build/k151_mic_wake_trial.bin
+            firmware/standalone/mic_wake_trial/build/k151_mic_wake_trial.elf
+            firmware/standalone/mic_wake_trial/validation-manifest.json
+            firmware/standalone/mic_wake_trial/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/mic_wake_trial/review-notices/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish question trial for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-mic-question-trial-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/mic_wake_trial/build-question/k151_mic_question_trial.bin
+            firmware/standalone/mic_wake_trial/build-question/k151_mic_question_trial.elf
+            firmware/standalone/mic_wake_trial/build-question/validation-manifest.json
+            firmware/standalone/mic_wake_trial/build-question/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/mic_wake_trial/review-notices/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish wake-only control for review (NOT INSTALL APPROVAL)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k151-wake-only-control-NOT-INSTALL-APPROVED
+          path: |
+            firmware/standalone/mic_wake_trial/build-wake-only-control/k151_wake_only_control.bin
+            firmware/standalone/mic_wake_trial/build-wake-only-control/k151_wake_only_control.elf
+            firmware/standalone/mic_wake_trial/build-wake-only-control/validation-manifest.json
+            firmware/standalone/mic_wake_trial/build-wake-only-control/BUILT-PARTITIONS-NEVER-FLASH.csv
+            firmware/standalone/mic_wake_trial/review-notices/
+          if-no-files-found: error
+          retention-days: 14

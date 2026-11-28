@@ -998,3 +998,44 @@ Baseline230 PASS /24.68s. No environment publication, device or paid API use.
   - A fresh embedded-audio builder check of the revision returned "nothing important left".
     Design implementation approval remains pending. No product implementation, voice
     recording, template training, microphone/device/API access or firmware installation.
+
+- 2026-11-20 (Asia/Seoul): Continued `feat/wakeword-josu` / PR #3 from e8ee330 per user's pasted implementation instructions. Preserved prior unfinished worktree and existing synthetic fixtures. Diagnosed absent observability behind notebook `UNVERIFIED_NO_MATCH` (22,080frames does not establish truncation). Added input/VAD/FIR quality diagnostics, actual C++ private feature/calibration/score pipes, and RAM-only personal enrollment with frozen calibration and fresh evaluation. Windows runners select current mic rather than hardcoded9, save only a new ignored passing profile. Existing core, GPT/MCP path and hardware HOLD remain unchanged. Full local results and boundaries: [validation](validation/2026-11-20-josu-human-mic-diagnostics.md); [operator guide](../firmware/standalone/docs/2026-11-20-josu-human-mic.md). No actual Windows microphone/COM3/paid API/firmware/NVS/OTA/motor operation performed.
+
+- 2026-11-20 (Asia/Seoul): Field enrollment kept failing at capture boundary even at3seconds; the requested no-speaking control also showed energy/tail activity with keyword rejection. No raw/private voice features received. Reproduced separated weak-tail expansion and quiet-noise premature rejection using synthetic/public data. Added conservative relative-peak energy region, retained400ms/physical-edge/format/clip guards, evaluated noisy quiet trials with the real frozen C++ matcher, kept falsewake FAIL and malformed/duplicate protections, and added3-second defaults/recording-finished marker. [Validation](validation/2026-11-20-josu-background-activity.md). Actual field success/device/API remain unverified and unexecuted.
+
+- 2026-11-20 (Asia/Seoul): User's next PC session passed all3enrollment+5positive/10negative calibration capture quality gates, then returned generic local_helper_rejected before evaluation. No private PCM/features were retained or received, so exact historical cause remains unknown. Added host-only fixed calibration failure codes plus extreme trial indices/numeric distances, strictly validated before Python CLI output. Kept original core calibrator, successful SWK1 bytes, rejection/pass criteria and storage protections. Synthetic overlap/range and actual process-boundary/CLI privacy tests first4FAIL, then GREEN. [Validation](validation/2026-11-20-josu-calibration-diagnostics.md). No actual microphone/device/API access.
+
+- 2026-11-20 (Asia/Seoul): User's new18capture session passed quality gates but returned calibration_not_separable; no raw/acoustic scalar data published or retuned. User accepted recommended built-in-wake support verification priority. Verified factory source pins Hi StackChan/ESP-SR2.4.7/IDF6.1, then copied current HOLD+core into an ignored throwaway project and actually compiled/linked model APIs and packed selected model. Build0, app334688bytes/model292607bytes, pack contents/SHA and ELF symbols checked, static DIRAM65482bytes. Model never executed; device/API untouched; runtime product source unchanged. Source/pack/size evidence and next integration sequence: [native wake preflight](validation/2026-11-20-k151-builtin-wakenet-preflight.md).
+
+- 2026-11-20 (Asia/Seoul): User requested next builtin-wake integration. Added stateful24k→16k FIR, bounded NativeWakeController, shared VoiceDialogEntry, preserved legacy SWK1 wrapper. Local native hits admit one RAM-only exact Session epoch; durable budgets/read-back, cloud/owner/time/ordered paid-step guards stay closed by default. Added dormant ESP-SR2.4.7 K151 adapter with exact Hi StackChan model/shape/lifecycle validation; full public ABI doubles and real S3 compile/link, no SDK startup. Core RED31 then admission RED8→41PASS including legacy; SDK RED25→25PASS. Full root487PASS2SKIP, standalone338PASS43SKIP, selected NumPy PC105PASS3SKIP; pinned actual targetapp325792/staticDIRAM59030bytes. Link proof caught virtual-pointer GC; retained qualified thunk verified detect symbol. No device/actual audio/API/flash/NVS/OTA/motor/environment publish. [Evidence and remaining preparation](validation/2026-11-20-native-wake-voice-bridge.md). Prior1412660 Windows3.12 soak failed check_timeout and unchanged rerun failed renew_timeout; no relaxation or hidden substitution.
+
+- Same native bridge task: sole fresh review found4Important issues (epoch crossing, shared SDK ownership, terminal-context retention, optimized PCM wipe). Promoted partial-read provider mutation to Important by effect. Reproduced9FAIL, corrected callback clock fixtures against pre-fix source, then70focusedPASS. Added listening-epoch checks, immediate provider checks, atomic single SDK owner/refusal of external cache, immediate error release and volatile PCM wipes with actual -O2 destructor store proof. Final whole standalone381PASS7Windows-onlySKIP with optional NumPy/crypto, root487PASS2SKIP, Ruff326files and actual S3/symbol recheck PASS. Finalapp325792bytes/staticDIRAM59030. Upstream SDK whitespace preserved as deferred minor with exact project diff scope. Physical/runtime/network/install exclusions remain HOLD; no re-review.
+# 2026-11-20 Windows K151 handoff
+
+Same feat/wakeword-josu/PR#3, clean checkout fast-forwarded to696460c. Added bounded
+queue/SQLite/loop diagnostic evidence without changing safety limits; historical
+Windows check_timeout remains unexplained. Local160/500/final600 finite Mock runs
+passed, cloud0; root495PASS2SKIP and standalone402PASS5SKIP on Windows. Reverified
+existing A/B16MB SHA, sanitized historical OTA candidateota_1, regenerated pinned
+292607byte model pack. Added dormant single-owner loop and after-model/TLS memory
+admission. Single independent review's delivery-cancellation label corrected via
+RED→GREEN. PnP has no present Espressif; no port/reset/write/API/voice recording.
+Target build is separate CI evidence; app_main remains HOLD. Details and remaining
+installation/restore constraints: [handoff](validation/2026-11-20-windows-handoff.md),
+[preparation](K151_NATIVE_INSTALL_PREP.ko.md). New head CI is reported on PR#3.
+
+## 2026-11-20 USB reconnection and target asset verification gate
+
+User reconnected COM3/303A:1001. One no-reset query failed; explicit USB reset
+queried S3rev0.2/16MB/securityOFF. Read current table4KiB+OTA8KiB only; both match
+verified factory snapshot. Current seq1/2 VALID→ota_1 candidate, not running/spare
+proof. Requested hard-reset back to flash boot; actual face/menu unobserved.
+No flash/partition/NVS/eFuse write, stub upload, new voice capture or API call.
+Added dormant actual whole-DATA-partition SHA + atomic owner/STOP preparation.
+Pinned draft model partition readonly/main-flash/F00000/1MiB includingFF tail.
+17RED→44SDKPASS,2RED→5packerPASS. Single independent review found legacy-entry
+lifecycle bypass; it plus stricter revocation boundaries reproduced3RED→101focused
+PASS. Final whole standalone423PASS5SKIP/root495PASS2SKIP, Ruff335files PASS.
+Actual new target CI remains separate. Preserved a6488de7/9 CI with SQLite COMMIT
+renewal and installed-wheel Mock wait failures; no job retry/timeout relaxation.
+[Fresh device and asset evidence](validation/2026-11-20-k151-current-usb-and-assets.md).

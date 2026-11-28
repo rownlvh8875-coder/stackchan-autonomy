@@ -16,8 +16,22 @@ def test_ci_linux_runner_is_explicit_stable_target():
 
 def test_codec_dependencies_have_bounded_network_retries():
     config = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    steps = config["jobs"]["verify"]["steps"]
+    job = config["jobs"]["verify"]
+    assert job["timeout-minutes"] == 20
+    steps = job["steps"]
     linux = next(step for step in steps if step.get("name") == "Install Linux codec")
     assert linux["if"] == "runner.os == 'Linux'"
-    assert "apt-get -o Acquire::Retries=3 update" in linux["run"]
-    assert "apt-get -o Acquire::Retries=3 install --yes libopus0 libcjson-dev" in linux["run"]
+    run = linux["run"]
+    assert "URIs: https://archive.ubuntu.com/ubuntu/" in run
+    assert "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg" in run
+    options = run.split("apt_options=(\n", 1)[1].split("\n)\n", 1)[0]
+    assert [line.strip() for line in options.splitlines()] == [
+        "-o Dir::Etc::sourcelist=/dev/null",
+        '-o "Dir::Etc::sourceparts=$sources_dir"',
+        "-o Acquire::Retries=3",
+    ]
+    commands = [line for line in run.splitlines() if line.startswith("sudo apt-get ")]
+    assert commands == [
+        'sudo apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update',
+        'sudo apt-get "${apt_options[@]}" install --yes libopus0 libcjson-dev',
+    ]

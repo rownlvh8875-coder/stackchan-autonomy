@@ -70,15 +70,23 @@ def _sas(shared: bytes, device_hello: bytes, pc_hello: bytes) -> str:
     return f"{int.from_bytes(data, 'big') % 100_000_000:08d}"
 
 
-def _encode_credentials(ssid: bytes, password: str, api_key: str) -> bytes:
+def validate_wifi_credentials(ssid: bytes, password: str) -> None:
     if not 1 <= len(ssid) <= 32 or any(b < 0x20 or b == 0x7F for b in ssid):
         raise ValueError("invalid SSID")
     if not 8 <= len(password) <= 64 or any(ord(c) < 0x20 or ord(c) > 0x7E for c in password):
         raise ValueError("invalid Wi-Fi passphrase")
     if len(password) == 64 and any(c not in "0123456789abcdefABCDEF" for c in password):
         raise ValueError("64-character Wi-Fi PSK must be hex")
+
+
+def validate_api_key(api_key: str) -> None:
     if not 16 <= len(api_key) <= 220 or any(ord(c) <= 0x20 or ord(c) >= 0x7F for c in api_key):
         raise ValueError("invalid API key")
+
+
+def _encode_credentials(ssid: bytes, password: str, api_key: str) -> bytes:
+    validate_wifi_credentials(ssid, password)
+    validate_api_key(api_key)
     key_bytes, pass_bytes = api_key.encode("ascii"), password.encode("ascii")
     return (
         PAYLOAD_MAGIC

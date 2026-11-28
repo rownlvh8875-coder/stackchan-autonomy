@@ -13,11 +13,14 @@
 #include <esp_wifi_default.h>
 #include <esp_netif_sntp.h>
 #include <esp_event.h>
+#include <sdkconfig.h>
 
 namespace stackchan::standalone {
 namespace {
 constexpr size_t kQueueLength = 16;
 constexpr char kNtpServer[] = "pool.ntp.org";
+static_assert(CONFIG_LWIP_SNTP_UPDATE_DELAY < NetworkTimeGuard::kMaxClockAgeMs,
+              "SNTP must refresh before K151 clock admission expires");
 uint64_t millis() {
   const int64_t t = esp_timer_get_time();
   return t <= 0 ? 0 : static_cast<uint64_t>(t / 1000);
@@ -40,14 +43,8 @@ void K151WifiTimePort::on_event(void* arg, esp_event_base_t base,
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
     evt.type = EventType::associated;
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-    self->link_down_.store(true, std::memory_order_release);
-    self->admission_ready_.store(false, std::memory_order_release);
     evt.type = EventType::disconnected;
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-    // A DHCP renewal can replace the route while a voice request is active.
-    // Revoke readiness in the callback, not on the next owner poll.
-    self->link_down_.store(true, std::memory_order_release);
-    self->admission_ready_.store(false, std::memory_order_release);
     evt.type = EventType::ip;
   } else if (base == NETIF_SNTP_EVENT && id == NETIF_SNTP_TIME_SYNC && data) {
     const auto* sync = static_cast<const esp_netif_sntp_time_sync_t*>(data);
@@ -56,6 +53,18 @@ void K151WifiTimePort::on_event(void* arg, esp_event_base_t base,
     evt.epoch_seconds = static_cast<uint64_t>(sync->tv.tv_sec);
   } else {
     return;
+  }
+  if (evt.type == EventType::disconnected || evt.type == EventType::ip ||
+      evt.type == EventType::sync) {
+    std::lock_guard<std::mutex> lock(self->route_mutex_);
+    if (evt.type != EventType::sync) {
+      // Revoke before the owner drains the queue. An older queued clock sync
+      // must not restore admission after this callback changes the route.
+      self->link_down_.store(true, std::memory_order_release);
+      self->admission_ready_.store(false, std::memory_order_release);
+      ++self->route_revision_;
+    }
+    evt.route_revision = self->route_revision_;
   }
   // The event task only enqueues, never writes NVS, opens a paid request,
   // logs SSID/key, or modifies policy concurrently with poll().
@@ -139,6 +148,7 @@ bool K151WifiTimePort::handle_event(const Event& evt, uint64_t now_ms) {
       return true;
     case EventType::ip:
       if (!policy_.ip_acquired(policy_.attempt_id(), now_ms)) return false;
+      acquired_ip_revision_ = evt.route_revision;
       // On renewal the same esp-netif SNTP service is already running.
       // Starting it twice is not a recovery operation and may fail.
       if (sntp_started_) return true;
@@ -146,6 +156,9 @@ bool K151WifiTimePort::handle_event(const Event& evt, uint64_t now_ms) {
       sntp_started_ = true;
       return true;
     case EventType::sync: {
+      std::lock_guard<std::mutex> lock(route_mutex_);
+      if (!acquired_ip_revision_ || evt.route_revision != acquired_ip_revision_ ||
+          evt.route_revision != route_revision_) return true;
       // SNTP is ordinary, unauthenticated; only time plausibility is checked.
       const bool accepted = policy_.time_synchronized(
           policy_.attempt_id(), evt.epoch_seconds, now_ms);

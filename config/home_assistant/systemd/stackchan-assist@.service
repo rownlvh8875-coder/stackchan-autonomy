@@ -1,0 +1,29 @@
+[Unit]
+Description=StackChan Assist %i worker
+PartOf=stackchan-assist.target
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/var/lib/stackchan-assist
+StartLimitIntervalSec=120
+StartLimitBurst=4
+
+[Service]
+Type=exec
+User=stackchan-assist
+Group=stackchan-assist
+StateDirectory=stackchan-assist
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/stackchan-assist
+EnvironmentFile=/etc/stackchan-assist/settings.env
+UnsetEnvironment=OPENAI_API_KEY
+LoadCredential=openai-key:/etc/stackchan-assist/openai-key
+ExecStart=/opt/stackchan/venv-%i/bin/python -B -m stackchan_autonomy.ha_host %i
+Restart=on-failure
+RestartPreventExitStatus=2
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

@@ -3,6 +3,15 @@
 from pathlib import Path
 
 
+def test_native_runtime_is_built_and_linked_without_starting_in_hold():
+    app = Path(__file__).resolve().parents[1] / "esp_app" / "main"
+    entry = (app / "app_main.cpp").read_text()
+    assert '"k151_voice_runtime.cpp"' in (app / "CMakeLists.txt").read_text()
+    assert "K151VoiceRuntime::compiled_link_marker()" in entry
+    assert entry.count("K151VoiceRuntime::") == 1
+    assert "K151VoiceRuntime " not in entry
+
+
 def test_network_adapter_is_only_linked_in_hold_entrypoint():
     root = Path(__file__).resolve().parents[1]
     entry = (root / "esp_app" / "main" / "app_main.cpp").read_text()

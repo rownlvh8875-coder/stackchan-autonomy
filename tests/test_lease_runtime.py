@@ -19,6 +19,7 @@ async def test_control_deadline_is_checked_even_if_loop_cannot_schedule_timer(mo
 
     from stackchan_autonomy import action
     from stackchan_autonomy.state_store import StateUnavailable
+    from stackchan_autonomy.timing_diagnostics import TimingProbe
 
     executor = ActionExecutor(FakeRobotAdapter(), Settings(lease_ttl_s=1.5))
     assert await executor.claim_control()
@@ -34,11 +35,13 @@ async def test_control_deadline_is_checked_even_if_loop_cannot_schedule_timer(mo
         action, "time", SimpleNamespace(monotonic=lambda: time.monotonic() + offset[0])
     )
     monkeypatch.setattr(executor._storage, "call", delayed_delivery)
+    probe = TimingProbe()
     try:
-        with pytest.raises(StateUnavailable):
+        with probe.collect(), pytest.raises(StateUnavailable):
             await executor.claim_control()
         assert executor.control_loss_reason == "check_timeout"
         assert not executor.robot.history
+        assert probe.snapshot()["interruptions"][-1]["stage"] == "post_delivery_deadline"
     finally:
         monkeypatch.setattr(executor._storage, "call", original_call)
         await executor.aclose()
@@ -60,20 +63,68 @@ async def test_cold_unowned_acquisition_can_return_fresh_lease_after_slow_setup(
         await executor.aclose()
 
 
-async def test_valid_verification_uses_remaining_lifetime_not_a_fixed_fraction(monkeypatch):
-    executor = ActionExecutor(FakeRobotAdapter(), Settings(lease_ttl_s=1.5))
-    assert await executor.claim_control()
-    original = executor.lease.check
+@pytest.mark.usefixtures("lease_timing_probe")
+@pytest.mark.parametrize(("elapsed", "accepted"), [(0.6, True), (0.91, False)])
+async def test_verification_uses_remaining_lifetime_not_a_fixed_fraction(
+    monkeypatch, elapsed, accepted
+):
+    from types import SimpleNamespace
 
-    def delayed_check(handle):
-        result = original(handle)
-        time.sleep(0.6)  # Longer than TTL/4, still within the verified live lease.
-        return result
+    from stackchan_autonomy import action
+    from stackchan_autonomy.control import LeaseHandle
+    from stackchan_autonomy.state_store import StateUnavailable
 
-    monkeypatch.setattr(executor.lease, "check", delayed_check)
+    # The policy test controls both the lease timestamp and result delivery.
+    # SQLite/worker and heartbeat timing have separate integration coverage.
+    now = [100.0]
+    settings = Settings(lease_ttl_s=1.5)
+    handle = LeaseHandle(settings.control_resource, "controlled-owner", 1)
+    timeouts = []
+
+    class ControlledLease:
+        ttl_s = settings.lease_ttl_s
+        valid_until_monotonic = None
+
+        def acquire(self):
+            self.valid_until_monotonic = now[0] + self.ttl_s
+            now[0] += 0.6
+            return handle
+
+        def check(self, observed):
+            assert observed == handle and now[0] < self.valid_until_monotonic
+            now[0] += elapsed
+            return True
+
+        def release(self, observed):
+            assert observed == handle
+            return True
+
+    class ObservedAsyncio:
+        def __getattr__(self, name):
+            return getattr(asyncio, name)
+
+        def timeout(self, seconds):
+            timeouts.append(seconds)
+            return asyncio.timeout(seconds)
+
+    async def inline_storage(operation, *args, **kwargs):
+        return operation(*args, **kwargs)
+
+    monkeypatch.setattr(action, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(action, "asyncio", ObservedAsyncio())
+    executor = ActionExecutor(FakeRobotAdapter(), settings, lease=ControlledLease())
+    monkeypatch.setattr(executor._storage, "call", inline_storage)
     try:
         assert await executor.claim_control()
-        assert not executor.faulted
+        if accepted:
+            assert await executor.claim_control()
+            assert not executor.faulted
+        else:
+            with pytest.raises(StateUnavailable, match="control verification timed out"):
+                await executor.claim_control()
+            assert executor.control_loss_reason == "check_timeout"
+            assert not executor.robot.history
+        assert timeouts[1:] == pytest.approx([0.9])
     finally:
         await executor.aclose()
 
@@ -251,13 +302,21 @@ async def test_late_successful_control_io_cannot_authorize_dispatch(monkeypatch,
     )
     executor = ActionExecutor(FakeRobotAdapter(), settings, lease=lease)
     if phase == "check":
+
+        async def wait_for_test_cleanup():
+            await asyncio.Event().wait()
+
+        # Both operations share the expiry. This case observes delayed
+        # verification; the competing renewal deadline has its own test.
+        monkeypatch.setattr(executor, "_renew_control", wait_for_test_cleanup)
         assert await executor.claim_control()
-    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    verified, release, finished = threading.Event(), threading.Event(), threading.Event()
     original = getattr(lease, phase)
 
     def blocked(*args):
-        started.set()
         result = original(*args)
+        if result is not None and result is not False:
+            verified.set()
         release.wait(2)  # Delay delivery after the lease was actually verified.
         try:
             return result
@@ -274,7 +333,7 @@ async def test_late_successful_control_io_cannot_authorize_dispatch(monkeypatch,
         assert executor.control_loss_reason == phase + "_timeout"
         release.set()
         await executor.aclose()
-        assert finished.is_set()
+        assert verified.is_set() and finished.is_set()
         assert ControlLease(settings.state_path, settings.control_resource).acquire() is not None
     finally:
         release.set()
@@ -326,14 +385,17 @@ async def test_two_executors_cannot_dispatch_same_resource_until_release():
         await second.aclose()
 
 
+@pytest.mark.usefixtures("lease_timing_probe")
 async def test_live_heartbeat_renews_ownership_until_close():
     settings = Settings(lease_ttl_s=1.5, command_interval_s=0)
     executor = ActionExecutor(FakeRobotAdapter(), settings)
     contender = ControlLease(settings.state_path, settings.control_resource, ttl_s=1.5)
     try:
         assert await executor.claim_control()
-        await asyncio.sleep(3.2)  # Longer than the initial lease, independent of disk speed.
-        assert contender.acquire() is None
+        await asyncio.sleep(3.2)  # Observe ownership beyond the initial lease lifetime.
+        assert contender.acquire() is None, (
+            f"heartbeat control loss: {executor.control_loss_reason}"
+        )
     finally:
         await executor.aclose()
     assert contender.acquire() is not None

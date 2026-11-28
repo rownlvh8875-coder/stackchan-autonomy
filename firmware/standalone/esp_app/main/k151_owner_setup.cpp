@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Only this marker is linked by HOLD app_main. Setup is never constructed.
 #include "k151_owner_setup.hpp"
+#include "k151_wifi_time.hpp"
 
 namespace stackchan::standalone {
 const char* K151LocalOwnerSetup::compiled_link_marker() {
@@ -16,7 +17,8 @@ bool K151LocalOwnerSetup::start_wifi_once(K151WifiTimePort& network) {
        secrets_.ssid(), secrets_.passphrase(), secrets_.api_key(), stop_);
   // Never retain a second copy after handoff, including on driver errors.
   setup_.cancel();
-  if (stop_.load() && accepted) (void)network.shutdown();
-  return accepted && !stop_.load();
+  const bool still_allowed = owner_.load() && input_.load() && !stop_.load();
+  if (accepted && !still_allowed) (void)network.shutdown();
+  return accepted && still_allowed;
 }
 }  // namespace stackchan::standalone

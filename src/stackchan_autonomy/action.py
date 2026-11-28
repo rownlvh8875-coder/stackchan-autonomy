@@ -12,6 +12,7 @@ from .ports import RobotAdapter
 from .safety import SafetyPolicy, UnsafeDecision
 from .settings import Settings
 from .state_store import StateUnavailable
+from .timing_diagnostics import control_deadline, operation_label
 
 
 class ActionExecutor:
@@ -38,6 +39,7 @@ class ActionExecutor:
             settings.state_path, settings.control_resource, ttl_s=settings.lease_ttl_s
         )
         self._lease_handle = None
+        self._lease_storage_keeper = None
         self._heartbeat: asyncio.Task | None = None
         self._storage = AsyncStorage()
         self._claim_lock = asyncio.Lock()
@@ -61,12 +63,23 @@ class ActionExecutor:
     def _acquire_lease(self):
         if self.stopped or self.faulted:
             return None
+        if isinstance(self.lease, ControlLease) and self._lease_storage_keeper is None:
+            self._lease_storage_keeper = self.lease.store.keep_wal_open()
+        if self.stopped or self.faulted:
+            return None
         # Retain a late result inside the tracked worker, even if its caller cancels.
         self._lease_handle = self.lease.acquire()
         return self._lease_handle
 
     async def _lease_io(self, operation, *args, extends=False):
         started = time.monotonic()
+        label = (
+            "lease_acquire"
+            if operation == self._acquire_lease
+            else "lease_check"
+            if operation == self.lease.check
+            else "lease_renew"
+        )
         # Unowned setup has no lease yet. Held ownership must never outlive the
         # actual verified expiry, including admission, commit and result delivery.
         timeout = (
@@ -75,6 +88,7 @@ class ActionExecutor:
             else self._authorized_until - started
         )
         if timeout <= 0:
+            control_deadline(label, "pre_submission_deadline", 0)
             raise TimeoutError
 
         def observe():
@@ -84,14 +98,17 @@ class ActionExecutor:
             # overwrite validity metadata before this caller consumes its result.
             return result, self.lease.valid_until_monotonic, self._observation_sequence
 
-        async with asyncio.timeout(timeout):
-            result, valid_until, sequence = await self._storage.call(observe)
+        with operation_label(label):
+            async with asyncio.timeout(timeout):
+                result, valid_until, sequence = await self._storage.call(observe)
         # A descheduled loop may deliver a ready result before its overdue timer.
         finished = time.monotonic()
         if finished - started >= timeout:
+            control_deadline(label, "post_delivery_deadline", finished - started)
             raise TimeoutError
         if result is not None and result is not False:
             if valid_until is None or valid_until <= finished:
+                control_deadline(label, "expired_observation", finished - started)
                 raise TimeoutError
             if sequence > self._applied_sequence:
                 self._authorized_until = (
@@ -215,7 +232,12 @@ class ActionExecutor:
                     pass  # Leave expiry in place; never erase another owner's lease.
                 self._lease_handle = None
         finally:
-            await self._storage.aclose()
+            try:
+                if self._lease_storage_keeper is not None:
+                    await self._storage.call(self._lease_storage_keeper.close)
+                    self._lease_storage_keeper = None
+            finally:
+                await self._storage.aclose()
 
     async def _consume(self) -> None:
         while True:

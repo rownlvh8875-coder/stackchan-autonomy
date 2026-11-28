@@ -45,6 +45,10 @@ int main() {
       assert(setup_screen_frame(tp,op,verified,false,true).kind==SetupScreenKind::fault);
   }
   assert(setup_screen_frame(TouchConsentPhase::hold,OwnerSetupPhase::hold,false,false,false).kind==SetupScreenKind::locked);
+  const auto arm = setup_screen_frame(
+      TouchConsentPhase::clear_for_arm, OwnerSetupPhase::hold, false, false, false);
+  assert(std::string_view(arm.line1) == "Wait for PC instruction");
+  assert(std::string_view(arm.line2) == "Touch top for 3 sec, then lift");
   assert(setup_screen_frame(TouchConsentPhase::arm_press,OwnerSetupPhase::hold,false,false,false).kind==SetupScreenKind::hold_to_enter);
   assert(setup_screen_frame(TouchConsentPhase::owner_window,OwnerSetupPhase::hold,false,false,false).kind==SetupScreenKind::trusted_entry_required);
   assert(setup_screen_frame(TouchConsentPhase::owner_window,OwnerSetupPhase::wifi_input,true,false,false).kind==SetupScreenKind::enter_wifi);

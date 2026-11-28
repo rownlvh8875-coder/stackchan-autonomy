@@ -3,7 +3,6 @@
 #pragma once
 
 #include "owner_setup.hpp"
-#include "k151_wifi_time.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -16,6 +15,9 @@ namespace stackchan::standalone {
 // keyboard, display, or automatic trusted-input mode. The real physical
 // authorization mechanism is deliberately NOT provided or guessed here.
 class K151HeadTouchOwner;
+class K151OwnerSession;
+class K151VoiceBootstrap;
+class K151WifiTimePort;
 
 class K151LocalOwnerSetup final {
  public:
@@ -47,11 +49,19 @@ class K151LocalOwnerSetup final {
 
  private:
   friend class K151HeadTouchOwner;
+  friend class K151OwnerSession;
   friend class K151ScpsUsbPort;
+  friend class K151VoiceBootstrap;
   // Only the sensor-owned second 3-second touch ticket may consume this
   // path. Other application code cannot impersonate final confirmation.
   bool confirm(uint64_t now_ms, bool physical_confirmation) {
     return setup_.confirm(now_ms, physical_confirmation);
+  }
+  SavedSetupLoad restore_saved(SavedOwnerCredentials& saved, uint64_t now_ms) {
+    return setup_.restore_saved(saved, now_ms);
+  }
+  bool save_first(SavedOwnerCredentials& saved, bool local_save_confirmed) {
+    return setup_.save_first(saved, local_save_confirmed);
   }
   RuntimeSecrets secrets_;
   OwnerSetupController setup_;

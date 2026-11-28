@@ -2,6 +2,7 @@
 // Build-verified K151 codec transport, explicitly dormant at app startup.
 #pragma once
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -10,6 +11,9 @@
 #include <driver/i2s_tdm.h>
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
+#include "k151_bounded_i2s.hpp"
+#include "k151_codec_control.hpp"
+#include "k151_mic_only_evidence.hpp"
 
 namespace stackchan::standalone {
 
@@ -24,42 +28,137 @@ class K151CodecPort final {
   K151CodecPort& operator=(const K151CodecPort&) = delete;
   ~K151CodecPort();
 
-  bool prepare(bool physical_owner_approval, bool exact_k151_identity,
-               bool amp_reset_and_power_verified);
+  // Both atomic flags must outlive this port and latch loss until teardown.
+  // A borrowed board bus must outlive the port. Use it from the same owner
+  // task that serializes all board I2C access.
+  bool prepare(const std::atomic_bool& owner, const std::atomic_bool& stop,
+               const K151AudioBoardEvidence& evidence,
+               i2c_master_bus_handle_t borrowed_bus = nullptr);
+  static bool is_registered_board_bus(i2c_master_bus_handle_t bus);
+  bool prepare_microphone_only(const std::atomic_bool& owner, const std::atomic_bool& stop,
+                               const K151MicOnlyEvidence& evidence);
   bool microphone_on();
   bool microphone_off();
-  bool capture_mono_24k(std::span<int16_t> mono);  // <= 10ms; channel 0 only
-  bool speaker_on_low_volume();
-  bool speaker_off();
-  bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms
-  bool drain_output_before_mute(); // False until real DMA+codec drain telemetry.
+  bool capture_idle() const;  // Check physical I2S idle before the next capture.
+  bool start_fresh_capture(); // Open duplex RX and discard its first complete PCM block.
+  bool capture_mono_24k(std::span<int16_t> mono);  // <= 10ms PCM; 20ms driver wait + 40ms postcheck.
+  static bool playback_enabled_by_build();
+  bool playback_available() const;
+  bool speaker_on_low_volume(const std::atomic_bool& consent);
+  bool speaker_off(const std::atomic_bool* consent = nullptr);
+  bool play_mono_24k(std::span<const int16_t> mono); // <= 10ms PCM; not wall-clock latency.
+  bool wait_for_tx_tail(const std::atomic_bool& owner, const std::atomic_bool& consent,
+                        const std::atomic_bool& stop);
+  bool drain_output_before_mute(); // Consume fresh DMA tail confirmation.
   bool quiet();      // Both codecs; error latches fault
-  bool shutdown();   // Release only, never erase/flash/NVS
-  bool prepared() const { return prepared_ && !fault_; }
-  bool faulted() const { return fault_; }
+  bool shutdown();   // One release attempt/handle; retains failed I2S, fault stays.
+  bool prepared() const {
+    return prepared_ && !faulted() && input_allowed() &&
+           (speaker_probe_build() || in_control_.healthy()) &&
+           (microphone_only() || out_control_.healthy());
+  }
+  bool faulted() const {
+    return fault_ || data_port_.faulted() || in_control_.faulted() || out_control_.faulted();
+  }
+  K151MicWakeStage prepare_stage() const { return prepare_stage_; }
+  K151SpeakerStartupDiagnostic speaker_startup() const { return speaker_startup_; }
+  K151SpeakerCleanupStage speaker_cleanup_stage() const { return speaker_cleanup_stage_; }
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  K151SpeakerResetObservations speaker_reset_observations() const { return speaker_reset_observations_; }
+#endif
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+  bool speaker_stop_reset_latch_verified() const { return speaker_stop_reset_latch_verified_; }
+  bool speaker_stop_tx_idle() const;
+#endif
+  bool cleanup_unverified() const { return cleanup_unverified_; }
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  bool start_aec_reference();
+  const char* aec_setup_stage() const { return aec_setup_stage_; }
+#endif
 
  private:
+  static constexpr bool speaker_probe_build() {
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+    return true;
+#else
+    return false;
+#endif
+  }
+  enum class OutputData { empty, queued, dma_complete, drain_confirmed };
+  bool microphone_only() const { return receive_only_; }
+  bool input_allowed() const {
+    // A cold port rejects on prepared() without latching a new I/O fault.
+    return owner_ ? owner_->load() && !stop_->load() : !attempted_;
+  }
   bool fail();
+  K151SpeakerCleanupStage wait_for_standby_switch_off(const std::atomic_bool* consent,
+                                                     bool stopping);
+  void note_speaker_cleanup_failure(K151SpeakerCleanupStage stage) {
+    if constexpr (speaker_probe_build()) {
+      if (speaker_cleanup_stage_ == K151SpeakerCleanupStage::none) speaker_cleanup_stage_ = stage;
+    }
+  }
+  bool prepare_hardware();
+  bool prepare_board();
+  bool attach_board_device(uint16_t address);
+  bool read_board_register(uint8_t reg, uint8_t& value);
+  bool set_amplifier_reset(bool held);
+  bool release_board_device();
   bool prepare_i2s();
+  bool prepare_i2s_tx();
   bool prepare_codecs();
+  bool quiesce_channels();
+  bool prepare_output_codec();
+  bool prepare_input_codec();
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  bool prepare_aec_adc();
+  bool set_aec_amp_frame();
+#endif
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  std::optional<uint16_t> read_amp_observation(uint8_t reg);
+#endif
+  bool close_microphone(bool* driver_closed = nullptr); // Does not initiate nested cleanup.
+  const std::atomic_bool* owner_ = nullptr;
+  const std::atomic_bool* stop_ = nullptr;
   i2c_master_bus_handle_t i2c_bus_ = nullptr;
+  bool owns_i2c_bus_ = false;
+  i2c_master_dev_handle_t board_device_ = nullptr;
+#ifdef STACKCHAN_K151_SPEAKER_PROBE
+  i2c_master_dev_handle_t amp_observer_ = nullptr;
+  K151SpeakerResetObservations speaker_reset_observations_{};
+#endif
   i2s_chan_handle_t tx_ = nullptr;
   i2s_chan_handle_t rx_ = nullptr;
   const audio_codec_data_if_t* data_if_ = nullptr;
+  K151BoundedI2s data_port_;
   const audio_codec_ctrl_if_t* in_ctrl_ = nullptr;
   const audio_codec_ctrl_if_t* out_ctrl_ = nullptr;
+  K151CodecControl in_control_;
+  K151CodecControl out_control_{K151CodecControl::Profile::aw88298_muted_startup};
   const audio_codec_if_t* in_codec_ = nullptr;
   const audio_codec_if_t* out_codec_ = nullptr;
   const audio_codec_gpio_if_t* gpio_if_ = nullptr;
   esp_codec_dev_handle_t in_dev_ = nullptr;
   esp_codec_dev_handle_t out_dev_ = nullptr;
   bool attempted_ = false;
+  bool receive_only_ = false;
+  bool reset_controlled_ = false;
   bool prepared_ = false;
   bool fault_ = false;
-  bool tx_enabled_ = false;
-  bool rx_enabled_ = false;
   bool input_open_ = false;
   bool output_open_ = false;
+  bool tx_tail_registered_ = false;
+  OutputData output_data_ = OutputData::empty;
+  K151MicWakeStage prepare_stage_ = K151MicWakeStage::admission;
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  const char* aec_setup_stage_ = "audio_admission";
+#endif
+  K151SpeakerStartupDiagnostic speaker_startup_{K151SpeakerStartupStage::audio_guard};
+  K151SpeakerCleanupStage speaker_cleanup_stage_ = K151SpeakerCleanupStage::none;
+#ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+  bool speaker_stop_reset_latch_verified_ = false;
+#endif
+  bool cleanup_unverified_ = false;
 };
 
 }  // namespace stackchan::standalone

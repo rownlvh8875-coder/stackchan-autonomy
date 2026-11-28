@@ -1,9 +1,10 @@
 """Restart-safe API reservations and aggregate metadata. No retry/refund on uncertainty."""
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from .settings import Settings
-from .state_store import SQLiteState, finite_time
+from .state_store import SQLiteState, StateUnavailable, finite_time
 
 
 @dataclass(frozen=True)
@@ -18,15 +19,29 @@ class SQLiteRequestBudget:
     def __init__(self, settings: Settings):
         self.store = SQLiteState(settings.state_path)
         self.namespace = settings.budget_namespace
+        self.require_existing = settings.budget_require_existing
         self.windows = (
             (60, settings.requests_per_minute),
             (3600, settings.requests_per_hour),
             (86400, settings.requests_per_day),
         )
 
+    @contextmanager
+    def _transaction(self):
+        with self.store.transaction(existing=self.require_existing) as db:
+            if (
+                self.require_existing
+                and db.execute(
+                    "SELECT 1 FROM api_usage WHERE namespace=?", (self.namespace,)
+                ).fetchone()
+                is None
+            ):
+                raise StateUnavailable("budget was not initialized for this namespace")
+            yield db
+
     def reserve(self, now: float) -> bool:
         now = finite_time(now)
-        with self.store.transaction() as db:
+        with self._transaction() as db:
             now = self.store.observed_time(db, "budget:" + self.namespace, now)
             db.execute(
                 "DELETE FROM api_requests WHERE namespace=? AND at<=?",
@@ -53,7 +68,7 @@ class SQLiteRequestBudget:
             or type(failed) is not bool
         ):
             raise ValueError("usage must contain nonnegative integer counters")
-        with self.store.transaction() as db:
+        with self._transaction() as db:
             db.execute(
                 "INSERT INTO api_usage VALUES(?,0,?,?,?) ON CONFLICT(namespace) DO UPDATE SET "
                 "input_tokens=input_tokens+excluded.input_tokens, "
@@ -62,7 +77,7 @@ class SQLiteRequestBudget:
             )
 
     def snapshot(self) -> BudgetUsage:
-        with self.store.transaction() as db:
+        with self._transaction() as db:
             row = db.execute(
                 "SELECT requests,input_tokens,output_tokens,failures FROM api_usage "
                 "WHERE namespace=?",

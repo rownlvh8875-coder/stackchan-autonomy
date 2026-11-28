@@ -22,3 +22,48 @@ Official ESP-IDF fixed source: [esp_wifi.h](https://github.com/espressif/esp-idf
 - A bounded FreeRTOS queue carries Wi-Fi connection, disconnect, IP and SNTP events to a single owning task. The ESP event callback immediately raises an atomic `link_down` latch on disconnection, so paid-work eligibility is revoked even before the task drains its queue. Queue overflow is a permanent fault.
 - The owning task uses the portable backoff/clock policy; SNTP starts only after IP acquisition, after which a plausible clock update can mark readiness. No pending paid request is retried on reconnect. `shutdown()` attempts resource cleanup, invalidates eligibility and wipes the local copy of credentials.
 - This is **compile-only**. The adapter has not been exercised on any physical network, and event races, Wi-Fi memory, delayed callbacks, NVS semantics, request interruption time, packet loss, and recovery after a device reset remain unverified. A synchronous HTTPS client must separately check link/clock state between I/O calls, not only at the start of the transaction.
+
+## Saved setup and continuous conversation (2026-11-27)
+
+`SavedOwnerCredentials` accepts a separate atomic ciphertext store and a
+purpose-bound key from the local platform. The fixed-size record uses AES-256-GCM
+with a fresh 96-bit nonce and a 128-bit tag. The ESP adapter accepts a borrowed
+PSA key with encryption and decryption permissions and refuses exportable or
+copyable keys. Temporary plaintext storage is cleared after use.
+
+On first pairing, the owner task checks the final local pairing gesture and a
+separate paid voice review. It then arms STOP, verifies the durable budget, and
+commits and verifies the encrypted setup before starting Wi-Fi. After a reboot,
+local owner presence allows restoration. A valid record skips USB pairing and
+still requires paid voice approval on the robot. A missing record allows initial
+pairing. A corrupt or unreadable record stops setup. An authenticated setup
+without an existing budget stops before networking and leaves the budget absent.
+
+Host tests exercise the owner task, budget, and runtime with simulated reboot,
+audio, network and storage. The board's persistent protected key source and
+ciphertext storage binding still need verification on hardware. The public ESP review build links
+the adapter for validation and leaves both disconnected from startup.
+
+### Protected platform binding
+
+The continuous boot profile pins the slot of a reviewed, dedicated high-entropy
+ESP32-S3 upstream HMAC key. Runtime admission requires secure boot, release-mode
+flash encryption, an encrypted running app, restricted ROM download, hardware
+JTAG disabled on both interfaces, and read, write and purpose protection on that
+slot. The device uses PSA to reference the hardware key, derive a purpose-specific
+256-bit AES key, and destroy the two volatile PSA handles after use. A no-RF
+hardware entropy source covers the local setup handshake and the first record
+seal. The separate `sc_owner` namespace accepts one fixed ciphertext record.
+Its adapter opens read-only until initial save and has no erase or rotation path.
+This partition layout uses application-layer encryption without an NVS key
+partition or automatic NVS key provisioning.
+The one-turn profile still uses RAM setup.
+
+Authenticity of a record does not provide flash rollback protection. The
+observed K151 security state fails this protected profile. Any future security
+transition needs a separate recovery design covering signed, compatible firmware
+and the ROM access and encryption state. The existing raw stock backup alone
+does not establish recovery on a secured unit.
+
+[Espressif HMAC reference](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/peripherals/hmac.html)
+and [release flash encryption reference](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/security/flash-encryption.html).

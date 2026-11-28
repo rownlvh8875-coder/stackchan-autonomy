@@ -15,7 +15,7 @@
 
 namespace stackchan::standalone::httpwire {
 constexpr size_t kMaxRecordFrames = 8U*24000U;
-constexpr size_t kMaxSpeechBytes = 20U*24000U*2U;
+constexpr size_t kMaxSpeechBytes = OfflineVoiceCycle::kMaxSynthFrames * sizeof(int16_t);
 constexpr size_t kMaxJsonBytes = 256U*1024U;
 constexpr std::string_view kBoundary = "K151SpeechBoundary20261119";
 enum class Endpoint { transcription, responses, speech };
@@ -133,6 +133,12 @@ class BoundedReply {
   bool append(std::span<const uint8_t> part){
     if(!started_||failed_||finished_||part.size()>response_cap(endpoint_)-bytes_.size()||
       (declared_&&part.size()>*declared_-bytes_.size())){failed_=true;return false;}
+    const size_t required = bytes_.size() + part.size();
+    if (required > bytes_.capacity()) {
+      const size_t limit = declared_.value_or(response_cap(endpoint_));
+      // Avoid implicit geometric growth beyond this validated body limit.
+      bytes_.reserve(std::max(required, std::min(limit, 2 * bytes_.capacity())));
+    }
     bytes_.insert(bytes_.end(),part.begin(),part.end());return true;
   }
   bool finish(bool complete_transport){

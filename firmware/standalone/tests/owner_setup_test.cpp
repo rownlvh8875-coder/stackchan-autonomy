@@ -1,5 +1,6 @@
 // No device I/O, serial, flash or paid requests. Credentials are fake.
 #include "owner_setup.hpp"
+#include "saved_owner_credentials_fixture.hpp"
 
 #include <array>
 #include <atomic>
@@ -14,7 +15,59 @@ constexpr std::array<uint8_t,4> ssid{'t','e','s','t'};
 constexpr std::string_view password="fake-passphrase";
 constexpr std::string_view key="fake-testing-token-0123456789";
 
+void exercise_saved_setup() {
+  MockOwnerRecords records;
+  MockOwnerCipher cipher;
+  SavedOwnerCredentials store(records, cipher);
+  std::atomic_bool owner{true}, surface{true}, stop{false};
+  {
+    RuntimeSecrets secrets;
+    OwnerSetupController first(secrets, owner, surface, stop);
+    assert(first.restore_saved(store, 100) == SavedSetupLoad::missing);
+    assert(first.phase() == OwnerSetupPhase::hold && !first.ready() && !cipher.opens);
+    assert(first.arm(120) && first.submit_wifi(ssid, password, 121) &&
+           first.submit_api_key(key, 122) && first.confirm(123, true));
+    assert(!first.save_first(store, false) && records.commits == 0);
+    assert(first.save_first(store, true) && records.commits == 1 && cipher.seals == 1);
+    assert(!first.save_first(store, true) && records.commits == 1);
+    assert(std::search(records.data.begin(), records.data.end(), key.begin(), key.end()) ==
+           records.data.end());
+  }
+  {
+    RuntimeSecrets fresh;
+    OwnerSetupController rebooted(fresh, owner, surface, stop);
+    const auto reads = records.reads;
+    owner = false;
+    assert(rebooted.restore_saved(store, 5) == SavedSetupLoad::unusable);
+    assert(records.reads == reads && !fresh.valid());
+    owner = true;
+    assert(rebooted.restore_saved(store, 8) == SavedSetupLoad::restored);
+    assert(rebooted.ready() && fresh.api_key() == key && fresh.passphrase() == password);
+    assert(std::ranges::equal(fresh.ssid(), ssid));
+    assert(!rebooted.arm(9) && rebooted.tick(10));
+    rebooted.cancel();
+    assert(!fresh.valid());
+  }
+  {
+    RuntimeSecrets fresh;
+    OwnerSetupController rebooted(fresh, owner, surface, stop);
+    cipher.stop_on_open = &stop;
+    assert(rebooted.restore_saved(store, 5) == SavedSetupLoad::unusable);
+    assert(!fresh.valid() && !rebooted.ready() && !rebooted.arm(8));
+    cipher.stop_on_open = nullptr;
+    stop = false;
+  }
+  {
+    RuntimeSecrets fresh;
+    OwnerSetupController rebooted(fresh, owner, surface, stop);
+    records.data.back() ^= 1;
+    assert(rebooted.restore_saved(store, 5) == SavedSetupLoad::unusable);
+    assert(!fresh.valid() && !rebooted.arm(9) && records.commits == 1);
+  }
+}
+
 int main() {
+  exercise_saved_setup();
   {
     RuntimeSecrets secrets;
     std::atomic_bool owner{false}, surface{true}, stop{false};

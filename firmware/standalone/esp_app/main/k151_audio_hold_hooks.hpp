@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Explicitly dormant AudioGuard ↔ K151CodecPort hooks, never used by app_main.
-// No verified AXP2101/AW9523 power sequence, capture flush or TX DMA drain.
+// Owner-task AudioGuard hooks. The HOLD app does not construct them.
 #pragma once
 
 #include "audio_guard.hpp"
@@ -8,17 +7,19 @@
 
 namespace stackchan::standalone {
 
-// Returning success from a missing physical operation would be unsafe.
-// Even if a future caller creates these hooks, AudioGuard initialization
-// and playback drain fail closed in the HOLD build.
-inline AudioHooks k151_unapproved_audio_hooks(K151CodecPort& codec) {
+inline AudioHooks k151_audio_hooks(K151CodecPort& codec, const std::atomic_bool& owner,
+                                  const std::atomic_bool& stop, const std::atomic_bool& consent,
+                                  K151AudioBoardEvidence evidence,
+                                  i2c_master_bus_handle_t borrowed_bus = nullptr) {
   return AudioHooks{
       [&codec]() { return codec.microphone_off(); },
-      [&codec]() { return codec.speaker_off(); },
-      []() { return false; }, // No validated power/reset/init transaction.
-      [&codec]() { return codec.microphone_on(); },
-      []() { return false; }, // Mic FIFO flush not measured on hardware.
-      [&codec]() { return codec.speaker_on_low_volume(); },
+      [&codec, &consent]() { return codec.speaker_off(&consent); },
+      [&codec, &owner, &stop, evidence, borrowed_bus]() {
+        return codec.prepare(owner, stop, evidence, borrowed_bus);
+      },
+      [&codec]() { return codec.start_fresh_capture(); },
+      [&codec]() { return codec.capture_idle(); },
+      [&codec, &consent]() { return codec.speaker_on_low_volume(consent); },
       [&codec]() { return codec.drain_output_before_mute(); },
   };
 }

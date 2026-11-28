@@ -1,0 +1,6 @@
+[Unit]
+Description=StackChan Assist voice and GPT workers
+Wants=stackchan-assist@voice.service stackchan-assist@conversation.service
+
+[Install]
+WantedBy=multi-user.target

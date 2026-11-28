@@ -1,0 +1,42 @@
+{
+  "record_kind": "pre_push_offline_validation",
+  "date": "2026-11-21",
+  "base_sha": "30da931345120f78161e23b0f87122459562e1d4",
+  "branch": "feat/wakeword-josu",
+  "pr": 3,
+  "red": {"null_handle_access_violations": 5, "swallowed_control_errors": 12},
+  "local": {
+    "focused_codec": {"pass": 56, "seconds": 3.08},
+    "root": {"pass": 495, "skip": 2, "seconds": 90.41},
+    "standalone_optional": {"pass": 615, "skip": 5, "seconds": 104.79},
+    "compiler": "Zig0.15.2/Clang20.1.2 -O2 assertions ON",
+    "ruff": "PASS",
+    "format_files": 360,
+    "owned_source_diff_check": "PASS",
+    "original_sdk_sha_and_checkout": "PASS"
+  },
+  "review": {
+    "fresh_reviewers": 1,
+    "critical": 0,
+    "important": 0,
+    "deferred_minor": "AW88298 two-byte register transfer regression; production forwards original length, current output double uses one byte"
+  },
+  "ci_at_recording": "NOT_YET_PUSHED; exact-head results follow in PR3/checks",
+  "device_operations": 0,
+  "resets": 0,
+  "flash_writes": 0,
+  "real_audio_recordings": 0,
+  "paid_api_calls": 0,
+  "operational_app": "HOLD marker only",
+  "cloud_default": "OFF",
+  "physical_output_enabled": false,
+  "dma_drain_ready": false,
+  "real_wake_recognition_verified": false,
+  "standalone_gpt_turn_verified": false,
+  "unresolved": [
+    "Physical power, channel mapping, mute, STOP and DMA drain",
+    "Simultaneous question/TLS/TTS peak and live runtime admission",
+    "Windows physical I/O versus OS descheduling attribution",
+    "SDK control destructor hides low-level device-removal result"
+  ]
+}

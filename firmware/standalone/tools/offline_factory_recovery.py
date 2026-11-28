@@ -7,10 +7,23 @@ write API. A successful report is NOT installation or restore approval.
 from __future__ import annotations
 
 import argparse
+import binascii
 import hashlib
 import json
+import struct
 import sys
 from pathlib import Path
+
+from esp_app_image import (
+    NVS_BYTES,
+    NVS_OFFSET,
+    OTADATA_BYTES,
+    OTADATA_OFFSET,
+    PARTITION_TABLE_BYTES,
+    PARTITION_TABLE_OFFSET,
+    SLOT_BYTES,
+    SLOT_OFFSET,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 # Reuse the repository's already-tested, hash-pinned partition-table parser.
@@ -29,7 +42,67 @@ EXPECTED_PARTITIONS = (
 )
 
 
-def verify_copies(path_a: Path, path_b: Path, expected_sha256: str) -> dict:
+def inspect_otadata(region: bytes) -> dict:
+    """Sanitized historical candidates, NOT the currently running or spare slot.
+
+    Pinned IDF fff9895: esp_flash_partitions.h, bootloader_common_loader.c,
+    bootloader_utility.c and otatool.py. Do not export the 20-byte seq_label.
+    Factory bootloader config/image validation/fallback may change selection.
+    """
+    if len(region) != 8192:
+        raise ValueError("invalid OTA region size")
+    states = {
+        0: "new",
+        1: "pending_verify",
+        2: "valid",
+        3: "invalid",
+        4: "aborted",
+        0xFFFFFFFF: "undefined",
+    }
+    records = []
+    for offset in (0, 4096):
+        seq = struct.unpack_from("<I", region, offset)[0]
+        state, crc = struct.unpack_from("<II", region, offset + 24)
+        crc_valid = crc == binascii.crc32(region[offset : offset + 4], 0xFFFFFFFF)
+        records.append(
+            {
+                "sequence": seq,
+                "state": states.get(state, "unknown"),
+                "crc_valid": crc_valid,
+                "eligible": seq != 0xFFFFFFFF and crc_valid and state in (0, 1, 2, 0xFFFFFFFF),
+            }
+        )
+
+    def select(rollback):
+        choices = [
+            i
+            for i, r in enumerate(records)
+            if r["eligible"] and not (rollback and r["state"] == "pending_verify")
+        ]
+        # IDF takes the numerically largest uint32 sequence; ties favor copy 0.
+        selected = max(choices, key=lambda i: records[i]["sequence"]) if choices else None
+        slot = (
+            f"ota_{((records[selected]['sequence'] - 1) & 0xFFFFFFFF) % 2}"
+            if selected is not None
+            else None
+        )
+        return selected, slot
+
+    selected, candidate = select(False)
+    _, rollback_candidate = select(True)
+    return {
+        "records": records,
+        "selected_record_without_rollback": selected,
+        "without_rollback_candidate": candidate,
+        "with_rollback_candidate": rollback_candidate,
+        "factory_bootloader_policy_verified": False,
+        "running_slot_verified": False,
+        "spare_slot_verified": False,
+        "evidence_scope": "HASH_VERIFIED_BACKUP_SNAPSHOT_ONLY",
+    }
+
+
+def _verified_factory(path_a: Path, path_b: Path, expected_sha256: str) -> tuple[bytes, dict]:
     if path_a.resolve() == path_b.resolve():
         raise Rejected
     images = []
@@ -58,20 +131,147 @@ def verify_copies(path_a: Path, path_b: Path, expected_sha256: str) -> dict:
         layouts.append(parts)
     if images[0] != images[1] or layouts[0] != layouts[1]:
         raise Rejected
-    return {
+    return images[0], {
         "status": "TWO_LOCAL_BACKUPS_MATCH_NOT_INSTALL_AUTHORIZATION",
         "backup_count": 2,
         "image_length_bytes": IMAGE_BYTES,
         "sha256_verified_locally": hashlib.sha256(images[0]).hexdigest(),
+        "factory_ota1_sha256": hashlib.sha256(
+            images[0][SLOT_OFFSET : SLOT_OFFSET + SLOT_BYTES]
+        ).hexdigest(),
+        "factory_table_sha256": hashlib.sha256(
+            images[0][PARTITION_TABLE_OFFSET : PARTITION_TABLE_OFFSET + PARTITION_TABLE_BYTES]
+        ).hexdigest(),
+        "factory_otadata_sha256": hashlib.sha256(
+            images[0][OTADATA_OFFSET : OTADATA_OFFSET + OTADATA_BYTES]
+        ).hexdigest(),
         "partition_table_md5_checked": True,
         "partition_count": len(EXPECTED_PARTITIONS),
         "ota_partition_count": 2,
         "ota_slot_bytes": 5177344,
         "active_slot_identified": False,
+        "ota_metadata": inspect_otadata(images[0][0xD000:0xF000]),
         "independent_offsite_copy_verified": False,
         "restore_write_tested": False,
         "factory_official_app_compatibility_verified": False,
         "install_authorized": False,
+        "flash_modified": False,
+    }
+
+
+def verify_copies(path_a: Path, path_b: Path, expected_sha256: str) -> dict:
+    return _verified_factory(path_a, path_b, expected_sha256)[1]
+
+
+def _read_restore_inputs(ota1: Path, pretrial_nvs: Path, ota1_sha256: str) -> tuple[bytes, bytes]:
+    with ota1.open("rb") as slot:
+        ota1_bytes = slot.read(SLOT_BYTES + 1)
+    if len(ota1_bytes) != SLOT_BYTES or hashlib.sha256(ota1_bytes).hexdigest() != ota1_sha256:
+        raise ValueError("factory OTA1 restore slice disagrees with the verified full backups")
+    with pretrial_nvs.open("rb") as snapshot:
+        nvs_bytes = snapshot.read(NVS_BYTES + 1)
+    if len(nvs_bytes) != NVS_BYTES:
+        raise ValueError("pretrial NVS snapshot size rejected")
+    return ota1_bytes, nvs_bytes
+
+
+def verify_trial_restore(
+    factory_a: Path, factory_b: Path, expected_sha256: str, ota1: Path, pretrial_nvs: Path
+) -> dict:
+    """Describe a complete paid-trial rollback using local files only."""
+    factory = verify_copies(factory_a, factory_b, expected_sha256)
+    _, nvs_bytes = _read_restore_inputs(ota1, pretrial_nvs, factory["factory_ota1_sha256"])
+    return {
+        "matching_factory_copies": factory["backup_count"],
+        "factory_table_sha256": factory["factory_table_sha256"],
+        "factory_otadata_sha256": factory["factory_otadata_sha256"],
+        "restore_in_order": [
+            {
+                "partition": "ota_1",
+                "offset": SLOT_OFFSET,
+                "bytes": SLOT_BYTES,
+                "sha256": factory["factory_ota1_sha256"],
+            },
+            {
+                "partition": "nvs",
+                "offset": NVS_OFFSET,
+                "bytes": NVS_BYTES,
+                "sha256": hashlib.sha256(nvs_bytes).hexdigest(),
+            },
+        ],
+        "verify_each_range_before_next_restore": True,
+        "pretrial_nvs_verified_against_device": False,
+        "restore_authorized": False,
+    }
+
+
+def rehearse_restore(
+    factory_a: Path,
+    factory_b: Path,
+    expected_sha256: str,
+    ota1: Path,
+    pretrial_nvs: Path,
+    nvs_sha256: str,
+    candidate: Path,
+    candidate_sha256: str,
+) -> dict:
+    """Replay OTA1 and NVS recovery in RAM with unchanged security and layout."""
+    original, report = _verified_factory(factory_a, factory_b, expected_sha256)
+    slot_bytes, nvs_bytes = _read_restore_inputs(ota1, pretrial_nvs, report["factory_ota1_sha256"])
+    if hashlib.sha256(nvs_bytes).hexdigest() != nvs_sha256.lower():
+        raise ValueError("pretransition NVS does not match the reviewed snapshot")
+    with candidate.open("rb") as stream:
+        app = stream.read(SLOT_BYTES + 1)
+    if (
+        not 24 <= len(app) <= SLOT_BYTES
+        or hashlib.sha256(app).hexdigest() != candidate_sha256.lower()
+    ):
+        raise ValueError("candidate size or digest differs from the review")
+
+    erase_bytes = (len(app) + 4095) // 4096 * 4096
+    baseline = bytearray(original)
+    baseline[NVS_OFFSET : NVS_OFFSET + NVS_BYTES] = nvs_bytes
+    outcomes = {}
+    for interruption in (
+        "interrupted_install",
+        "after_runtime_nvs_change",
+        "interrupted_ota1_restore",
+        "interrupted_nvs_restore",
+    ):
+        flash = baseline.copy()
+        flash[SLOT_OFFSET : SLOT_OFFSET + erase_bytes] = b"\xff" * erase_bytes
+        written = app[: len(app) // 2] if interruption == "interrupted_install" else app
+        flash[SLOT_OFFSET : SLOT_OFFSET + len(written)] = written
+        if interruption != "interrupted_install":
+            # Arbitrary dirty NVS bytes model the scope, without generating or parsing credentials.
+            flash[NVS_OFFSET : NVS_OFFSET + NVS_BYTES] = b"\0" * NVS_BYTES
+        if interruption == "interrupted_ota1_restore":
+            flash[SLOT_OFFSET : SLOT_OFFSET + SLOT_BYTES] = b"\xff" * SLOT_BYTES
+            flash[SLOT_OFFSET : SLOT_OFFSET + 4096] = slot_bytes[:4096]
+        if interruption == "interrupted_nvs_restore":
+            flash[SLOT_OFFSET : SLOT_OFFSET + SLOT_BYTES] = slot_bytes
+            flash[NVS_OFFSET : NVS_OFFSET + NVS_BYTES] = b"\xff" * NVS_BYTES
+            flash[NVS_OFFSET : NVS_OFFSET + 4096] = nvs_bytes[:4096]
+
+        flash[SLOT_OFFSET : SLOT_OFFSET + SLOT_BYTES] = slot_bytes
+        flash[NVS_OFFSET : NVS_OFFSET + NVS_BYTES] = nvs_bytes
+        if flash != baseline:
+            raise ValueError("recovery does not match the modeled pretransition image")
+        outcomes[interruption] = True
+
+    return {
+        "status": "OTA1_NVS_RECOVERY_REHEARSED_IN_MEMORY",
+        "matching_factory_copies": report["backup_count"],
+        "candidate_write": {"offset": SLOT_OFFSET, "bytes": len(app), "erase_bytes": erase_bytes},
+        "restore_ranges": [
+            {"partition": "ota_1", "offset": SLOT_OFFSET, "bytes": SLOT_BYTES},
+            {"partition": "nvs", "offset": NVS_OFFSET, "bytes": NVS_BYTES},
+        ],
+        "simulated_recovery": outcomes,
+        "hardware_security_change_supported": False,
+        "running_slot_verified": False,
+        "install_authorized": False,
+        "restore_authorized": False,
         "flash_modified": False,
     }
 
@@ -81,9 +281,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--factory-a", required=True, type=Path)
     parser.add_argument("--factory-b", required=True, type=Path)
     parser.add_argument("--expected-sha256", required=True)
+    parser.add_argument("--factory-ota1", type=Path)
+    parser.add_argument("--pretrial-nvs", type=Path)
+    parser.add_argument("--pretrial-nvs-sha256")
+    parser.add_argument("--candidate", type=Path)
+    parser.add_argument("--candidate-sha256")
     args = parser.parse_args(argv)
+    rehearsal = (
+        args.factory_ota1,
+        args.pretrial_nvs,
+        args.pretrial_nvs_sha256,
+        args.candidate,
+        args.candidate_sha256,
+    )
+    if any(rehearsal) and not all(rehearsal):
+        parser.error("recovery rehearsal requires all five offline inputs")
     try:
-        report = verify_copies(args.factory_a, args.factory_b, args.expected_sha256)
+        if all(rehearsal):
+            report = rehearse_restore(
+                args.factory_a, args.factory_b, args.expected_sha256, *rehearsal
+            )
+        else:
+            report = verify_copies(args.factory_a, args.factory_b, args.expected_sha256)
     except (Rejected, ValueError, OSError, MemoryError):
         print("FACTORY_BACKUP_REJECTED")
         return 2
