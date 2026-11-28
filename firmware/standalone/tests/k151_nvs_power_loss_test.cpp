@@ -19,6 +19,8 @@ using stackchan::standalone::PaidStage;
 using stackchan::standalone::PersistentGuard;
 using stackchan::standalone::ReadCode;
 using stackchan::standalone::ReadValue;
+using stackchan::standalone::RebootTrialBoot;
+using stackchan::standalone::RebootTrialScope;
 
 namespace {
 constexpr size_t kSector = 4096;
@@ -212,6 +214,146 @@ void check_damaged_budget(const FlashBytes& start, std::vector<uint8_t> corrupt)
   }
   require(!check_restart_guard({ReadCode::failure, {}}), "normal boot accepted a read error");
 }
+
+class TrialStorage final : public AtomicKv {
+ public:
+  explicit TrialStorage(RamFlash& flash) : storage_(&flash) {
+    require(storage_.init(0, kSectors) == ESP_OK, "mount reboot trial storage");
+    index_ = ns(storage_, "sc_gpt");
+  }
+
+  ReadValue read(std::string_view key, size_t max_bytes) override {
+    return read_blob(storage_, "sc_gpt", name(key), max_bytes);
+  }
+  bool commit(std::string_view key, std::span<const uint8_t> bytes) override {
+    return write_blob(storage_, index_, name(key), bytes);
+  }
+
+ private:
+  static const char* name(std::string_view key) {
+    require(key == "budget" || key == "trial_ckpt", "unexpected reboot trial key");
+    return key == "budget" ? "budget" : "trial_ckpt";
+  }
+  nvs::Storage storage_;
+  uint8_t index_{};
+};
+
+void check_trial_reboot_cuts(const FlashBytes& start, const BudgetLedger& ledger) {
+  constexpr uint64_t epoch = 1'700'000'000 + 864 * 300;
+  constexpr size_t record_bound = 1024;
+  const RebootTrialScope before{{0x31}, RebootTrialBoot::before_reboot};
+  const RebootTrialScope after{before.id, RebootTrialBoot::after_reboot};
+  const auto baseline = ledger.serialize();
+  auto charged = ledger;
+  require(charged.reserve(epoch, true, [](auto) { return true; }), "compute trial reservation");
+  const auto expected = charged.serialize();
+  require(expected.size() == 818, "exercise maximum size wrapped trial budget");
+  std::vector<uint8_t> checkpoint(before.id.begin(), before.id.end());
+  checkpoint.insert(checkpoint.end(), expected.begin(), expected.end());
+  std::vector<uint8_t> claimed_budget;
+
+  const auto prepare = [&](RamFlash& flash, size_t cut) {
+    TrialStorage store(flash);
+    PersistentGuard guard(store, before);
+    require(guard.restore_budget_for_setup(false, [&](const ReadValue& read) {
+              return read.code == ReadCode::found && read.bytes == baseline;
+            }) && guard.admit_builtin_wake(1, true, true) && guard.reserve(epoch, true, true, 1),
+            "claim before reboot and reserve a trial turn");
+    for (const auto stage : {PaidStage::transcribe, PaidStage::respond, PaidStage::synthesize})
+      require(guard.authorize_step(stage, true, true), "dispatch mocked paid stage");
+    claimed_budget = store.read("budget", record_bound).bytes;
+    const auto began = flash.operations;
+    flash.cut_after = cut ? began + cut : 0;
+    require(guard.prepare_trial_reboot(true, [&](auto wire) {
+              return std::ranges::equal(wire, expected) &&
+                     store.read("trial_ckpt", record_bound).code == ReadCode::missing &&
+                     store.commit("trial_ckpt", checkpoint) &&
+                     store.read("trial_ckpt", record_bound).bytes == checkpoint;
+            }), "prepare durable reboot checkpoint");
+    return flash.operations - began;
+  };
+  const auto resume = [&](TrialStorage& store, bool eligible) {
+    PersistentGuard guard(store, after);
+    const bool restored = guard.restore_budget_for_setup(false, [&](const ReadValue& read) {
+      const auto durable = store.read("trial_ckpt", record_bound);
+      return read.code == ReadCode::found && read.bytes == expected &&
+             durable.code == ReadCode::found && durable.bytes == checkpoint;
+    });
+    require(restored == eligible, "reboot admission does not match durable trial phase");
+    require(!guard.authorize_step(PaidStage::transcribe, true, true), "reboot revived a paid permit");
+    if (restored)
+      require(guard.reserved_conversations() == charged.count(), "reboot changed reserved budget");
+    else
+      require(!guard.admit_builtin_wake(1, true, true) && !guard.reserve(epoch + 60, true, true),
+              "unverified reboot admitted a new charge");
+  };
+
+  RamFlash ready(start);
+  const auto prepare_ops = prepare(ready, 0);
+  RamFlash claimed(ready.bytes);
+  std::vector<uint8_t> ready_budget;
+  std::vector<uint8_t> after_budget;
+  size_t claim_ops;
+  {
+    TrialStorage store(claimed);
+    ready_budget = store.read("budget", record_bound).bytes;
+    const auto began = claimed.operations;
+    resume(store, true);
+    claim_ops = claimed.operations - began;
+    after_budget = store.read("budget", record_bound).bytes;
+    resume(store, false);
+  }
+  require(prepare_ops && claim_ops && !claimed_budget.empty() && !ready_budget.empty() &&
+              !after_budget.empty() && claimed_budget != ready_budget && ready_budget != after_budget,
+          "establish all three distinct durable trial phases");
+
+  size_t cuts = 0;
+  for (const auto pattern : {CutPattern::completed, CutPattern::first_half,
+                             CutPattern::interleaved_bits}) {
+    for (const bool preparing : {true, false}) {
+      for (size_t cut = 1; cut <= (preparing ? prepare_ops : claim_ops); ++cut) {
+        RamFlash flash(preparing ? start : ready.bytes);
+        flash.pattern = pattern;
+        try {
+          if (preparing) {
+            (void)prepare(flash, cut);
+          } else {
+            TrialStorage store(flash);
+            flash.cut_after = flash.operations + cut;
+            resume(store, true);
+          }
+          require(false, "reboot trial write interruption was not reached");
+        } catch (const PowerLoss&) {
+          flash.cut_after = 0;
+        }
+        TrialStorage reboot(flash);
+        const auto budget = reboot.read("budget", record_bound);
+        const auto durable = reboot.read("trial_ckpt", record_bound);
+        require(budget.code == ReadCode::found &&
+                    (budget.bytes == ready_budget ||
+                     budget.bytes == (preparing ? claimed_budget : after_budget)),
+                "power cut changed or lost a reserved trial budget");
+        if (budget.bytes == ready_budget || !preparing)
+          require(durable.code == ReadCode::found && durable.bytes == checkpoint,
+                  "verified reboot phase lost its checkpoint");
+        resume(reboot, budget.bytes == ready_budget);
+        resume(reboot, false);
+        ++cuts;
+      }
+    }
+  }
+
+  RamFlash mismatched(ready.bytes);
+  TrialStorage bad_checkpoint(mismatched);
+  auto incorrect = checkpoint;
+  incorrect.back() ^= 1;
+  require(bad_checkpoint.commit("trial_ckpt", incorrect), "write mismatched checkpoint fixture");
+  resume(bad_checkpoint, false);
+  require(bad_checkpoint.read("budget", record_bound).bytes == ready_budget,
+          "checkpoint denial modified the trial budget");
+  std::printf("K151 reboot trial: %zu modeled cuts in checkpoint publication and boot claim passed\n",
+              cuts);
+}
 }  // namespace
 
 int main() try {
@@ -268,6 +410,7 @@ int main() try {
   require(ledger.serialize().size() == 818 && boundaries > 3'000,
           "exercise full ledger and page reuse");
   check_damaged_budget(flash.bytes, ledger.serialize());
+  check_trial_reboot_cuts(flash.bytes, ledger);
   std::printf("K151 NVS power-loss regression: %zu write/erase boundaries passed\n", boundaries);
   for (const auto& [pattern, label, totals] : scenarios) {
     if (pattern == CutPattern::completed) continue;
