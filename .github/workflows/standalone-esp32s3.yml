@@ -58,6 +58,9 @@ jobs:
           idf.py -C "$APP" -B "$OUT" -DK151_CONVERSATION_REVIEW=ON \
             -DK151_CONVERSATION_PRIVATE_POLICY= -DSDKCONFIG="$OUT/sdkconfig" \
             -DIDF_TARGET=esp32s3 -DPROJECT_VER="${SOURCE_HEAD:0:12}" build
+          grep -Fq 'libnvs_flash.a(k151_nvs_page.cpp.obj)' "$OUT/k151_conversation_review.map"
+          python3 firmware/standalone/tools/check_nvs_power_loss.py --idf "$IDF_PATH" \
+            --page-source "$OUT/k151_nvs_recovery/k151_nvs_page.cpp"
           python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
             "$OUT/partition_table/partition-table.bin" "$OUT/BUILT-PARTITIONS-NEVER-FLASH.csv"
           python3 firmware/standalone/tools/check_conversation_image.py \
