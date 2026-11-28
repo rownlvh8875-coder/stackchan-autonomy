@@ -11,6 +11,10 @@
 #include "board_evidence.hpp"
 #include "audio_wipe.hpp"
 #include "k151_dma_tx_tail.hpp"
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+#include "k151_aec_dma.hpp"
+#include "k151_aec_stop_probe.hpp"
+#endif
 #ifdef STACKCHAN_K151_CONVERSATION_IMAGE
 #include "k151_conversation_policy.hpp"
 #endif
@@ -247,6 +251,9 @@ bool K151CodecPort::prepare_i2s() {
   chan.dma_desc_num = DmaTxTail::kDescriptorCount;
   chan.dma_frame_num = DmaTxTail::kFramesPerDescriptor;
   chan.auto_clear_after_cb = !microphone_only();
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  if (!input_allowed() || i2s_new_channel(&chan, nullptr, &rx_) != ESP_OK) return false;
+#else
   if (!input_allowed() ||
       i2s_new_channel(&chan, microphone_only() ? nullptr : &tx_,
                       speaker_probe_build() ? nullptr : &rx_) != ESP_OK)
@@ -259,6 +266,7 @@ bool K151CodecPort::prepare_i2s() {
   if constexpr (speaker_probe_build()) {
     return input_allowed();
   }
+#endif
 
   i2s_tdm_config_t rx_cfg = {};
   rx_cfg.clk_cfg = I2S_TDM_CLK_DEFAULT_CONFIG(k151::kInputHz);
@@ -268,6 +276,11 @@ bool K151CodecPort::prepare_i2s() {
       : (I2S_TDM_SLOT0 | I2S_TDM_SLOT1 | I2S_TDM_SLOT2 | I2S_TDM_SLOT3));
   rx_cfg.slot_cfg = I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG(
       I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, slot_mask);
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  rx_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_512;
+  rx_cfg.slot_cfg.total_slot = 4;
+  rx_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_16BIT;
+#endif
   if (microphone_only()) {
     // Same final 2-slot/16-bit TDM format as esp_codec_dev 1.6.2 set_drv_fs.
     rx_cfg.slot_cfg.total_slot = 2;
@@ -281,7 +294,22 @@ bool K151CodecPort::prepare_i2s() {
   rx_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
   rx_cfg.gpio_cfg.din = static_cast<gpio_num_t>(k151::kI2sDin);
 
-  return input_allowed() && i2s_channel_init_tdm_mode(rx_, &rx_cfg) == ESP_OK;
+  if (!input_allowed() || i2s_channel_init_tdm_mode(rx_, &rx_cfg) != ESP_OK) return false;
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  // Allocate separately so IDF checks the shared frame and clock pins before
+  // pairing. RX was initialized first and remains master when TX is disabled.
+  if (!input_allowed() || i2s_new_channel(&chan, &tx_, nullptr) != ESP_OK ||
+      !prepare_i2s_tx()) return false;
+  i2s_chan_info_t rx{}, tx{};
+  return i2s_channel_get_info(rx_, &rx) == ESP_OK &&
+      i2s_channel_get_info(tx_, &tx) == ESP_OK && rx.pair_chan == tx_ && tx.pair_chan == rx_ &&
+      rx.role == I2S_ROLE_MASTER && tx.role == I2S_ROLE_SLAVE &&
+      rx.bclk_hz == K151AecStopProbe::kBclkHz && tx.bclk_hz == K151AecStopProbe::kBclkHz &&
+      rx.total_dma_buf_size == 6 * kMaxFrames * 4 * sizeof(int16_t) &&
+      tx.total_dma_buf_size == 6 * kMaxFrames * sizeof(int16_t) && attach_k151_aec_dma(rx_);
+#else
+  return true;
+#endif
 }
 
 bool K151CodecPort::prepare_i2s_tx() {
@@ -290,6 +318,12 @@ bool K151CodecPort::prepare_i2s_tx() {
   tx_cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
       I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
   tx_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  tx_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_512;
+  tx_cfg.slot_cfg.slot_mode = I2S_SLOT_MODE_MONO;
+  tx_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
+  tx_cfg.slot_cfg.ws_width = 32;
+#endif
   tx_cfg.gpio_cfg.mclk = static_cast<gpio_num_t>(k151::kI2sMclk);
   tx_cfg.gpio_cfg.bclk = static_cast<gpio_num_t>(k151::kI2sBclk);
   tx_cfg.gpio_cfg.ws = static_cast<gpio_num_t>(k151::kI2sWs);
@@ -305,6 +339,9 @@ bool K151CodecPort::prepare_i2s_tx() {
 }
 
 bool K151CodecPort::prepare_codecs() {
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  return data_port_.attach_fixed_aec_output(tx_) && prepare_output_codec() && prepare_aec_adc();
+#else
   if (!microphone_only()) {
     audio_codec_i2s_cfg_t i2s_cfg = {};
     i2s_cfg.port = I2S_NUM_0;
@@ -318,6 +355,7 @@ bool K151CodecPort::prepare_codecs() {
   return input_allowed();
 #else
   return input_allowed() && prepare_input_codec();
+#endif
 #endif
 }
 
@@ -343,7 +381,11 @@ bool K151CodecPort::prepare_output_codec() {
       speaker_reset_observations_.before_tx = (*status & aw88298_protection::undervoltage) != 0;
   }
 #endif
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  if (!input_allowed() || i2s_channel_enable(rx_) != ESP_OK || !input_allowed()) return false;
+#else
   if (!input_allowed() || i2s_channel_enable(tx_) != ESP_OK || !input_allowed()) return false;
+#endif
 
   audio_codec_i2c_cfg_t i2c_cfg = {};
   i2c_cfg.port = static_cast<i2c_port_t>(kI2cPort);
@@ -392,6 +434,65 @@ bool K151CodecPort::prepare_input_codec() {
   dev_cfg.data_if = data_port_.interface();
   in_dev_ = esp_codec_dev_new(&dev_cfg);
   return in_dev_ != nullptr;
+}
+#endif
+
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+bool K151CodecPort::prepare_aec_adc() {
+  audio_codec_i2c_cfg_t i2c{};
+  i2c.port = static_cast<i2c_port_t>(kI2cPort);
+  i2c.addr = ES7210_CODEC_DEFAULT_ADDR;
+  i2c.bus_handle = i2c_bus_;
+  in_ctrl_ = audio_codec_new_i2c_ctrl(&i2c);
+  if (!in_ctrl_ || !in_control_.attach(in_ctrl_) || !input_allowed()) return false;
+  es7210_codec_cfg_t config{};
+  config.ctrl_if = in_control_.interface();
+  config.mic_selected = ES7210_SEL_MIC3; // Speaker reference only.
+  config.mclk_div = 512;
+  in_codec_ = es7210_codec_new(&config);
+  return in_codec_ && in_control_.healthy() && input_allowed();
+}
+
+bool K151CodecPort::start_aec_reference() {
+  if (!prepared() || !in_codec_ || output_open_ || !in_codec_->set_fs || !in_codec_->enable)
+    return false;
+  esp_codec_dev_sample_info_t fs{};
+  fs.bits_per_sample = 16;
+  fs.channel = 4;
+  fs.sample_rate = K151AecStopProbe::kSampleRate;
+  if (in_codec_->set_fs(in_codec_, &fs) != ESP_CODEC_DEV_OK || !input_allowed() ||
+      in_codec_->enable(in_codec_, true) != ESP_CODEC_DEV_OK || !input_allowed())
+    return false;
+  const auto* control = in_control_.interface();
+  // The pinned driver selects ordinary I²S for MIC3 alone. Keep its analog
+  // selection and explicitly request its four-slot serial format instead.
+  uint8_t tdm = 0x02, observed{};
+  if (control->read_reg(control, 0x08, 1, &observed, 1) != ESP_CODEC_DEV_OK ||
+      (observed & 0x01) != 0 || !input_allowed() ||
+      control->read_reg(control, 0x11, 1, &observed, 1) != ESP_CODEC_DEV_OK ||
+      (observed & 0xe3) != 0x60 || !input_allowed() ||
+      control->write_reg(control, 0x12, 1, &tdm, 1) != ESP_CODEC_DEV_OK ||
+      control->read_reg(control, 0x12, 1, &observed, 1) != ESP_CODEC_DEV_OK || observed != tdm)
+    return false;
+  for (const auto reg : {0x43, 0x44, 0x45, 0x46}) {
+    if (!input_allowed() || control->read_reg(control, reg, 1, &observed, 1) != ESP_CODEC_DEV_OK ||
+        (observed & 0x10) != (reg == 0x45 ? 0x10 : 0))
+      return false;
+  }
+  return input_allowed() && in_control_.healthy() && begin_k151_aec_dma();
+}
+
+bool K151CodecPort::set_aec_amp_frame() {
+  if (!input_allowed() || !out_control_.aw88298_standby_verified()) return false;
+  const auto* control = out_control_.interface();
+  std::array<uint8_t, 2> frame{}, observed{};
+  if (control->read_reg(control, 0x06, 1, frame.data(), frame.size()) != ESP_CODEC_DEV_OK ||
+      !input_allowed()) return false;
+  // AW88298 I2SBCK[5:4] = 2 (64fs); retain format, channel and attenuation.
+  frame[1] = (frame[1] & ~0x30) | 0x20;
+  return control->write_reg(control, 0x06, 1, frame.data(), frame.size()) == ESP_CODEC_DEV_OK &&
+      control->read_reg(control, 0x06, 1, observed.data(), observed.size()) == ESP_CODEC_DEV_OK &&
+      frame == observed && input_allowed();
 }
 #endif
 
@@ -521,7 +622,11 @@ bool K151CodecPort::speaker_on_low_volume(const std::atomic_bool& consent) {
   speaker_startup_.stage = Stage::i2s_tx_state;
   i2s_chan_info_t tx_info{};
   if (i2s_channel_get_info(tx_, &tx_info) != ESP_OK || !tx_info.is_enabled ||
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+      tx_info.pair_chan != rx_ || !set_aec_amp_frame()) return fail();
+#else
       (speaker_probe_build() ? tx_info.pair_chan != nullptr : !channel_is_idle(rx_))) return fail();
+#endif
   const auto allowed = [&] {
     return consent.load() && prepared() && data_port_.ready(ESP_CODEC_DEV_TYPE_OUT);
   };
@@ -706,6 +811,9 @@ bool K151CodecPort::shutdown() {
   bool input_driver_closed = true;
   const bool mic_ok = close_microphone(&input_driver_closed);
   const bool speaker_ok = speaker_off();
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  end_k151_aec_dma();
+#endif
   bool cleanup_ok = true;
   const auto check_cleanup = [&](bool ok, Cleanup stage) {
     if (!ok) {

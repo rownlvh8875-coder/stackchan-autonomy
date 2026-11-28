@@ -356,11 +356,32 @@ RX 4×16비트는 같은 24kHz 프레임 길이와 1.536MHz BCLK를 사용한다
 [고정 ESP-IDF I²S 클럭 조건](https://github.com/espressif/esp-idf/blob/fff9895c82d744c7237be8847347bdd1b07c6643/docs/en/api-reference/peripherals/i2s.rst#L1095) ·
 [제조사 TDM 기준 채널 설정](https://github.com/m5stack/esphome-yaml/blob/ef4542ab698daf3ceca1784afd5947a344733162/common/stackchan-voice-assistant-base.yaml#L930)
 
-현재 이미지는 합성 샘플만 처리하며 I²S, I²C, 마이크, 스피커,
-NVS, 클라우드를 시작하지 않는다. 보드 내부 신호를 읽는 실물
-이미지와 설치 검토는 위 클럭·타임스탬프 검증이 끝난 뒤 진행한다.
-합성 시험에서 STOP 2ms 뒤에 넣은 중단을 1–3ms 구간으로 확인했다.
-호스트 회귀 480개와 고정 ESP-IDF의 ESP32-S3 컴파일·링크를 통과했다.
+합성 전용 앱에서는 STOP 2ms 뒤에 넣은 중단을 1–3ms 구간으로 확인했다.
+
+실물 시험 후보 `k151_aec_stop_trial.bin`은 기존 스피커 STOP 프로젝트에서
+`-DK151_AEC_REFERENCE=ON`으로 따로 빌드한다. ESP32-S3 I²S RX가
+24kHz 클럭을 공급한다. RX 4×16과 TX 2×32의 공유 클럭을 설정하고
+드라이버의 채널 역할·BCLK·DMA 크기를 확인한다. 앰프가 대기 상태일
+때 64fs를 설정해 읽어 확인하고, ES7210은 MIC3만 선택해 4슬롯 TDM의
+슬롯 1에서 기준 신호를 읽는다. 진단은 최대 2.5초의 저음량 1kHz
+합성음을 사용한다. 기준 샘플은 RAM에 잠깐 두고 지우며 USB에는
+프레임 범위와 진단 상태만 보낸다.
+[AW88298 I²S 제어 레지스터](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=34)
+
+앞면 STOP의 GPIO 읽기와 RX DMA 완료 콜백이 같은 `esp_timer` 시계를
+사용한다. STOP이 잡히면 기존 앰프 정리 경로부터 실행한다. RX를
+잠시 더 유지해 `stop_frames`와 `cutoff_frames`를 보고한다. 두 범위
+모두 끝값은 제외한다. 연속 DMA 블록이나 기준 톤, STOP 뒤 관찰
+구간이 부족하면 유효한 중단 범위를 내지 않는다. 이 결과의 기준은
+펌웨어가 관찰한 GPIO·DMA 시각이다. 터치 센서와 ADC/필터 지연,
+실제 스피커 단자의 중단 시각은 별도 계측이 필요하다.
+
+실물 시험에는 이 진단만 별도로 승인한다. 후보 앱의 설치 범위는
+`ota_1`의 `0x510000`에서 시작하는 이미지 및 섹터 경계까지다.
+시험 결과에 관계없이 검증된 순정 OTA1 전체를 복구한 뒤 해시를
+대조하고, 파티션 표·OTA 선택 정보를 재검증한 후 재부팅한다.
+후보는 상시 사용 승인 근거에 포함하지 않는다. 보드의 실제 기준
+신호와 중단 구간은 설치 후 한 번의 앞면 STOP 시험에서 확인한다.
 
 ## 2026-11-28 재부팅·연속 대화·STOP 통합 시험 준비
 

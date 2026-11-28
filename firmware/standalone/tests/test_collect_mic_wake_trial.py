@@ -1027,6 +1027,51 @@ AUTO_STOP_REPORT = {
 }
 
 
+def test_aec_cutoff_requires_a_live_cue_and_a_consistent_reference_interval(receiver):
+    protocol = receiver.AEC_STOP_PROTOCOL
+    challenge = AUTO_STOP_WAIT | {"mic_trial": receiver.SPEAKER_CHALLENGES[protocol]}
+    result = {
+        "aec_stop_trial": protocol,
+        "result": receiver.AEC_STOP_OK,
+        "sample_rate_hz": 24_000,
+        "pcm_blocks": 25,
+        "standby_confirmed": True,
+        "operating_admission": False,
+        "reference_timing": {
+            "gpio_sample_us": 25_000,
+            "rx_eof_us": [20_000, 30_000],
+            "stop_frames": [2_400, 2_640],
+            "cutoff_frames": [2_616, 2_688],
+        },
+    }
+    port = FakeSerial([challenge, AUTO_STOP_ARMED, AUTO_STOP_PLAYING, result, HOLD])
+    assert (
+        receiver.receive_once(port, lambda: None, speaker=True, speaker_protocol=protocol) == result
+    )
+    assert b"STOP\n" not in port.writes
+    with pytest.raises(ValueError, match="armed window"):
+        receiver.receive_once(
+            FakeSerial([challenge, AUTO_STOP_ARMED, result, HOLD]),
+            lambda: None,
+            speaker=True,
+            speaker_protocol=protocol,
+        )
+    for corrupt in (
+        {"gpio_sample_us": 30_000},
+        {"rx_eof_us": [10_000, 30_000]},
+        {"stop_frames": [2_401, 2_641]},
+        {"cutoff_frames": [2_352, 2_376]},
+        {"raw_pcm": [0]},
+    ):
+        record = result | {"reference_timing": result["reference_timing"] | corrupt}
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(record, speaker=True, speaker_protocol=protocol)
+    with pytest.raises(ValueError):
+        receiver.validate_output_report(
+            result | {"standby_confirmed": False}, speaker=True, speaker_protocol=protocol
+        )
+
+
 @pytest.mark.parametrize("conclusion", ["standby", "reset"])
 @pytest.mark.parametrize("cue", ["manual", "missing", "late", "automatic"])
 def test_screen_stop_timing_requires_an_observed_manual_playback_window(receiver, conclusion, cue):

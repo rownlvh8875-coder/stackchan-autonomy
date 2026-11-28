@@ -56,8 +56,13 @@ const char* tx_result_name(K151SilentTxResult result) {
   return nullptr;
 }
 #elif defined(STACKCHAN_K151_SPEAKER_STOP_PROBE)
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+constexpr char kBootMarker[] = "K151_AEC_STOP_TRIAL_NOT_OPERATIONAL";
+constexpr char kChallengeMarker[] = "WAIT_AEC_STOP_REFERENCE_LOCAL_START";
+#else
 constexpr char kBootMarker[] = "K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL";
 constexpr char kChallengeMarker[] = "WAIT_SPEAKER_SCREEN_STOP_SHUTDOWN_START";
+#endif
 K151SpeakerStopCue speaker_stop_cue;
 #elif defined(STACKCHAN_K151_SPEAKER_PROBE)
 constexpr char kBootMarker[] = "K151_SPEAKER_PROBE_NOT_OPERATIONAL";

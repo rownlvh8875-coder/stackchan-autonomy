@@ -21,9 +21,54 @@ def inspect_image(
     silent_tx=False,
     speaker=False,
     speaker_stop=False,
+    aec_stop=False,
 ) -> dict:
-    if sum((question, wake_only_control, question_only, silent_tx, speaker, speaker_stop)) > 1:
+    if (
+        sum(
+            (question, wake_only_control, question_only, silent_tx, speaker, speaker_stop, aec_stop)
+        )
+        > 1
+    ):
         raise ValueError("Select a single trial image")
+    if aec_stop:
+        envelope, _ = inspect_envelope(app, elf_sha256, b"k151_aec_stop_trial")
+        required = (
+            b"K151_AEC_STOP_TRIAL_NOT_OPERATIONAL\0",
+            b"WAIT_AEC_STOP_REFERENCE_LOCAL_START\0",
+            b'"K151_AEC_REFERENCE_STOP_V1"',
+            b'"SPEAKER_STOP_PLAYING"',
+            b'"reference_timing"',
+            b'"rx_eof_us"',
+            b'"operating_admission":false',
+        )
+        forbidden = (
+            check_resource_bench.PACK_PREFIX,
+            b"LISTEN_NOW\0",
+            b"QUESTION_ONLY_NOW\0",
+            b"api.openai.com\0",
+            b"K151_AEC_STOP_SYNTHETIC_ONLY_HOLD",
+            b"K151_SPEAKER_STOP_PROBE_NOT_OPERATIONAL",
+        )
+        if not all(marker in app for marker in required) or any(
+            marker in app for marker in forbidden
+        ):
+            raise ValueError("Unexpected AEC reference STOP diagnostic image")
+        return {
+            **envelope,
+            **validate_slot(partition_csv, SLOT_OFFSET, envelope["erase_span_bytes"]),
+            "kind": "AEC_REFERENCE_SCREEN_STOP_NOT_OPERATIONAL",
+            "expected_protocol": "K151_AEC_REFERENCE_STOP_V1",
+            "local_nonce_start_required": True,
+            "combined_start_window_ms": 10_000,
+            "tone_samples": 60_000,
+            "tone_peak_pcm16": 4096,
+            "sample_rate_hz": 24_000,
+            "adc_reference_slot": 1,
+            "microphone_enabled": False,
+            "raw_pcm_exported": False,
+            "cloud_enabled": False,
+            "electrical_stop_mute_verified": False,
+        }
     if speaker_stop:
         envelope, _ = inspect_envelope(app, elf_sha256, b"k151_speaker_stop_probe")
         progress = (
@@ -254,6 +299,7 @@ def main():
     mode.add_argument("--silent-tx", action="store_true")
     mode.add_argument("--speaker", action="store_true")
     mode.add_argument("--speaker-stop", action="store_true")
+    mode.add_argument("--aec-stop", action="store_true")
     args = parser.parse_args()
     validate_source_head(args.source_head)
     build = validate(args.elf, args.bin, args.idf_head)
@@ -267,6 +313,7 @@ def main():
         silent_tx=args.silent_tx,
         speaker=args.speaker,
         speaker_stop=args.speaker_stop,
+        aec_stop=args.aec_stop,
     )
     result.update(
         idf_commit=build["idf_commit"],

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "k151_aec_stop_probe.hpp"
+#include "k151_aec_timeline.hpp"
 #include "k151_probe_tone.hpp"
 
 #include <algorithm>
@@ -43,6 +44,21 @@ void establish_tone(Probe& probe) {
 }
 
 int main() {
+  K151AecTimeline clock;
+  assert(clock.accept(0, 10'000));
+  assert(!clock.stop_bracket(10'000)); // A previous and next EOF are both required.
+  assert(clock.accept(240, 19'900));
+  const auto bracket = clock.stop_bracket(14'300);
+  assert(bracket && bracket->first_frame == 240 && bracket->end_frame == 480);
+  assert(bracket->before_us == 10'000 && bracket->after_us == 19'900);
+  assert(!clock.stop_bracket(19'900) && !clock.stop_bracket(9'999));
+  assert(!clock.accept(480, 39'900) && !clock.valid()); // A missing EOF cannot become quiet.
+  assert(!clock.stop_bracket(14'300));
+  K151AecTimeline rollback;
+  assert(rollback.accept(0, 30'000) && !rollback.accept(240, 29'999));
+  K151AecTimeline skipped;
+  assert(skipped.accept(0, 30'000) && !skipped.accept(480, 40'000));
+
   static_assert(Probe::kSampleRate == 24000 && Probe::kReferenceSlot == 1 && Probe::kSlots == 4);
   static_assert(Probe::kBclkHz == 1536000);
   Probe good;

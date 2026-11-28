@@ -33,7 +33,15 @@ SPEAKER_AMP_OFF_PROTOCOL = "K151_SPEAKER_V13"
 SPEAKER_STOP_PROTOCOL = "K151_SPEAKER_STOP_V1"
 SPEAKER_STOP_PROGRESS_PROTOCOL = "K151_SPEAKER_STOP_V2"
 SPEAKER_STOP_SHUTDOWN_PROTOCOL = "K151_SPEAKER_STOP_V3"
-SPEAKER_STOP_PROGRESS_PROTOCOLS = {SPEAKER_STOP_PROGRESS_PROTOCOL, SPEAKER_STOP_SHUTDOWN_PROTOCOL}
+AEC_STOP_PROTOCOL = "K151_AEC_REFERENCE_STOP_V1"
+AEC_STOP_SCOPE = "ONE_AEC_REFERENCE_SCREEN_STOP_AND_OTA1_RESTORE"
+AEC_STOP_MODE = "AEC_REFERENCE_SCREEN_STOP"
+AEC_STOP_OK = "reference_cutoff_bracketed"
+SPEAKER_STOP_PROGRESS_PROTOCOLS = {
+    SPEAKER_STOP_PROGRESS_PROTOCOL,
+    SPEAKER_STOP_SHUTDOWN_PROTOCOL,
+    AEC_STOP_PROTOCOL,
+}
 SPEAKER_STOP_PROTOCOLS = {SPEAKER_STOP_PROTOCOL, *SPEAKER_STOP_PROGRESS_PROTOCOLS}
 SPEAKER_STOP_SCOPE = "ONE_SYNTHETIC_SPEAKER_SCREEN_STOP_AND_OTA1_RESTORE"
 SPEAKER_STOP_MODE = "SYNTHETIC_SPEAKER_SCREEN_STOP"
@@ -63,6 +71,7 @@ SPEAKER_CHALLENGES = {
     SPEAKER_STOP_PROTOCOL: "WAIT_SPEAKER_SCREEN_STOP_START",
     SPEAKER_STOP_PROGRESS_PROTOCOL: "WAIT_SPEAKER_SCREEN_STOP_PROGRESS_START",
     SPEAKER_STOP_SHUTDOWN_PROTOCOL: "WAIT_SPEAKER_SCREEN_STOP_SHUTDOWN_START",
+    AEC_STOP_PROTOCOL: "WAIT_AEC_STOP_REFERENCE_LOCAL_START",
 }
 SPEAKER_REVIEW_KINDS = {
     SPEAKER_PROTOCOL: "REVIEW_ONLY_SPEAKER_PROBE_V1",
@@ -81,6 +90,7 @@ SPEAKER_REVIEW_KINDS = {
     SPEAKER_STOP_PROTOCOL: "REVIEW_ONLY_SPEAKER_STOP_V1",
     SPEAKER_STOP_PROGRESS_PROTOCOL: "REVIEW_ONLY_SPEAKER_STOP_V2",
     SPEAKER_STOP_SHUTDOWN_PROTOCOL: "REVIEW_ONLY_SPEAKER_STOP_V3",
+    AEC_STOP_PROTOCOL: "REVIEW_ONLY_AEC_REFERENCE_STOP_V1",
 }
 SILENT_TX_RESULTS = {
     "denied",
@@ -247,7 +257,90 @@ def _validate_stop_shutdown(record):
         raise ValueError("Reset timing requires a verified fallback and idle TX")
 
 
+def validate_aec_report(record):
+    result = record.get("result")
+    blocks = record.get("pcm_blocks")
+    standby = record.get("standby_confirmed")
+    timing = record.get("reference_timing")
+    if (
+        set(record)
+        != {
+            "aec_stop_trial",
+            "result",
+            "sample_rate_hz",
+            "pcm_blocks",
+            "standby_confirmed",
+            "operating_admission",
+            "reference_timing",
+        }
+        or record["aec_stop_trial"] != AEC_STOP_PROTOCOL
+        or type(record["sample_rate_hz"]) is not int
+        or record["sample_rate_hz"] != 24_000
+        or type(blocks) is not int
+        or not 0 <= blocks <= SPEAKER_STOP_BLOCKS
+        or type(standby) is not bool
+        or record["operating_admission"] is not False
+        or result
+        not in (
+            AEC_STOP_OK,
+            "preparation_failed",
+            "host_stopped",
+            "screen_stop_before_playing",
+            "clock_fault",
+            "reference_setup_failed",
+            "stopped_before_playback",
+            "baseline_unverified",
+            "amplifier_start_failed",
+            "ended_without_screen_stop",
+            "cleanup_failed",
+            "reference_unverified",
+        )
+    ):
+        raise ValueError("Invalid AEC reference diagnostic")
+    if result != AEC_STOP_OK:
+        if timing is not None or (result == "cleanup_failed" and standby):
+            raise ValueError("Unexpected AEC timing or standby assertion")
+        return record
+    if (
+        not standby
+        or not 0 < blocks < SPEAKER_STOP_BLOCKS
+        or not isinstance(timing, dict)
+        or set(timing) != {"gpio_sample_us", "rx_eof_us", "stop_frames", "cutoff_frames"}
+    ):
+        raise ValueError("Incomplete AEC cutoff evidence")
+
+    def pair(name, bound):
+        value = timing[name]
+        if (
+            not isinstance(value, list)
+            or len(value) != 2
+            or any(type(item) is not int or not 0 <= item <= bound for item in value)
+            or value[0] >= value[1]
+        ):
+            raise ValueError("Invalid AEC timing interval")
+        return value
+
+    before, after = pair("rx_eof_us", 2**63 - 1)
+    lo, hi = pair("stop_frames", 72_000)
+    last_tone, first_quiet = pair("cutoff_frames", 72_000)
+    sampled = timing["gpio_sample_us"]
+    if (
+        type(sampled) is not int
+        or not before <= sampled < after
+        or not 8_000 <= after - before <= 12_000
+        or hi - lo != 240
+        or lo % 240
+        or last_tone % 24
+        or first_quiet % 24
+        or first_quiet <= lo
+    ):
+        raise ValueError("Unaligned AEC timing evidence")
+    return record
+
+
 def validate_output_report(record, *, speaker, speaker_protocol=SPEAKER_PROTOCOL):
+    if speaker and speaker_protocol == AEC_STOP_PROTOCOL:
+        return validate_aec_report(record)
     if speaker and speaker_protocol in SPEAKER_STOP_PROGRESS_PROTOCOLS:
         fields = {
             "speaker_probe",
@@ -716,7 +809,9 @@ def receive_once(
                     raise ValueError("Unexpected question marker")
                 question_cued = True
                 announce_question()
-            elif "tx_dma_probe" in record or "speaker_probe" in record:
+            elif (
+                "tx_dma_probe" in record or "speaker_probe" in record or "aec_stop_trial" in record
+            ):
                 if not output_only or not started or report is not None:
                     raise ValueError("Unexpected or repeated output result")
                 close_speaker_window()
@@ -724,7 +819,7 @@ def receive_once(
                     record, speaker=speaker, speaker_protocol=speaker_protocol
                 )
                 reset_timing = report.get("stop_diagnostic", {}).get("sample_to_reset_idle_us")
-                if report["result"] == SPEAKER_STOP_OK or reset_timing is not None:
+                if report["result"] in (SPEAKER_STOP_OK, AEC_STOP_OK) or reset_timing is not None:
                     if not speaker_stop_cued:
                         raise ValueError("Speaker STOP preceded the armed window")
                     if auto_stop_attempted:
@@ -803,6 +898,8 @@ def verified_port(
             operator_mode = SPEAKER_STOP_MODE if speaker_stop else "SYNTHETIC_SPEAKER_ONLY"
             protocol = speaker_protocol
             expected_kind = SPEAKER_REVIEW_KINDS[protocol]
+            if protocol == AEC_STOP_PROTOCOL:
+                scope, operator_mode = AEC_STOP_SCOPE, AEC_STOP_MODE
             if auto_stop:
                 scope = SPEAKER_AUTO_STOP_SCOPE
                 operator_mode = SPEAKER_AUTO_STOP_MODE
@@ -932,6 +1029,7 @@ def main():
                 SPEAKER_STOP_PROTOCOL: SPEAKER_STOP_CUE,
                 SPEAKER_STOP_PROGRESS_PROTOCOL: SPEAKER_STOP_PROGRESS_CUE,
                 SPEAKER_STOP_SHUTDOWN_PROTOCOL: SPEAKER_STOP_PROGRESS_CUE,
+                AEC_STOP_PROTOCOL: SPEAKER_STOP_PROGRESS_CUE,
             }.get(args.speaker_protocol, "지금 Hi StackChan을 한 번 말해 주세요.")
             report = receive_once(
                 port,
@@ -967,9 +1065,13 @@ def main():
     if args.auto_stop:
         return int(not _auto_stop_passed(report))
     expected = (
-        SPEAKER_STOP_OK
-        if args.speaker_protocol in SPEAKER_STOP_PROTOCOLS
-        else "dma_and_mute_observed"
+        AEC_STOP_OK
+        if args.speaker_protocol == AEC_STOP_PROTOCOL
+        else (
+            SPEAKER_STOP_OK
+            if args.speaker_protocol in SPEAKER_STOP_PROTOCOLS
+            else "dma_and_mute_observed"
+        )
     )
     return int(args.speaker and report["result"] != expected)
 

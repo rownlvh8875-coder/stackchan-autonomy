@@ -71,6 +71,9 @@ class K151CodecPort final {
   bool speaker_stop_tx_idle() const;
 #endif
   bool cleanup_unverified() const { return cleanup_unverified_; }
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  bool start_aec_reference();
+#endif
 
  private:
   static constexpr bool speaker_probe_build() {
@@ -106,6 +109,10 @@ class K151CodecPort final {
   bool quiesce_channels();
   bool prepare_output_codec();
   bool prepare_input_codec();
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  bool prepare_aec_adc();
+  bool set_aec_amp_frame();
+#endif
 #ifdef STACKCHAN_K151_SPEAKER_PROBE
   std::optional<uint16_t> read_amp_observation(uint8_t reg);
 #endif

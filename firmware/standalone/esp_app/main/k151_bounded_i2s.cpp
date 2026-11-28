@@ -59,13 +59,30 @@ bool K151BoundedI2s::attach_receive_only(i2s_chan_handle_t rx) {
   rx_ = rx;
   return true;
 }
+
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+bool K151BoundedI2s::attach_fixed_aec_output(i2s_chan_handle_t tx) {
+  if (attempted_) return false;
+  attempted_ = true;
+  i2s_chan_info_t info{};
+  if (!tx || i2s_channel_get_info(tx, &info) != ESP_OK ||
+      !info.pair_chan || info.is_enabled) {
+    fail();
+    return false;
+  }
+  // The diagnostic configures its paired clocks before attaching the codec.
+  // Never call the SDK data adapter's reconfiguration path on this pair.
+  tx_ = tx;
+  return true;
+}
+#endif
 void K151BoundedI2s::detach() {
   base_ = nullptr; rx_ = tx_ = nullptr; formats_ = {}; enabled_ = {};
 }
 bool K151BoundedI2s::opened(const audio_codec_data_if_t* h) {
   if (!h) return false;
   const auto& p = self(h);
-  return p.base_ ? p.base_->is_open(p.base_) : p.rx_ != nullptr;
+  return p.base_ ? p.base_->is_open(p.base_) : p.rx_ != nullptr || p.tx_ != nullptr;
 }
 bool K151BoundedI2s::has_channel(int direction) const {
   return direction == 0 ? rx_ != nullptr : direction == 1 && tx_ != nullptr;
@@ -107,8 +124,8 @@ int K151BoundedI2s::enable_data(const audio_codec_data_if_t* h, esp_codec_dev_ty
   // Disabling remains possible after a transfer fault; do not erase the fault.
   int rc = ESP_CODEC_DEV_OK;
   if (p.base_) rc = p.base_->enable(p.base_, type, enable);
-  else if (enable) rc = i2s_channel_enable(p.rx_);
-  else if (p.enabled_[i]) rc = i2s_channel_disable(p.rx_);
+  else if (enable) rc = i2s_channel_enable(i == 0 ? p.rx_ : p.tx_);
+  else if (p.enabled_[i]) rc = i2s_channel_disable(i == 0 ? p.rx_ : p.tx_);
   if (rc != ESP_CODEC_DEV_OK) return p.fail();
   p.enabled_[i] = enable;
   return ESP_CODEC_DEV_OK;

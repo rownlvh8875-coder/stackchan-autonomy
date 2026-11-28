@@ -99,6 +99,28 @@ def test_question_trial_requires_separate_project_and_scope(model_fixture):
         inspect_image(image(model_fixture, project=PROJECT), ELF_SHA, SLOT_CSV, question=True)
 
 
+def test_aec_reference_stop_has_its_own_project_and_authorization(model_fixture):
+    from check_mic_wake_image import inspect_image
+
+    markers = (
+        b"K151_AEC_STOP_TRIAL_NOT_OPERATIONAL\0WAIT_AEC_STOP_REFERENCE_LOCAL_START\0"
+        b'"K151_AEC_REFERENCE_STOP_V1"\0"SPEAKER_STOP_PLAYING"\0"reference_timing"\0'
+        b'"rx_eof_us"\0"operating_admission":false\0'
+    )
+    project = b"k151_aec_stop_trial"
+    app = image(markers, project=project)
+    manifest = inspect_image(app, ELF_SHA, SLOT_CSV, aec_stop=True)
+    assert manifest["expected_protocol"] == "K151_AEC_REFERENCE_STOP_V1"
+    assert manifest["adc_reference_slot"] == 1
+    assert manifest["install_authorized"] is manifest["raw_pcm_exported"] is False
+    with pytest.raises(ValueError):
+        inspect_image(app, ELF_SHA, SLOT_CSV, speaker_stop=True)
+    with pytest.raises(ValueError):
+        inspect_image(
+            image(markers + model_fixture, project=project), ELF_SHA, SLOT_CSV, aec_stop=True
+        )
+
+
 def test_wake_only_control_has_distinct_identity_and_short_observation(model_fixture):
     from check_mic_wake_image import inspect_image
 

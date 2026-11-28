@@ -7,8 +7,12 @@ idf_component_register(
     INCLUDE_DIRS "${ports}" "../../resource_bench/main" "../../core"
     PRIV_REQUIRES esp_partition spi_flash esp_driver_i2c esp_driver_i2s esp_driver_spi
                   esp_driver_gpio esp_lcd esp_driver_usb_serial_jtag esp_timer esp_hw_support
-                  app_update lvgl__lvgl
+                  app_update lvgl__lvgl espressif__esp_codec_dev
 )
 target_compile_features(${COMPONENT_LIB} PRIVATE cxx_std_20)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     STACKCHAN_K151_SPEAKER_PROBE=1 STACKCHAN_K151_SPEAKER_STOP_PROBE=1)
+if(K151_AEC_REFERENCE)
+    target_sources(${COMPONENT_LIB} PRIVATE "${ports}/k151_aec_dma.cpp")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE STACKCHAN_K151_AEC_REFERENCE_PROBE=1)
+endif()

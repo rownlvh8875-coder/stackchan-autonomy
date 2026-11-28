@@ -6,6 +6,10 @@
 #include "k151_probe_tone.hpp"
 #include "k151_speaker_stop_probe.hpp"
 #include "k151_speaker_stop_timing.hpp"
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+#include "k151_aec_dma.hpp"
+#include "k151_aec_timeline.hpp"
+#endif
 #include <cstdio>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -15,6 +19,54 @@ namespace stackchan::standalone {
 namespace {
 constexpr auto tone = k151_probe_tone<6000>();
 constexpr int kRepetitions = 10; // At most 2.5 seconds at 24 kHz.
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+using Aec = K151AecStopProbe;
+constexpr unsigned kAecToneBlocks = tone.size() * kRepetitions / Aec::kFramesPerBlock;
+constexpr uint32_t kBaselineFrames = 3 * Aec::kFramesPerBlock;
+struct AecStopResult {
+  K151AecTimeline::Bracket bracket;
+  Aec::Cutoff cutoff;
+  int64_t sampled_us;
+};
+
+class AecObservation final {
+ public:
+  bool pump(int64_t stop_sampled_us = -1, uint32_t until_frame = Aec::kMaxFrames) {
+    ScopedPcmWipe wipe{block_};
+    for (unsigned i = 0; i < 16 && frames() < until_frame; ++i) {
+      uint32_t first{};
+      int64_t eof{};
+      if (!take_k151_aec_block(block_, first, eof)) break;
+      if (!timeline_.accept(first, eof)) return false;
+      if (stop_sampled_us >= 0 && !bracket_) {
+        bracket_ = timeline_.stop_bracket(stop_sampled_us);
+        if (!bracket_ && eof > stop_sampled_us) return false;
+        if (bracket_ && !analyzer_.mark_stop(bracket_->first_frame)) return false;
+      }
+      if (!analyzer_.observe(first, block_)) return false;
+    }
+    return !k151_aec_dma_faulted();
+  }
+
+  uint32_t frames() const { return timeline_.next_frame(); }
+  bool begin_tone() {
+    return analyzer_.begin_tone(kBaselineFrames + kAecToneBlocks * Aec::kFramesPerBlock);
+  }
+  std::optional<AecStopResult> result(int64_t sampled_us) const {
+    if (!bracket_ || frames() < bracket_->end_frame + 5 * Aec::kFramesPerBlock)
+      return std::nullopt;
+    auto cutoff = analyzer_.cutoff();
+    if (!cutoff) return std::nullopt;
+    return AecStopResult{*bracket_, *cutoff, sampled_us};
+  }
+
+ private:
+  K151AecTimeline timeline_;
+  Aec analyzer_;
+  std::optional<K151AecTimeline::Bracket> bracket_;
+  std::array<int16_t, Aec::kFramesPerBlock * Aec::kSlots> block_{};
+};
+#endif
 struct StopDiagnostic {
   bool screen_stop_sampled = false;
   bool pcm_write_rejected = false;
@@ -30,6 +82,9 @@ struct Report {
   bool dma_complete = false;
   bool standby_confirmed = false;
   StopDiagnostic stop{};
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  std::optional<AecStopResult> aec{};
+#endif
 };
 }
 
@@ -48,6 +103,10 @@ class K151SpeakerStopProbe final {
         (result.standby_confirmed && !codec_released)) {
       result.result = "cleanup_failed";
       result.sampled_us.reset();
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+      result.standby_confirmed = false;
+      result.aec.reset();
+#endif
     }
     return result;
   }
@@ -86,10 +145,82 @@ class K151SpeakerStopProbe final {
     (void)std::fflush(stdout);
     if (!owner.load()) return {"host_stopped"};
     if (stop_.load()) return {"screen_stop_before_playing"};
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+    return play_aec(audio, owner, cue);
+#else
     if (!audio.playback_begin()) return {"amplifier_start_failed"};
     return play(audio, owner, cue);
+#endif
   }
 
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  Report play_aec(AudioGuard& audio, const std::atomic_bool& owner, K151SpeakerStopCue& cue) {
+    AecObservation observation;
+    if (!codec_.start_aec_reference()) return {"reference_setup_failed"};
+    const auto start = esp_timer_get_time();
+    int64_t previous = start;
+    const auto elapsed_ok = [&](int64_t from, int64_t limit) {
+      const auto now = esp_timer_get_time();
+      if (from < 0 || now < previous || now < from || now - from >= limit) return false;
+      previous = now;
+      return true;
+    };
+    while (observation.frames() < kBaselineFrames) {
+      if (!owner.load() || stop_.load()) return {"stopped_before_playback"};
+      if (!elapsed_ok(start, 150'000) || !observation.pump(-1, kBaselineFrames))
+        return {"baseline_unverified"};
+      if (observation.frames() < kBaselineFrames) vTaskDelay(1);
+    }
+    if (!observation.begin_tone() || !owner.load() || stop_.load() || !audio.playback_begin())
+      return {"amplifier_start_failed"};
+    const auto began = esp_timer_get_time();
+    unsigned blocks = 0;
+    bool fault = false;
+    while (blocks < kAecToneBlocks && owner.load() && !stop_.load()) {
+      const auto offset = blocks == 0 ? 0 :
+          blocks + 1 == kAecToneBlocks ? tone.size() - Aec::kFramesPerBlock : Aec::kFramesPerBlock;
+      if (!elapsed_ok(began, 2'750'000) ||
+          !codec_.play_mono_24k(std::span(tone).subspan(offset, Aec::kFramesPerBlock))) {
+        fault = true;
+        break;
+      }
+      ++blocks;
+      if (blocks == 1) cue.pending.store(true);
+      if (!owner.load() || stop_.load()) break;
+      if (!observation.pump()) {
+        fault = true;
+        break;
+      }
+    }
+    cue.pending.store(false);
+    if (!fault && owner.load() && !stop_.load() && blocks == kAecToneBlocks &&
+        codec_.wait_for_tx_tail(owner, owner, stop_)) {
+      const bool quiet = audio.playback_end();
+      return {quiet ? "ended_without_screen_stop" : "cleanup_failed", {}, blocks, true, quiet};
+    }
+
+    // Disable output before any post-STOP observation or wait.
+    audio.stop();
+    const bool quiet = audio.state() == AudioState::stopped && codec_.speaker_stop_tx_idle();
+    if (!quiet) return {"cleanup_failed", {}, blocks};
+    Report report{"reference_unverified", {}, blocks, false, true};
+    const auto sampled = K151DisplayStop::observed_at_us();
+    if (!owner.load() || !stop_.load() || sampled < began || !cue.sent.load() ||
+        blocks == 0 || blocks == kAecToneBlocks || fault)
+      return report;
+    const auto quiet_at = esp_timer_get_time();
+    while (owner.load() && elapsed_ok(quiet_at, 120'000)) {
+      if (!observation.pump(sampled)) break;
+      if (auto captured = observation.result(sampled); captured && owner.load()) {
+        report.result = "reference_cutoff_bracketed";
+        report.aec = captured;
+        break;
+      }
+      vTaskDelay(1);
+    }
+    return report;
+  }
+#else
   Report play(AudioGuard& audio, const std::atomic_bool& owner, K151SpeakerStopCue& cue) {
     int64_t previous = esp_timer_get_time();
     const auto began = previous;
@@ -165,6 +296,7 @@ class K151SpeakerStopProbe final {
     report.stop.pcm_write_rejected = write_rejected;
     return report;
   }
+#endif
 
   bool release_panel() {
     if (stop_owned_ && !K151DisplayStop::disarm()) return false;
@@ -186,6 +318,23 @@ void report_k151_speaker_stop_probe(const std::atomic_bool& owner, K151AudioBoar
   // Stay alive on ambiguous release. The supervised one-shot ends in HOLD.
   static K151SpeakerStopProbe probe;
   const auto report = probe.run(owner, evidence, cue);
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  char timing[224] = "null";
+  if (const auto& aec = report.aec) {
+    std::snprintf(timing, sizeof(timing),
+                "{\"gpio_sample_us\":%lld,\"rx_eof_us\":[%lld,%lld],"
+                "\"stop_frames\":[%u,%u],\"cutoff_frames\":[%u,%u]}",
+                static_cast<long long>(aec->sampled_us),
+                static_cast<long long>(aec->bracket.before_us),
+                static_cast<long long>(aec->bracket.after_us),
+                unsigned(aec->bracket.first_frame), unsigned(aec->bracket.end_frame),
+                unsigned(aec->cutoff.first_possible_frame), unsigned(aec->cutoff.quiet_by_frame));
+  }
+  std::printf("{\"aec_stop_trial\":\"K151_AEC_REFERENCE_STOP_V1\",\"result\":\"%s\","
+              "\"sample_rate_hz\":24000,\"pcm_blocks\":%u,\"standby_confirmed\":%s,"
+              "\"operating_admission\":false,\"reference_timing\":%s}\n",
+              report.result, report.pcm_blocks, report.standby_confirmed ? "true" : "false", timing);
+#else
   char delta[12] = "null";
   char reset_delta[12] = "null";
   if (report.sampled_us)
@@ -204,5 +353,6 @@ void report_k151_speaker_stop_probe(const std::atomic_bool& owner, K151AudioBoar
               delta, flag(report.stop.screen_stop_sampled), flag(report.stop.pcm_write_rejected),
               unsigned(report.stop.cleanup_stage), flag(report.stop.reset_latch_verified),
               flag(report.stop.tx_idle_observed), reset_delta);
+#endif
 }
 } // namespace stackchan::standalone

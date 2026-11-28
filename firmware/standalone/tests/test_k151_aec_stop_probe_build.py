@@ -15,7 +15,7 @@ def compile_probe(tmp_path):
         pytest.skip("C++20 compiler required")
     root = Path(__file__).resolve().parents[1]
 
-    def run(*sources):
+    def run(*sources, args=()):
         binary = tmp_path / "k151_aec_stop_probe"
         build = subprocess.run(
             [
@@ -30,6 +30,8 @@ def compile_probe(tmp_path):
                 str(root / "core"),
                 "-I",
                 str(root / "esp_app/main"),
+                "-I",
+                str(root / "tests/codec_io_doubles"),
                 *(str(root / source) for source in sources),
                 "-o",
                 str(binary),
@@ -39,7 +41,7 @@ def compile_probe(tmp_path):
             timeout=90,
         )
         assert build.returncode == 0, build.stderr
-        result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+        result = subprocess.run([str(binary), *args], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, result.stderr
         return result.stdout
 
@@ -64,3 +66,10 @@ def test_app_entrypoint_exports_only_synthetic_summary(compile_probe, tmp_path):
         "quiet_by_frame": 1_032,
         "hardware_observed": False,
     }
+
+
+@pytest.mark.parametrize("args", [(), ("short",), ("cutoff",)])
+def test_dma_reference_overrun_short_data_and_aligned_cutoff(compile_probe, args):
+    assert not compile_probe(
+        "tests/k151_aec_dma_test.cpp", "esp_app/main/k151_aec_dma.cpp", args=args
+    )

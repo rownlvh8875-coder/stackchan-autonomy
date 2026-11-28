@@ -19,6 +19,9 @@ class K151BoundedI2s final : private audio_codec_data_if_t {
   // Attach a reserved, disabled and unpaired RX. The owner must configure the
   // fixed PCM format before exposing the interface to the codec.
   bool attach_receive_only(i2s_chan_handle_t rx);
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  bool attach_fixed_aec_output(i2s_chan_handle_t tx);
+#endif
   void detach(); // Only after codec devices have been deleted.
   const audio_codec_data_if_t* interface() const { return this; }
   bool faulted() const { return failed_.load(); }
