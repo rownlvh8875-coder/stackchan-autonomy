@@ -833,6 +833,7 @@ void exercise_conversation() {
              stop_timer_active && !network_starts && !setup_usb);
     };
   }
+  const auto budget_before_reboot = durable_budget;
   assert(!request(true, true) &&
          conversation.start({true, true}, true,
                             initial_saved_conversation() ? &saved : nullptr,
@@ -885,6 +886,11 @@ void exercise_conversation() {
     return;
   }
   assert(started == Phase::voice && network_starts == 1 && !setup_usb);
+  if (restored_conversation()) {
+    assert(!nvs_commits && durable_budget == budget_before_reboot);
+    const auto previous_budget = BudgetLedger::restore(durable_budget);
+    assert(previous_budget && previous_budget->count() == 1);
+  }
   assert(conversation.poll().voice == NativeVoiceStep::waiting_network);
   assert(voice_status == std::vector<K151VoiceStatus>{K151VoiceStatus::connecting});
   if (scenario == "bootstrap_conversation_stop") {
@@ -940,8 +946,13 @@ void exercise_conversation() {
     if (scenario == "bootstrap_conversation_reboot_stop_playback") {
       assert(state.phase == Phase::stopped && !board_bus_registered && !stop_timer_active);
       assert(calls == 6 && plays == 2 && !mic_open && !amp_open && network_stops == 1);
+      const auto budget_at_stop = durable_budget;
+      const auto stopped_budget = BudgetLedger::restore(budget_at_stop);
+      assert(nvs_commits == 2 && stopped_budget && stopped_budget->count() == 3);
       now_us += 600'000;
       assert(conversation.poll().phase == Phase::stopped && calls == 6 && plays == 2);
+      assert(!request(true, true) && !setup_usb && durable_budget == budget_at_stop);
+      assert(nvs_commits == 2 && network_starts == 1);
       return;
     }
     assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::answered);
