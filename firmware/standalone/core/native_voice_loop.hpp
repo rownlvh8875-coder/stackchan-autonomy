@@ -73,7 +73,7 @@ class NativeVoiceLoop final {
     faulted_ = true; // No implicit resume, retry, or re-use of a pending epoch.
     (void)wake_.cancel();
     (void)turn_.cancel();
-    ledger_.cancel_permit();
+    ledger_.stop();
     audio_.stop();
     session_.stop();
     return NativeVoiceStep::stopped;

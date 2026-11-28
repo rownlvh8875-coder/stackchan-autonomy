@@ -14,6 +14,7 @@ class TestKv : public AtomicKv {
   bool commit_fails = false;
   bool next_read_fails = false;
   bool fake_success = false;
+  bool uncertain_completion = false;
   int writes = 0;
 
   ReadValue read(std::string_view key, size_t max_bytes) override {
@@ -27,7 +28,7 @@ class TestKv : public AtomicKv {
     ++writes;
     if (commit_fails) return false;
     if (!fake_success) data[std::string(key)] = {blob.begin(), blob.end()};
-    return true;
+    return !uncertain_completion;
   }
 };
 
@@ -40,8 +41,113 @@ static std::vector<uint8_t> make_profile() {
   return *encoded;
 }
 
+static void test_reboot_trial(uint64_t now) {
+  const RebootTrialScope before{{0x31}, RebootTrialBoot::before_reboot};
+  const RebootTrialScope after{before.id, RebootTrialBoot::after_reboot};
+  const auto reviewed_absence = [](const ReadValue& read) {
+    return read.code == ReadCode::missing && read.bytes.empty();
+  };
+  auto expected = BudgetLedger::fresh();
+  assert(expected.reserve(now, true, [](auto) { return true; }));
+  const auto reviewed_checkpoint = [&expected](const ReadValue& read) {
+    return read.code == ReadCode::found && read.bytes == expected.serialize();
+  };
+  const auto charge = [](PersistentGuard& guard, uint64_t epoch, uint64_t wake) {
+    return guard.admit_builtin_wake(wake, true, true) && guard.reserve(epoch, true, true, wake);
+  };
+  const auto send = [](PersistentGuard& guard) {
+    assert(guard.authorize_step(PaidStage::transcribe, true, true));
+    assert(guard.authorize_step(PaidStage::respond, true, true));
+    assert(guard.authorize_step(PaidStage::synthesize, true, true));
+  };
+
+  TestKv absent;
+  PersistentGuard lost_after(absent, after);
+  assert(!lost_after.restore_budget_for_setup(true, reviewed_absence) && !absent.writes);
+  PersistentGuard unreviewed(absent, before);
+  assert(!unreviewed.restore_budget_for_setup(true) && !absent.writes);
+  PersistentGuard empty_scope(absent, RebootTrialScope{{}, RebootTrialBoot::before_reboot});
+  assert(!empty_scope.restore_budget_for_setup(true, reviewed_absence) && !absent.writes);
+
+  TestKv stopped_storage;
+  PersistentGuard stopped_before(stopped_storage, before);
+  assert(stopped_before.restore_budget_for_setup(true, reviewed_absence));
+  assert(charge(stopped_before, now, 1));
+  send(stopped_before);
+  stopped_before.stop();
+  assert(!stopped_before.prepare_trial_reboot(true));
+  PersistentGuard reboot_after_stop(stopped_storage, after);
+  assert(!reboot_after_stop.restore_budget_for_setup(false, reviewed_checkpoint));
+
+  TestKv storage;
+  PersistentGuard initial(storage, before);
+  assert(!initial.provision_budget(true));
+  assert(initial.restore_budget_for_setup(true, reviewed_absence) && storage.writes == 1);
+  assert(charge(initial, now, 1) && initial.paid_trial_spent());
+  assert(!initial.prepare_trial_reboot(true)); // A reservation alone is insufficient.
+  TestKv interrupted = storage;
+  PersistentGuard crashed_before(interrupted, after);
+  assert(!crashed_before.restore_budget_for_setup(false, reviewed_checkpoint));
+  PersistentGuard replay_before(interrupted, before);
+  assert(!replay_before.restore_budget_for_setup(true, reviewed_absence));
+  send(initial);
+  initial.cancel_permit(); // The existing voice cycle clears the completed permit.
+  assert(!initial.prepare_trial_reboot(false)); // No proven standby.
+  assert(initial.prepare_trial_reboot(true));
+  assert(!initial.authorize_step(PaidStage::transcribe, true, true));
+  assert(!initial.prepare_trial_reboot(true));
+
+  const int writes_before_approval = storage.writes;
+  auto wrong_id = after;
+  wrong_id.id[0] ^= 1;
+  PersistentGuard wrong(storage, wrong_id);
+  assert(!wrong.restore_budget_for_setup(false, reviewed_checkpoint));
+  PersistentGuard wrong_baseline(storage, after);
+  assert(!wrong_baseline.restore_budget_for_setup(false, reviewed_absence));
+  assert(storage.writes == writes_before_approval);
+  TestKv damaged = storage;
+  damaged.data.at("budget").back() ^= 1;
+  PersistentGuard corrupt(damaged, after);
+  assert(!corrupt.restore_budget_for_setup(false, reviewed_checkpoint));
+
+  TestKv uncertain = storage;
+  uncertain.uncertain_completion = true;
+  PersistentGuard uncertain_claim(uncertain, after);
+  assert(!uncertain_claim.restore_budget_for_setup(false, reviewed_checkpoint));
+  assert(uncertain_claim.fatal() && !charge(uncertain_claim, now + 61, 1));
+  uncertain.uncertain_completion = false;
+  PersistentGuard retry_uncertain_claim(uncertain, after);
+  assert(!retry_uncertain_claim.restore_budget_for_setup(false, reviewed_checkpoint));
+
+  TestKv unreadable = storage;
+  unreadable.fake_success = true;
+  PersistentGuard unverified_claim(unreadable, after);
+  assert(!unverified_claim.restore_budget_for_setup(false, reviewed_checkpoint));
+  assert(unverified_claim.fatal() && !charge(unverified_claim, now + 61, 1));
+
+  PersistentGuard resumed(storage, after);
+  assert(resumed.restore_budget_for_setup(false, reviewed_checkpoint));
+  assert(resumed.reserved_conversations() == 1 && !resumed.paid_trial_spent());
+  assert(!resumed.authorize_step(PaidStage::transcribe, true, true));
+  PersistentGuard second_boot(storage, after);
+  assert(!second_boot.restore_budget_for_setup(false, reviewed_checkpoint));
+  assert(charge(resumed, now + 61, 1) && !resumed.paid_trial_spent());
+  send(resumed);
+  assert(charge(resumed, now + 62, 2) && resumed.paid_trial_spent());
+  assert(resumed.authorize_step(PaidStage::transcribe, true, true));
+  resumed.stop();
+  assert(!resumed.authorize_step(PaidStage::respond, true, true));
+  assert(!charge(resumed, now + 86401, 3)); // Rolling-window expiry is unrelated to the cap.
+  assert(resumed.reserved_conversations() == 3);
+  PersistentGuard restart_after_stop(storage, after);
+  assert(!restart_after_stop.restore_budget_for_setup(false, reviewed_checkpoint));
+  PersistentGuard ordinary(storage);
+  assert(!ordinary.restore_budget() && ordinary.fatal());
+}
+
 int main() {
   constexpr uint64_t now = 1795100000ULL;
+  test_reboot_trial(now);
   auto profile = make_profile();
   TestKv kv;
   PersistentGuard no_init(kv);
