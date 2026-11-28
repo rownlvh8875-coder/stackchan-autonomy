@@ -220,6 +220,7 @@ def _validate_stop_shutdown(record):
             and (
                 not detail["screen_stop_sampled"]
                 or not detail["tx_idle_observed"]
+                or detail["cleanup_stage"] != 0
                 or detail["reset_latch_verified"]
                 or detail["pcm_write_rejected"]
             )
@@ -708,8 +709,12 @@ def receive_once(
                 report = validate_output_report(
                     record, speaker=speaker, speaker_protocol=speaker_protocol
                 )
-                if report["result"] == SPEAKER_STOP_OK and not speaker_stop_cued:
-                    raise ValueError("Speaker STOP preceded the armed window")
+                reset_timing = report.get("stop_diagnostic", {}).get("sample_to_reset_idle_us")
+                if report["result"] == SPEAKER_STOP_OK or reset_timing is not None:
+                    if not speaker_stop_cued:
+                        raise ValueError("Speaker STOP preceded the armed window")
+                    if auto_stop_attempted:
+                        raise ValueError("Speaker STOP timing overlaps automatic USB STOP")
             elif "mic_wake_trial" in record:
                 if output_only or question_only or not started or report is not None:
                     raise ValueError("Unexpected or repeated trial result")

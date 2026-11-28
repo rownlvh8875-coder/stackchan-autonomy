@@ -1027,6 +1027,64 @@ AUTO_STOP_REPORT = {
 }
 
 
+@pytest.mark.parametrize("conclusion", ["standby", "reset"])
+@pytest.mark.parametrize("cue", ["manual", "missing", "late", "automatic"])
+def test_screen_stop_timing_requires_an_observed_manual_playback_window(receiver, conclusion, cue):
+    detail = AUTO_STOP_REPORT["stop_diagnostic"] | {"screen_stop_sampled": True}
+    report = AUTO_STOP_REPORT | {"stop_diagnostic": detail}
+    if conclusion == "standby":
+        report |= {
+            "result": "screen_stop_and_standby_observed",
+            "sample_to_standby_us": 5_000,
+        }
+    else:
+        detail |= {
+            "cleanup_stage": 20,
+            "reset_latch_verified": True,
+            "sample_to_reset_idle_us": 5_000,
+        }
+        report |= {"result": "cleanup_failed", "standby_confirmed": False}
+    records = [AUTO_STOP_WAIT, AUTO_STOP_ARMED]
+    if cue in {"manual", "automatic"}:
+        records.append(AUTO_STOP_PLAYING)
+    records.append(report)
+    if cue == "late":
+        records.append(AUTO_STOP_PLAYING)
+    records.append(HOLD)
+    port = FakeSerial(records)
+
+    def receive():
+        return receiver.receive_once(
+            port,
+            lambda: None,
+            speaker=True,
+            speaker_protocol=report["speaker_probe"],
+            auto_stop=cue == "automatic",
+        )
+
+    if cue == "manual":
+        assert receive() == report
+        assert b"STOP\n" not in port.writes
+    else:
+        with pytest.raises(ValueError, match="Speaker STOP"):
+            receive()
+    if cue == "automatic":
+        assert port.writes.count(b"STOP\n") == 1
+
+
+def test_standby_timing_rejects_a_contradictory_cleanup_failure(receiver):
+    report = AUTO_STOP_REPORT | {
+        "result": "screen_stop_and_standby_observed",
+        "sample_to_standby_us": 5_000,
+        "stop_diagnostic": AUTO_STOP_REPORT["stop_diagnostic"]
+        | {"screen_stop_sampled": True, "cleanup_stage": 20},
+    }
+    with pytest.raises(ValueError, match="shutdown evidence"):
+        receiver.validate_output_report(
+            report, speaker=True, speaker_protocol=report["speaker_probe"]
+        )
+
+
 @pytest.mark.parametrize(
     ("changes", "late_cue", "passed"),
     [
