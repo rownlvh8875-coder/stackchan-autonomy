@@ -16,6 +16,7 @@ PRIVATE_MARKER = b"K151_CONVERSATION_LOCAL_RELEASE"
 ONE_TURN_MARKER = PRIVATE_MARKER + b"_ONE_PAID_TURN\0"
 DEVICE_OBSERVED_MARKER = PRIVATE_MARKER + b"_ONE_PAID_TURN_DEVICE_OBSERVED\0"
 CONTINUOUS_MARKER = PRIVATE_MARKER + b"_CONTINUOUS"
+REBOOT_TRIAL_MARKER = PRIVATE_MARKER + b"_REBOOT_TRIAL\0"
 
 
 def verify_sdkconfig(text: str) -> None:
@@ -44,7 +45,12 @@ def inspect_image(
     if local_one_turn:
         measured = ONE_TURN_MARKER in app
         device_observed = DEVICE_OBSERVED_MARKER in app
-        if PUBLIC_MARKER in app or CONTINUOUS_MARKER in app or measured == device_observed:
+        if (
+            PUBLIC_MARKER in app
+            or CONTINUOUS_MARKER in app
+            or REBOOT_TRIAL_MARKER in app
+            or measured == device_observed
+        ):
             raise ValueError("mixed or incompatible conversation image")
     elif PRIVATE_MARKER in app:
         raise ValueError("private release marker in public conversation image")

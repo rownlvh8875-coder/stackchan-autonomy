@@ -33,6 +33,7 @@ class K151VoiceRuntime final {
   // A rejected start leaves the network with its original owner.
   bool start(VoiceModelConfig models, std::span<const uint8_t> model_pack);
   NativeVoiceStep poll();
+  bool finish_trial();
   void stop();
   bool board_release_verified() const {
     return (phase_ == Phase::cold || phase_ == Phase::stopped) && !codec_.cleanup_unverified();
@@ -46,6 +47,7 @@ class K151VoiceRuntime final {
   bool live_ready() const;
   bool publish_status(K151VoiceStatus status) const;
   bool start_voice();
+  bool release_ports();
 
   PersistentGuard& ledger_;
   K151WifiTimePort& network_;

@@ -75,9 +75,12 @@ bool K151OwnerSession::start(bool exact_board_verified, bool physical_lcd_verifi
 }
 
 bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budget_scope_approved,
-                                              bool allow_first_budget, bool one_paid_turn) {
+                                              bool allow_first_budget, bool one_paid_turn,
+                                              std::optional<RebootTrialBoot> reboot_trial) {
   if (!on_owner_task() || step_ != Step::ready || !setup_.ready() || usb_.running() ||
-      (saved_ && one_paid_turn) || !paid_scope_approved || !budget_scope_approved || stop_.load())
+      (saved_ && one_paid_turn) ||
+      (reboot_trial && (one_paid_turn || reboot_trial != reboot_trial_boot())) ||
+      !paid_scope_approved || !budget_scope_approved || stop_.load())
     return false;
   const auto now_us = esp_timer_get_time();
   if (now_us < 0 || static_cast<uint64_t>(now_us / 1000) < last_sample_ms_) {
@@ -86,7 +89,7 @@ bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budge
   }
   const auto now = static_cast<uint64_t>(now_us / 1000);
   const bool first_budget_allowed = allow_first_budget && !restored_setup_;
-  if (!view_.begin_voice_review(now, first_budget_allowed, true, one_paid_turn)) {
+  if (!view_.begin_voice_review(now, first_budget_allowed, true, one_paid_turn, reboot_trial)) {
     (void)abort_setup();
     return false;
   }
@@ -95,6 +98,11 @@ bool K151OwnerSession::request_voice_review(bool paid_scope_approved, bool budge
   one_paid_turn_ = one_paid_turn;
   step_ = Step::voice_review;
   return true;
+}
+
+std::optional<RebootTrialBoot> K151OwnerSession::reboot_trial_boot() const {
+  if (!on_owner_task() || step_ != Step::ready || !saved_ || stop_.load()) return std::nullopt;
+  return restored_setup_ ? RebootTrialBoot::after_reboot : RebootTrialBoot::before_reboot;
 }
 
 K151OwnerSession::Step K151OwnerSession::poll() {

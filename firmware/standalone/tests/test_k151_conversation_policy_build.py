@@ -50,6 +50,10 @@ def test_k151_conversation_boot_policy(tmp_path):
         ("continuous", False, True, 0, None),
         ("continuous", False, False, "local", b"CONTINUOUS_LOCAL_UNLOCK"),
         ("continuous", False, True, "local", None),
+        ("reboot_trial", False, False, "local", b"REBOOT_TRIAL"),
+        ("reboot_trial", True, False, "local", b"REBOOT_TRIAL"),
+        ("reboot_trial", True, True, "local", None),
+        ("reboot_trial", True, False, 1, None),
         ("one_paid_turn", True, False, "local", None),
     ],
 )
@@ -73,7 +77,7 @@ def test_local_policy_marker_requires_complete_compiled_scope(
     trial_budget = ""
     if first_budget:
         trial_budget = ",\n.trial_budget_must_be_missing = true"
-    elif mode == "one_paid_turn":
+    elif mode in ("one_paid_turn", "reboot_trial"):
         trial_budget = ",\n.trial_budget_sha256 = K151BudgetDigest{2}"
     output = (
         "{true, true, false, false, false, false, true}"
@@ -92,13 +96,14 @@ def test_local_policy_marker_requires_complete_compiled_scope(
         if owner_slot is not None
         else ""
     )
+    reboot_id = ",\n.reboot_trial_id = K151BudgetDigest{3}" if mode == "reboot_trial" else ""
     (tmp_path / "k151_private_policy.inc").write_text(
         "{\n.expected_factory_identity = {1},\n"
         f".output = {output},\n"
         ".physical_lcd_verified = true,\n.exclusive_i2s0_verified = true,\n"
         f".paid_scope_approved = true,\n.budget_scope_approved = true,\n"
         f".allow_first_budget = {str(first_budget).lower()},\n"
-        f".mode = K151ConversationBuildMode::{mode}{trial_budget}{observed}{slot}\n}}\n"
+        f".mode = K151ConversationBuildMode::{mode}{trial_budget}{observed}{slot}{reboot_id}\n}}\n"
     )
     object_file = tmp_path / "policy.o"
     result = subprocess.run(
@@ -136,6 +141,7 @@ def test_local_policy_marker_requires_complete_compiled_scope(
             b"ONE_PAID_TURN_DEVICE_OBSERVED",
             b"CONTINUOUS",
             b"CONTINUOUS_LOCAL_UNLOCK",
+            b"REBOOT_TRIAL",
         ):
             assert (b"K151_CONVERSATION_LOCAL_RELEASE_" + suffix + b"\0" in data) == (
                 suffix == marker

@@ -200,15 +200,26 @@ K151SetupLvgl::ReviewResult K151SetupLvgl::poll_pairing_review(
 }
 
 bool K151SetupLvgl::begin_voice_review(uint64_t now, bool allow_first_budget, bool lvgl_lock_held,
-                                       bool one_paid_turn) {
+                                       bool one_paid_turn,
+                                       std::optional<RebootTrialBoot> reboot_trial) {
   if (voice_review_started_ || review_ != ReviewPhase::closed || sas_visible_ ||
       !lvgl_lock_held || !attached()) return false;
   voice_review_started_ = true;
-  lv_label_set_text(title_, one_paid_turn ? "PAID VOICE (ONE TURN)" : "PAID OPENAI VOICE");
-  lv_label_set_text(first_, allow_first_budget
+  const char* title = one_paid_turn ? "PAID VOICE (ONE TURN)" : "PAID OPENAI VOICE";
+  const char* transmits = allow_first_budget
       ? "Send question audio to OpenAI\nCreate or update NVS budget log"
-      : "Send question audio to OpenAI\nUpdate existing NVS budget log");
-  lv_label_set_text(second_, "Hold screen 1 sec and release");
+      : "Send question audio to OpenAI\nUpdate existing NVS budget log";
+  const char* confirmation = "Hold screen 1 sec and release";
+  if (reboot_trial == RebootTrialBoot::before_reboot) {
+    title = "TRIAL: ONE PAID TURN";
+  } else if (reboot_trial == RebootTrialBoot::after_reboot) {
+    title = "TRIAL: TWO PAID TURNS";
+    transmits = "Send question audio to OpenAI\nVerify and update NVS budget";
+    confirmation = "Saw Reboot ready?\nHold 1 sec and release";
+  }
+  lv_label_set_text(title_, title);
+  lv_label_set_text(first_, transmits);
+  lv_label_set_text(second_, confirmation);
   if (!panel_->present_now() || stop_.load()) return false;
   wait_for_fresh_contact(now);
   return true;
@@ -240,11 +251,15 @@ bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
     case K151VoiceStatus::playing: text = "Playing AI voice"; break;
     case K151VoiceStatus::returning: text = "Returning to standby"; break;
     case K151VoiceStatus::trial_finished: text = "Standby verified. Trial ended."; break;
+    case K151VoiceStatus::reboot_ready: text = "Reboot ready. Power off and on."; break;
+    case K151VoiceStatus::checking_budget: text = "Checking saved budget"; break;
+    case K151VoiceStatus::budget_verified: text = "Previous budget verified"; break;
   }
   if (!text) return false;
   const bool first = !voice_status_;
   if (first) {
-    if (status != K151VoiceStatus::connecting) return false;
+    if (status != K151VoiceStatus::connecting &&
+        status != K151VoiceStatus::checking_budget) return false;
     lv_label_set_text(title_, "STACKCHAN VOICE");
     lv_label_set_text(second_, "Tap the screen to stop");
   }

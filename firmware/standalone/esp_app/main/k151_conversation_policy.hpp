@@ -10,7 +10,7 @@
 
 namespace stackchan::standalone {
 
-enum class K151ConversationBuildMode { hold, one_paid_turn, continuous };
+enum class K151ConversationBuildMode { hold, one_paid_turn, continuous, reboot_trial };
 enum class K151ConversationBootStage : unsigned {
   policy = 0, chip = 1, identity = 2, slot = 3, psram = 4,
   security = 5, flash = 6, nvs = 7, ready = 8
@@ -43,7 +43,7 @@ struct K151ConversationPolicy {
   bool budget_scope_approved = false;
   bool allow_first_budget = false;
   K151ConversationBuildMode mode = K151ConversationBuildMode::hold;
-  // Bind a one-turn deployment to a private snapshot of just sc_gpt/budget.
+  // Bind the first boot of a paid trial to a private snapshot of sc_gpt/budget.
   // Missing is a separate, explicitly reviewed first-provisioning case.
   std::optional<K151BudgetDigest> trial_budget_sha256 = std::nullopt;
   bool trial_budget_must_be_missing = false;
@@ -51,6 +51,7 @@ struct K151ConversationPolicy {
   // Number of the reviewed dedicated HMAC_UP eFuse key, never the key bytes.
   std::optional<std::uint8_t> owner_hmac_slot = std::nullopt;
   bool reversible_owner_unlock = false;
+  std::optional<K151BudgetDigest> reboot_trial_id = std::nullopt;
 };
 
 // Read-only, observed on each approved boot. Empty fields fail closed.
@@ -79,6 +80,7 @@ struct K151AdmittedConversation {
   K151ConversationBuildMode mode;
   std::optional<std::uint8_t> owner_hmac_slot;
   bool reversible_owner_unlock;
+  std::optional<K151BudgetDigest> reboot_trial_id;
 };
 
 inline constexpr bool local_conversation_scope_complete(const K151ConversationPolicy& policy) {
@@ -86,12 +88,26 @@ inline constexpr bool local_conversation_scope_complete(const K151ConversationPo
                             policy.allow_first_budget && !policy.trial_budget_sha256;
   const bool existing_budget = !policy.trial_budget_must_be_missing && policy.trial_budget_sha256 &&
       std::ranges::any_of(*policy.trial_budget_sha256, [](auto value) { return value != 0; });
-  const bool scoped = policy.mode == K151ConversationBuildMode::one_paid_turn
-      ? !policy.owner_hmac_slot && !policy.reversible_owner_unlock && (first_budget || existing_budget)
-      : policy.mode == K151ConversationBuildMode::continuous &&
-        !policy.trial_budget_must_be_missing && !policy.trial_budget_sha256 &&
-        (policy.reversible_owner_unlock ? !policy.owner_hmac_slot
-                                        : policy.owner_hmac_slot && *policy.owner_hmac_slot < 6);
+  bool scoped = false;
+  switch (policy.mode) {
+    case K151ConversationBuildMode::one_paid_turn:
+      scoped = !policy.owner_hmac_slot && !policy.reversible_owner_unlock &&
+               !policy.reboot_trial_id && (first_budget || existing_budget);
+      break;
+    case K151ConversationBuildMode::continuous:
+      scoped = !policy.reboot_trial_id && !policy.trial_budget_must_be_missing &&
+               !policy.trial_budget_sha256 &&
+               (policy.reversible_owner_unlock ? !policy.owner_hmac_slot
+                                               : policy.owner_hmac_slot && *policy.owner_hmac_slot < 6);
+      break;
+    case K151ConversationBuildMode::reboot_trial:
+      scoped = policy.reversible_owner_unlock && !policy.owner_hmac_slot &&
+               (first_budget || existing_budget) && policy.reboot_trial_id &&
+               std::ranges::any_of(*policy.reboot_trial_id, [](auto byte) { return byte != 0; });
+      break;
+    case K151ConversationBuildMode::hold:
+      return false;
+  }
   // Device observations are a separate output basis for a single paid turn.
   // The final HOLD verdict on the other path means its measured-output checks passed.
   const bool output_reviewed = policy.one_turn_device_evidence
@@ -132,12 +148,14 @@ inline std::optional<K151AdmittedConversation> admit_conversation_boot(
   return K151AdmittedConversation{
       {policy.output.exact_board_revision_verified, policy.exclusive_i2s0_verified},
       policy.physical_lcd_verified, policy.paid_scope_approved, policy.budget_scope_approved,
-      policy.allow_first_budget, policy.mode, policy.owner_hmac_slot, policy.reversible_owner_unlock};
+      policy.allow_first_budget, policy.mode, policy.owner_hmac_slot, policy.reversible_owner_unlock,
+      policy.reboot_trial_id};
 }
 
 inline bool matches_reviewed_trial_budget(const K151ConversationPolicy& policy, bool missing,
                                            const std::optional<K151BudgetDigest>& observed) {
-  if (policy.mode != K151ConversationBuildMode::one_paid_turn ||
+  if ((policy.mode != K151ConversationBuildMode::one_paid_turn &&
+       policy.mode != K151ConversationBuildMode::reboot_trial) ||
       !local_conversation_scope_complete(policy))
     return false;
   return policy.trial_budget_must_be_missing ? missing && !observed

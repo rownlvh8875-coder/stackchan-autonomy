@@ -11,13 +11,15 @@ namespace stackchan::standalone {
 // NVS writes require an explicit local confirmation; no USB opcode can arm it.
 class IsolatedNvs : public AtomicKv {
  public:
+  static constexpr std::string_view kTrialCheckpointKey = "trial_ckpt";
   IsolatedNvs() = default;
   // Live device-local latches for budget initialization and durable charging.
   // All flags must outlive this store. The profile approval is separate.
   IsolatedNvs(const std::atomic_bool& owner, const std::atomic_bool& paid_consent,
-              const std::atomic_bool& budget_writes, const std::atomic_bool& stop)
+              const std::atomic_bool& budget_writes, const std::atomic_bool& stop,
+              bool reboot_trial = false)
       : owner_(&owner), paid_consent_(&paid_consent),
-        budget_writes_(&budget_writes), stop_(&stop) {}
+        budget_writes_(&budget_writes), stop_(&stop), reboot_trial_(reboot_trial) {}
   // Called only by the standalone app, after a later installation decision.
   bool init_without_erase();
   ReadValue read(std::string_view key, size_t max_bytes) override;
@@ -26,10 +28,14 @@ class IsolatedNvs : public AtomicKv {
 
  private:
   bool write_authorized(std::string_view key) const;
+  bool trial_checkpoint(std::string_view key) const {
+    return reboot_trial_ && key == kTrialCheckpointKey;
+  }
   const std::atomic_bool* owner_ = nullptr;
   const std::atomic_bool* paid_consent_ = nullptr;
   const std::atomic_bool* budget_writes_ = nullptr;
   const std::atomic_bool* stop_ = nullptr;
+  bool reboot_trial_ = false;
   bool initialized_ = false;
   bool approved_ = false;
 };

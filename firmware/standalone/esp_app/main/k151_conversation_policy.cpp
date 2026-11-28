@@ -23,6 +23,8 @@ const char* k151_local_release_marker() {
     return "K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN_DEVICE_OBSERVED";
   else if constexpr (policy.mode == K151ConversationBuildMode::one_paid_turn)
     return "K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN";
+  else if constexpr (policy.mode == K151ConversationBuildMode::reboot_trial)
+    return "K151_CONVERSATION_LOCAL_RELEASE_REBOOT_TRIAL";
   else if constexpr (policy.reversible_owner_unlock)
     return "K151_CONVERSATION_LOCAL_RELEASE_CONTINUOUS_LOCAL_UNLOCK";
   else

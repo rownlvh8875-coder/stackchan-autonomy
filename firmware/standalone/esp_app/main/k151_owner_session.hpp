@@ -44,7 +44,9 @@ class K151OwnerSession final {
   // after the encrypted USB session closed. The local display is the sole
   // gesture input for enabling paid voice and budget writes.
   bool request_voice_review(bool paid_scope_approved, bool budget_scope_approved,
-                            bool allow_first_budget, bool one_paid_turn = false);
+                            bool allow_first_budget, bool one_paid_turn = false,
+                            std::optional<RebootTrialBoot> reboot_trial = std::nullopt);
+  std::optional<RebootTrialBoot> reboot_trial_boot() const;
   Step poll();
   // Borrow until voice and its independent STOP monitor have shut down.
   std::optional<K151VoiceHandoff> handoff();

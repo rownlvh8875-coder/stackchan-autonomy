@@ -22,6 +22,7 @@
 #include <esp_psram.h>
 #include <esp_secure_boot.h>
 #include <psa/crypto.h>
+#include <utility>
 
 #ifdef STACKCHAN_K151_CONVERSATION_SETUP_PROBE
 #include <cstdio>
@@ -161,9 +162,13 @@ bool run_conversation(const K151AdmittedConversation& approval) {
     if (progress.phase == Phase::cloud_off) {
       const auto mode = approval.mode == K151ConversationBuildMode::one_paid_turn
                         ? K151VoiceMode::one_paid_turn : K151VoiceMode::continuous;
+      std::optional<K151RebootTrialPlan> reboot_trial;
+      if (approval.reboot_trial_id)
+        reboot_trial = K151RebootTrialPlan{*approval.reboot_trial_id, k151_local_trial_budget_matches};
       if (!owner.request_voice({"gpt-transcribe", "gpt-6-luna", std::string(kRealtimeSpeechModel),
                                 "marin"}, pack, approval.paid_scope_approved,
-                               approval.budget_scope_approved, approval.allow_first_budget, mode)) {
+                               approval.budget_scope_approved, approval.allow_first_budget, mode,
+                               std::move(reboot_trial))) {
         ESP_LOGE(kTag, "K151 local review could not start");
         break;
       }

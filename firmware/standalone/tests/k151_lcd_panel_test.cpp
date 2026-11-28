@@ -108,8 +108,8 @@ class K151OwnerSession {
   using Review = K151SetupLvgl::ReviewResult;
   using Unlock = K151SetupLvgl::UnlockChoice;
   static bool begin_voice(K151SetupLvgl& setup, uint64_t now, bool first_budget,
-                          bool one_turn = false) {
-    return setup.begin_voice_review(now, first_budget, true, one_turn);
+                          bool one_turn = false, std::optional<RebootTrialBoot> trial = std::nullopt) {
+    return setup.begin_voice_review(now, first_budget, true, one_turn, trial);
   }
   static Review poll_voice(K151SetupLvgl& setup, uint64_t now) {
     return setup.poll_voice_review(now, true);
@@ -237,7 +237,8 @@ extern "C" esp_err_t i2c_master_transmit_receive(
     assert(device == &expander && size == 1);
     if (*reg == 0x00 || *reg == 0x01) {
       assert(ft_contact_reads == handoff_first_contact_read && irq_ack_reads == *reg);
-      assert(scenario.starts_with("handoff_") || scenario.starts_with("review_voice_status"));
+      assert(scenario.starts_with("handoff_") || scenario.starts_with("review_voice_status") ||
+             scenario.starts_with("review_voice_trial_"));
       ++irq_ack_reads;
       *data = 0;
       return *reg == 0x01 && scenario == "handoff_i2c_error" ? ESP_FAIL : ESP_OK;
@@ -524,10 +525,13 @@ extern "C" void lv_label_set_text(lv_obj_t* label, const char* value) {
   if (index == 1 && std::strlen(value) == 8) assert(std::string_view(value) == "12345678");
   if (index == 1 && std::string_view(value).starts_with("Send question audio to OpenAI")) {
     assert(scenario.starts_with("review_voice_"));
-    assert(std::string_view(value).ends_with(scenario == "review_voice_existing"
-        ? "Update existing NVS budget log" : "Create or update NVS budget log"));
+    const char* expected = scenario == "review_voice_existing"
+        ? "Update existing NVS budget log" : "Create or update NVS budget log";
+    if (scenario == "review_voice_trial_after") expected = "Verify and update NVS budget";
+    assert(std::string_view(value).ends_with(expected));
   }
-  captions[index] = index == 0 ? std::string_view(value) : std::string_view{};
+  const bool trial_prompt = index == 2 && scenario == "review_voice_trial_after";
+  captions[index] = index == 0 || trial_prompt ? std::string_view(value) : std::string_view{};
 }
 extern "C" void lv_label_set_text_static(lv_obj_t* label, const char* value) {
   if (scenario == "unlock_screen") {
@@ -535,7 +539,8 @@ extern "C" void lv_label_set_text_static(lv_obj_t* label, const char* value) {
       if (label == &unlock_labels[i]) { unlock_captions[i] = value; return; }
     return;
   }
-  assert(label == &labels[1] && scenario.starts_with("review_voice_status"));
+  assert(label == &labels[1] && (scenario.starts_with("review_voice_status") ||
+                                 scenario.starts_with("review_voice_trial_")));
   captions[1] = value;
 }
 
@@ -641,10 +646,21 @@ int main(int argc, char** argv) {
       assert(setup.present(TouchConsentPhase::consumed, OwnerSetupPhase::ready, true, false, true));
       const bool expect_banner = scenario != "review_voice_banner_failure";
       const bool one_turn = scenario == "review_voice_one_turn";
-      assert(K151OwnerSession::begin_voice(setup, 2400, scenario != "review_voice_existing", one_turn)
+      std::optional<RebootTrialBoot> trial;
+      if (scenario == "review_voice_trial_before") trial = RebootTrialBoot::before_reboot;
+      if (scenario == "review_voice_trial_after") trial = RebootTrialBoot::after_reboot;
+      const bool first_budget = scenario != "review_voice_existing" &&
+                                trial != RebootTrialBoot::after_reboot;
+      assert(K151OwnerSession::begin_voice(setup, 2400, first_budget, one_turn, trial)
              == expect_banner);
       if (expect_banner) {
-        assert(captions[0] == (one_turn ? "PAID VOICE (ONE TURN)" : "PAID OPENAI VOICE"));
+        if (trial == RebootTrialBoot::before_reboot)
+          assert(captions[0] == "TRIAL: ONE PAID TURN");
+        else if (trial == RebootTrialBoot::after_reboot) {
+          assert(captions[0] == "TRIAL: TWO PAID TURNS");
+          assert(captions[2] == "Saw Reboot ready?\nHold 1 sec and release");
+        } else
+          assert(captions[0] == (one_turn ? "PAID VOICE (ONE TURN)" : "PAID OPENAI VOICE"));
         assert(!K151OwnerSession::begin_voice(setup, 2400, true));
         assert(K151ScpsUsbPort::poll(setup, 2400) == Review::fault);
         const auto voice = [&](uint64_t now, uint8_t count) {
@@ -658,6 +674,20 @@ int main(int argc, char** argv) {
           assert(voice(now, 1) == Review::waiting);
         assert(voice(4800, 0) == Review::approved && captions[0] == "VOICE APPROVED");
         assert(voice(4900, 0) == Review::fault);
+        if (trial) {
+          handoff_first_contact_read = ft_contact_reads + 1;
+          assert(K151DisplayStop::handoff(panel, &bus, stop));
+          if (trial == RebootTrialBoot::before_reboot) {
+            assert(setup.present_voice_status(K151VoiceStatus::connecting));
+            assert(setup.present_voice_status(K151VoiceStatus::reboot_ready));
+            assert(captions[1] == "Reboot ready. Power off and on.");
+          } else {
+            assert(setup.present_voice_status(K151VoiceStatus::checking_budget));
+            assert(captions[1] == "Checking saved budget");
+            assert(setup.present_voice_status(K151VoiceStatus::budget_verified));
+            assert(captions[1] == "Previous budget verified");
+          }
+        }
         if (scenario.starts_with("review_voice_status")) {
           using Status = K151VoiceStatus;
           assert(!setup.present_voice_status(Status::connecting)); // STOP monitor has no route yet.

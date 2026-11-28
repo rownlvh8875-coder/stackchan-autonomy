@@ -45,10 +45,12 @@ struct RebootTrialScope {
 
 class PersistentGuard {
  public:
-  explicit PersistentGuard(AtomicKv& store, bool limit_to_one_paid_turn = false)
-      : store_(store), limit_to_one_paid_turn_(limit_to_one_paid_turn) {}
+  explicit PersistentGuard(AtomicKv& store, bool limit_to_one_paid_turn = false,
+                           std::optional<RebootTrialScope> scope = std::nullopt)
+      : store_(store), limit_to_one_paid_turn_(limit_to_one_paid_turn),
+        reboot_trial_(std::move(scope)) {}
   PersistentGuard(AtomicKv& store, RebootTrialScope scope)
-      : store_(store), reboot_trial_(std::move(scope)) {}
+      : PersistentGuard(store, false, std::move(scope)) {}
 
   // A corrupt/missing ledger is never silently treated as an empty ledger.
   // An explicit, separately authorized FIRST provisioning operation may set
@@ -159,12 +161,18 @@ class PersistentGuard {
   }
   // The caller observes the completed playback, standby and live consent.
   // The next boot still needs its own review of the exact prior budget.
-  bool prepare_trial_reboot(bool verified_local_standby) {
+  using TrialCheckpointWriter = std::function<bool(std::span<const uint8_t>)>;
+  bool prepare_trial_reboot(bool verified_local_standby,
+                            const TrialCheckpointWriter& checkpoint = {}) {
     if (!reboot_trial_ || !before_reboot() || !verified_local_standby || fatal_ ||
         trial_stopped_ || reboot_prepared_ || trial_used_ != 1 ||
         !trial_stages_dispatched_ || permit_active_ || !budget_) return false;
-    reboot_prepared_ = write_trial_budget(TrialPhase::reboot_ready, trial_used_,
-                                         budget_->serialize());
+    const auto wire = budget_->serialize();
+    if (checkpoint && !checkpoint(wire)) {
+      fatal_ = true;
+      return false;
+    }
+    reboot_prepared_ = write_trial_budget(TrialPhase::reboot_ready, trial_used_, wire);
     return reboot_prepared_;
   }
   size_t reserved_conversations() const { return budget_ ? budget_->count() : 0; }

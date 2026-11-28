@@ -55,7 +55,8 @@ class K151SetupLvgl final {
   bool begin_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
   ReviewResult poll_pairing_review(uint64_t now_ms, bool lvgl_lock_held);
   bool begin_voice_review(uint64_t now_ms, bool allow_first_budget, bool lvgl_lock_held,
-                          bool one_paid_turn = false);
+                          bool one_paid_turn = false,
+                          std::optional<RebootTrialBoot> reboot_trial = std::nullopt);
   ReviewResult poll_voice_review(uint64_t now_ms, bool lvgl_lock_held);
   void wait_for_fresh_contact(uint64_t now_ms);
   ReviewResult poll_contact(uint64_t now_ms, bool lvgl_lock_held);

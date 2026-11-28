@@ -142,15 +142,22 @@ NativeVoiceStep K151VoiceRuntime::poll() {
 
 void K151VoiceRuntime::stop() {
   if (phase_ == Phase::cold || phase_ == Phase::stopped) return;
+  if (audio_.state() != AudioState::cold) (void)loop_.cancel();
+  (void)release_ports();
+}
+
+bool K151VoiceRuntime::finish_trial() {
+  if (phase_ != Phase::operating || !authorized() || !loop_.finish_trial()) return false;
+  return release_ports() && authorized();
+}
+
+bool K151VoiceRuntime::release_ports() {
   phase_ = Phase::stopped;
   model_pack_ = {};
   session_.cloud_enable(false);
-  if (audio_.state() != AudioState::cold) {
-    (void)loop_.cancel();
-    (void)codec_.shutdown();
-  }
+  const bool codec_released = audio_.state() == AudioState::cold || codec_.shutdown();
   model_.close();
-  (void)network_.shutdown();
+  return network_.shutdown() && codec_released && board_release_verified();
 }
 
 const char* K151VoiceRuntime::compiled_link_marker() {

@@ -143,7 +143,9 @@ bool K151SetupLvgl::present(TouchConsentPhase phase, OwnerSetupPhase ready,
   return true;
 }
 bool K151SetupLvgl::detach(bool lock) { assert(lock && !usb); view = false; return true; }
-bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first_budget, bool lock, bool one_turn) {
+bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first_budget, bool lock, bool one_turn,
+                                       std::optional<RebootTrialBoot> trial) {
+  assert(!trial);
   assert(now == ms && lock && view && ready_page && !usb);
   assert(first_budget == (scenario != "existing_ledger_scope" && scenario != "unlock_restored"));
   assert(!one_turn);

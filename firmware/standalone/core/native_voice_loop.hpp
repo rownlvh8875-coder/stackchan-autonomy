@@ -10,7 +10,7 @@
 
 namespace stackchan::standalone {
 enum class NativeVoiceStep {
-  listening, questioning, answered, cooldown, stopped, waiting_network, trial_standby
+  listening, questioning, answered, cooldown, stopped, waiting_network, trial_standby, reboot_ready
 };
 
 class NativeVoiceLoop final {
@@ -70,16 +70,27 @@ class NativeVoiceLoop final {
 
   NativeVoiceStep cancel() {
     if (faulted_) return NativeVoiceStep::stopped;
-    faulted_ = true; // No implicit resume, retry, or re-use of a pending epoch.
-    (void)wake_.cancel();
-    (void)turn_.cancel();
     ledger_.stop();
-    audio_.stop();
-    session_.stop();
+    quiesce();
     return NativeVoiceStep::stopped;
   }
 
+  bool finish_trial() {
+    if (faulted_ || !reported_trial_standby_ || !live_ready()) return false;
+    // Keep only the completed ledger checkpoint available to the owner task.
+    quiesce();
+    return !stop_.load() && consent_.load();
+  }
+
  private:
+  void quiesce() {
+    faulted_ = true; // No implicit resume, retry, or re-use of a pending epoch.
+    (void)wake_.cancel();
+    (void)turn_.cancel();
+    audio_.stop();
+    session_.stop();
+  }
+
   bool live_ready() const {
     return !stop_.load() && consent_.load() && readiness_ && readiness_() &&
            !stop_.load() && consent_.load() && model_.ready() && !busy_.load();

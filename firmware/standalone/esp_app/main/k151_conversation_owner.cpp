@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "k151_conversation_owner.hpp"
 
+#include <algorithm>
 #include <esp_timer.h>
 #include <utility>
 
@@ -32,11 +33,19 @@ bool K151ConversationOwner::start(K151AudioBoardEvidence evidence, bool physical
 
 bool K151ConversationOwner::request_voice(VoiceModelConfig models,
     std::span<const uint8_t> model_pack, bool paid_scope_approved, bool budget_scope_approved,
-    bool allow_first_budget, K151VoiceMode mode) {
+    bool allow_first_budget, K151VoiceMode mode, std::optional<K151RebootTrialPlan> reboot_trial) {
   if (!on_owner_task() || progress_.phase != Phase::cloud_off ||
-      !models.valid() || model_pack.empty() ||
-      !setup_.request_voice_review(paid_scope_approved, budget_scope_approved, allow_first_budget,
-                                   mode == K151VoiceMode::one_paid_turn)) return false;
+      !models.valid() || model_pack.empty()) return false;
+  const auto trial_boot = reboot_trial ? setup_.reboot_trial_boot() : std::nullopt;
+  if (reboot_trial && (!trial_boot || mode != K151VoiceMode::continuous ||
+      !reboot_trial->first_budget ||
+      std::ranges::all_of(reboot_trial->id, [](auto byte) { return byte == 0; }))) return false;
+  if (!setup_.request_voice_review(paid_scope_approved, budget_scope_approved, allow_first_budget,
+                                   mode == K151VoiceMode::one_paid_turn, trial_boot)) return false;
+  if (reboot_trial) {
+    trial_scope_ = RebootTrialScope{reboot_trial->id, *trial_boot};
+    first_trial_budget_ = std::move(reboot_trial->first_budget);
+  }
   models_ = std::move(models);
   pack_ = model_pack;
   progress_ = {Phase::voice_review};
@@ -48,13 +57,15 @@ K151ConversationOwner::Progress K151ConversationOwner::poll() {
   if (!on_owner_task()) return {Phase::fault};
   if (progress_.phase == Phase::showing_trial_result) {
     const auto now_us = esp_timer_get_time();
-    if (now_us < trial_result_at_us_ || now_us - trial_result_at_us_ >= 3'000'000)
+    const auto dwell_us = progress_.voice == NativeVoiceStep::reboot_ready ? 30'000'000 : 3'000'000;
+    if (now_us < trial_result_at_us_ || now_us - trial_result_at_us_ >= dwell_us)
       return finish_trial_result(progress_.voice);
     return progress_;
   }
   if (progress_.phase == Phase::voice) {
     const auto result = voice_->poll();
-    if (result == NativeVoiceStep::trial_standby || voice_->keep_failed_trial_frame()) {
+    if (result == NativeVoiceStep::trial_standby || result == NativeVoiceStep::reboot_ready ||
+        voice_->keep_failed_trial_frame()) {
       // Bootstrap has already closed audio, model, network and the STOP monitor.
       // Keep the last frame visible briefly. The owner task polls the dwell.
       voice_.reset();
@@ -75,7 +86,7 @@ K151ConversationOwner::Progress K151ConversationOwner::poll() {
     if (step == K151OwnerSession::Step::voice_ready) {
       const auto handoff = setup_.handoff();
       if (!handoff) return finish(Phase::fault);
-      voice_.emplace(*handoff, evidence_);
+      voice_.emplace(*handoff, evidence_, trial_scope_, std::move(first_trial_budget_));
       if (!voice_->start(std::move(models_), std::exchange(pack_, {}))) return finish(Phase::fault);
       return progress_ = {Phase::voice, NativeVoiceStep::waiting_network};
     }
@@ -88,8 +99,9 @@ K151ConversationOwner::Progress K151ConversationOwner::finish(Phase phase, Nativ
 }
 
 K151ConversationOwner::Progress K151ConversationOwner::finish_trial_result(NativeVoiceStep result) {
-  return finish(result == NativeVoiceStep::trial_standby ? Phase::trial_complete : Phase::stopped,
-                result);
+  const bool completed = result == NativeVoiceStep::trial_standby ||
+                         result == NativeVoiceStep::reboot_ready;
+  return finish(completed ? Phase::trial_complete : Phase::stopped, result);
 }
 
 bool K151ConversationOwner::shutdown() {
@@ -98,6 +110,7 @@ bool K151ConversationOwner::shutdown() {
   if (released_) return true;
   models_ = {};
   pack_ = {};
+  first_trial_budget_ = {};
   if (voice_) {
     voice_->stop();
     if (!voice_->board_release_verified()) {

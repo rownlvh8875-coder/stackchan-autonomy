@@ -86,7 +86,12 @@ const std::atomic_bool& stop_source() {
 }
 
 bool conversation_case() { return scenario.starts_with("bootstrap_conversation_"); }
-bool restored_conversation() { return scenario.starts_with("bootstrap_conversation_reboot_"); }
+bool combined_before() { return scenario.starts_with("bootstrap_conversation_combined_before"); }
+bool combined_after() { return scenario.starts_with("bootstrap_conversation_combined_after"); }
+bool combined_trial() { return combined_before() || combined_after(); }
+bool restored_conversation() {
+  return scenario.starts_with("bootstrap_conversation_reboot_") || combined_after();
+}
 constexpr std::array<char, kOwnerCodeLength> test_code{
     '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
 bool deriving_setup = false;
@@ -107,7 +112,9 @@ struct RuntimeTestUnlock final : OwnerUnlockPort {
   SavedOwnerCredentials& saved;
   int64_t began = 0;
 };
-bool initial_saved_conversation() { return scenario.starts_with("bootstrap_conversation_save_"); }
+bool initial_saved_conversation() {
+  return scenario.starts_with("bootstrap_conversation_save_") || combined_before();
+}
 bool continuous_conversation() {
   return scenario == "bootstrap_conversation_continuous" || restored_conversation() ||
          initial_saved_conversation();
@@ -134,11 +141,23 @@ void display_press() {
 }
 int nvs_init_calls = 0, nvs_write_opens = 0, nvs_sets = 0, nvs_commits = 0;
 std::vector<uint8_t> durable_budget, durable_profile{0x7b}, staged;
+std::vector<uint8_t> durable_checkpoint;
+constexpr std::array<uint8_t, 32> kCombinedId{0x37};
 std::vector<uint8_t> durable_owner_setup;
 bool stop_owner_at_open = false, refuse_owner_commit = false;
 bool code_nvs_case() { return scenario == "owner_code_nvs"; }
 std::string_view owner_nvs_key() { return code_nvs_case() ? "owner_cfg_v2" : "owner_cfg_v1"; }
 bool staged_profile = false;
+bool staged_checkpoint = false;
+
+std::optional<BudgetLedger> stored_budget(std::span<const uint8_t> bytes) {
+  if (combined_trial()) {
+    constexpr size_t header = 6 + kCombinedId.size();
+    assert(bytes.size() > header + 4 && bytes[0] == 'B' && bytes[1] == 'T');
+    bytes = bytes.subspan(header, bytes.size() - header - 4);
+  }
+  return BudgetLedger::restore(bytes);
+}
 
 struct Store final : AtomicKv {
   std::vector<uint8_t> budget;
@@ -153,6 +172,34 @@ struct Store final : AtomicKv {
     return true;
   }
 };
+
+void seed_combined_checkpoint() {
+  Store store;
+  PersistentGuard prior(store, RebootTrialScope{kCombinedId, RebootTrialBoot::before_reboot});
+  assert(prior.restore_budget_for_setup(true, [](const ReadValue& read) {
+    return read.code == ReadCode::missing;
+  }));
+  assert(prior.admit_builtin_wake(1, true, true));
+  assert(prior.reserve(static_cast<uint64_t>(std::time(nullptr)) - 120, true, true, 1));
+  for (auto stage : {PaidStage::transcribe, PaidStage::respond, PaidStage::synthesize})
+    assert(prior.authorize_step(stage, true, true));
+  assert(prior.prepare_trial_reboot(true, [](std::span<const uint8_t> wire) {
+    durable_checkpoint.assign(kCombinedId.begin(), kCombinedId.end());
+    durable_checkpoint.insert(durable_checkpoint.end(), wire.begin(), wire.end());
+    return true;
+  }));
+  if (scenario == "bootstrap_conversation_combined_after_spent") {
+    PersistentGuard consumed(store, RebootTrialScope{kCombinedId, RebootTrialBoot::after_reboot});
+    assert(consumed.restore_budget_for_setup(false, [](const ReadValue& read) {
+      return std::ranges::equal(read.bytes, std::span(durable_checkpoint).subspan(kCombinedId.size()));
+    }));
+  }
+  durable_budget = std::move(store.budget);
+  if (scenario == "bootstrap_conversation_combined_after_bad_checkpoint")
+    durable_checkpoint.back() ^= 1;
+  if (scenario == "bootstrap_conversation_combined_after_missing_checkpoint")
+    durable_checkpoint.clear();
+}
 
 bool control_open(const audio_codec_ctrl_if_t*) { return true; }
 int register_op(const audio_codec_ctrl_if_t*, int, int, void*, int) { return 0; }
@@ -344,15 +391,17 @@ extern "C" esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* ou
     *len = durable_owner_setup.size();
     return ESP_OK;
   }
-  assert(handle == 1 && std::string_view{key} == "budget");
-  if (durable_budget.empty()) return ESP_ERR_NVS_NOT_FOUND;
+  const bool checkpoint = std::string_view{key} == IsolatedNvs::kTrialCheckpointKey;
+  assert(handle == 1 && (checkpoint ? combined_trial() : std::string_view{key} == "budget"));
+  const auto& data = checkpoint ? durable_checkpoint : durable_budget;
+  if (data.empty()) return ESP_ERR_NVS_NOT_FOUND;
   if (out) {
-    assert(*len == durable_budget.size());
-    std::memcpy(out, durable_budget.data(), *len);
+    assert(*len == data.size());
+    std::memcpy(out, data.data(), *len);
     if (scenario == "bootstrap_readback_error") static_cast<uint8_t*>(out)[0] ^= 1;
     if (scenario == "bootstrap_bus_lost_during_restore") board_bus_registered = false;
   }
-  *len = durable_budget.size();
+  *len = data.size();
   return ESP_OK;
 }
 extern "C" esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const void* bytes,
@@ -367,8 +416,10 @@ extern "C" esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const vo
   }
   assert(handle == 2);
   staged_profile = std::string_view{key} == "wake_profile";
+  staged_checkpoint = std::string_view{key} == IsolatedNvs::kTrialCheckpointKey;
   assert(staged_profile ? scenario == "bootstrap_scopes_separate" :
-                          (std::string_view{key} == "budget" && budget_writes && consent && !stop_source()));
+                        ((std::string_view{key} == "budget" || (staged_checkpoint && combined_before())) &&
+                         budget_writes && consent && !stop_source()));
   assert(!mic_open && !amp_open);
   ++nvs_sets;
   const auto* data = static_cast<const uint8_t*>(bytes);
@@ -385,7 +436,7 @@ extern "C" esp_err_t nvs_commit(nvs_handle_t handle) {
   assert(handle == 2);
   ++nvs_commits;
   if (scenario == "bootstrap_commit_error") return ESP_FAIL;
-  (staged_profile ? durable_profile : durable_budget) = staged;
+  (staged_profile ? durable_profile : staged_checkpoint ? durable_checkpoint : durable_budget) = staged;
   if (scenario == "bootstrap_stop_at_reservation" && nvs_commits == 2) display_press();
   return ESP_OK;
 }
@@ -447,10 +498,14 @@ bool K151SetupLvgl::finish_unlock(bool restored) {
   return restored && deriving_setup && lvgl_on && !setup_usb && !network_starts;
 }
 bool K151SetupLvgl::detach(bool lock) { return lock && !setup_usb && !codec_running; }
-bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first, bool lock, bool one_turn) {
+bool K151SetupLvgl::begin_voice_review(uint64_t now, bool first, bool lock, bool one_turn,
+                                       std::optional<RebootTrialBoot> trial) {
   assert(first == !restored_conversation());
   assert(lock && !setup_usb && !network_starts && !nvs_init_calls);
   assert(one_turn == !continuous_conversation());
+  const auto expected = combined_trial() ? std::optional{combined_before()
+        ? RebootTrialBoot::before_reboot : RebootTrialBoot::after_reboot} : std::nullopt;
+  assert(trial == expected);
   review_started_ms = now;
   return true;
 }
@@ -464,6 +519,10 @@ bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
   voice_status.push_back(status);
   const int calls_this_turn = calls - 3 * plays;
   if (status == K151VoiceStatus::connecting) assert(!nvs_init_calls && !network_starts);
+  if (status == K151VoiceStatus::checking_budget)
+    assert(combined_after() && !nvs_init_calls && !network_starts);
+  if (status == K151VoiceStatus::budget_verified)
+    assert(combined_after() && !network_starts && nvs_commits == 1);
   if (status == K151VoiceStatus::question) assert(mic_open && calls_this_turn == 0);
   switch (status) {
     case K151VoiceStatus::transcribing: assert(!mic_open && !amp_open && calls_this_turn == 0); break;
@@ -472,10 +531,12 @@ bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
     case K151VoiceStatus::playing: assert(!mic_open && !amp_open && calls_this_turn == 3); break;
     default: break;
   }
-  if (status == K151VoiceStatus::trial_finished) {
+  if (status == K151VoiceStatus::trial_finished || status == K151VoiceStatus::reboot_ready) {
     assert(mic_opens == 3 && plays == 1 && !mic_open && !amp_open && !pending_pcm);
     assert(!codec_running && !model_loaded && codec_stops == 1 && network_stops == 1);
   }
+  if (status == K151VoiceStatus::reboot_ready &&
+      scenario == "bootstrap_conversation_combined_before_stop_at_frame") display_press();
   if (status == K151VoiceStatus::transcribing && scenario == "bootstrap_conversation_stop_during_display")
     display_press();
   return !K151DisplayStop::flag();
@@ -558,7 +619,8 @@ bool K151CodecPort::play_mono_24k(std::span<const int16_t> pcm) {
   assert(pcm.size() == 240 && pcm.front() == 10);
 #endif
   ++plays;
-  if (plays == 2 && scenario == "bootstrap_conversation_reboot_stop_playback")
+  if (plays == 2 && (scenario == "bootstrap_conversation_reboot_stop_playback" ||
+                    scenario == "bootstrap_conversation_combined_after"))
     display_press();
   return pending_pcm = true;
 }
@@ -574,7 +636,8 @@ bool K151CodecPort::shutdown() {
   assert(!mic_open && !amp_open);
   if (codec_running) {
     ++codec_stops;
-    if (scenario == "bootstrap_conversation_stop_during_release") display_press();
+    if (scenario == "bootstrap_conversation_stop_during_release" ||
+        scenario == "bootstrap_conversation_combined_before_stop_at_release") display_press();
   }
   prepared_ = codec_running = false;
   if (scenario == "bootstrap_conversation_unverified_release") cleanup_unverified_ = true;
@@ -586,7 +649,7 @@ bool K151WifiTimePort::start(bool, bool, std::span<const uint8_t>, std::string_v
                             std::string_view, const std::atomic_bool&) {
   ++network_starts;
   if (scenario.starts_with("bootstrap_")) {
-    assert(BudgetLedger::restore(durable_budget).has_value());
+    assert(stored_budget(durable_budget).has_value());
     if (scenario == "bootstrap_wifi_revoke_owner") owner = false;
     if (scenario == "bootstrap_wifi_revoke_storage") budget_writes = false;
   }
@@ -645,10 +708,10 @@ bool K151HttpsVoicePort::post_once(const Request& req, std::string_view,
   assert(!realtime_conversation() || call_in_turn < 2);
   if (call_in_turn == 0) {
     if (scenario.starts_with("bootstrap_")) {
-      const auto ledger = BudgetLedger::restore(durable_budget);
+      const auto ledger = stored_budget(durable_budget);
       const int already_charged = restored_conversation() ? 1 : 0;
       assert(ledger && ledger->count() == static_cast<size_t>(plays + 1 + already_charged));
-      assert(nvs_commits == plays + 2 - already_charged);
+      assert(nvs_commits == plays + 2 - already_charged + combined_after());
     }
     assert(req.pcm24k.size() == 4 * QuestionCapture::kFrame);
     for (int16_t sample : req.pcm24k) assert(sample == (plays == 0 ? 2000 : 2400));
@@ -808,6 +871,12 @@ void exercise_conversation() {
                                 realtime ? "marin" : "voice"};
   const auto request = [&](bool paid, bool budget) {
     const auto mode = continuous ? K151VoiceMode::continuous : K151VoiceMode::one_paid_turn;
+    if (combined_trial()) {
+      const K151RebootTrialPlan trial{kCombinedId, [](const ReadValue& read) {
+        return read.code == ReadCode::missing && read.bytes.empty();
+      }};
+      return conversation.request_voice(models, pack, paid, budget, true, mode, trial);
+    }
     return conversation.request_voice(models, pack, paid, budget, true, mode);
   };
   MockOwnerRecords records;
@@ -819,7 +888,9 @@ void exercise_conversation() {
     constexpr std::array<uint8_t, 4> ssid{'t', 'e', 's', 't'};
     assert(previous_boot.provision(ssid, "mock-password", "not-a-real-key-test", true));
     assert(saved.save_first(previous_boot, [] { return true; }));
-    if (scenario != "bootstrap_conversation_reboot_no_budget") {
+    if (combined_after()) {
+      seed_combined_checkpoint();
+    } else if (scenario != "bootstrap_conversation_reboot_no_budget") {
       auto ledger = BudgetLedger::fresh();
       assert(ledger.reserve(static_cast<uint64_t>(std::time(nullptr)) - 120, true,
                             [](auto) { return true; }));
@@ -828,7 +899,7 @@ void exercise_conversation() {
   } else if (initial_saved_conversation()) {
     records.fail_commit = scenario == "bootstrap_conversation_save_failed";
     records.before_commit = [] {
-      const auto budget = BudgetLedger::restore(durable_budget);
+      const auto budget = stored_budget(durable_budget);
       assert(budget && budget->count() == 0 && nvs_commits == 1 &&
              stop_timer_active && !network_starts && !setup_usb);
     };
@@ -867,12 +938,17 @@ void exercise_conversation() {
   }
   now_us += 50'000;
   const auto started = conversation.poll().phase;
-  if (scenario == "bootstrap_conversation_reboot_no_budget") {
+  if (scenario == "bootstrap_conversation_reboot_no_budget" ||
+      scenario == "bootstrap_conversation_combined_after_bad_checkpoint" ||
+      scenario == "bootstrap_conversation_combined_after_missing_checkpoint" ||
+      scenario == "bootstrap_conversation_combined_after_spent") {
     assert(started == Phase::fault && !network_starts && !nvs_commits && !calls && !mic_opens);
+    if (combined_after())
+      assert(voice_status == std::vector{K151VoiceStatus::checking_budget});
     assert(!board_bus_registered && !stop_timer_active && !setup_usb);
     return;
   }
-  if (initial_saved_conversation()) {
+  if (initial_saved_conversation() && !combined_before()) {
     assert(records.commits == 1 && cipher.seals == 1 && nvs_commits == 1 && !calls && !mic_opens);
     if (records.fail_commit) {
       assert(started == Phase::fault && records.data.empty() && !network_starts &&
@@ -886,13 +962,22 @@ void exercise_conversation() {
     return;
   }
   assert(started == Phase::voice && network_starts == 1 && !setup_usb);
+  if (combined_before()) assert(records.commits == 1 && !records.data.empty() && nvs_commits == 1);
   if (restored_conversation()) {
-    assert(!nvs_commits && durable_budget == budget_before_reboot);
-    const auto previous_budget = BudgetLedger::restore(durable_budget);
+    const auto previous_budget = stored_budget(durable_budget);
     assert(previous_budget && previous_budget->count() == 1);
+    if (combined_after()) {
+      const auto before = stored_budget(budget_before_reboot);
+      assert(nvs_commits == 1 && before && before->serialize() == previous_budget->serialize());
+    } else {
+      assert(!nvs_commits && durable_budget == budget_before_reboot);
+    }
   }
   assert(conversation.poll().voice == NativeVoiceStep::waiting_network);
-  assert(voice_status == std::vector<K151VoiceStatus>{K151VoiceStatus::connecting});
+  const auto expected_start = combined_after()
+      ? std::vector{K151VoiceStatus::checking_budget, K151VoiceStatus::budget_verified}
+      : std::vector{K151VoiceStatus::connecting};
+  assert(voice_status == expected_start);
   if (scenario == "bootstrap_conversation_stop") {
     display_press();
     assert(conversation.poll().phase == Phase::stopped && !board_bus_registered &&
@@ -938,21 +1023,52 @@ void exercise_conversation() {
   assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::answered && calls == 3);
   now_us += 600'000;
   state = conversation.poll();
+  if (combined_before()) {
+    const bool stopped_at_frame = scenario == "bootstrap_conversation_combined_before_stop_at_frame";
+    const bool stopped_at_release =
+        scenario == "bootstrap_conversation_combined_before_stop_at_release";
+    if (stopped_at_frame || stopped_at_release) {
+      assert(state.phase == Phase::stopped && !board_bus_registered && calls == 3);
+      assert(!stop_timer_active && network_stops == 1 && nvs_commits == 2 + stopped_at_frame);
+      Store store;
+      store.budget = durable_budget;
+      PersistentGuard after(store, RebootTrialScope{kCombinedId, RebootTrialBoot::after_reboot});
+      assert(!after.restore_budget_for_setup(false, [](const auto&) { return true; }));
+      return;
+    }
+    assert(state.phase == Phase::showing_trial_result && state.voice == NativeVoiceStep::reboot_ready);
+    assert(voice_status.back() == K151VoiceStatus::reboot_ready && !stop_timer_active);
+    assert(!mic_open && !amp_open && !codec_running && !model_loaded && network_stops == 1);
+    assert(nvs_commits == 4 && !durable_checkpoint.empty());
+    Store store;
+    store.budget = durable_budget;
+    PersistentGuard next(store, RebootTrialScope{kCombinedId, RebootTrialBoot::after_reboot});
+    assert(next.restore_budget_for_setup(false, [](const ReadValue& read) {
+      return std::ranges::equal(read.bytes, std::span(durable_checkpoint).subspan(kCombinedId.size()));
+    }));
+    now_us += 4'000'000;
+    assert(conversation.poll().phase == Phase::showing_trial_result && calls == 3);
+    now_us += 30'000'000;
+    assert(conversation.poll().phase == Phase::trial_complete && !board_bus_registered);
+    assert(!request(true, true) && calls == 3 && !setup_usb);
+    return;
+  }
   if (continuous) {
     assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::listening);
     assert(voice_status.back() == K151VoiceStatus::listening && mic_opens == 3 && mic_open);
     assert(!amp_open && stop_timer_active && calls == 3 && plays == 1);
     capture_and_answer();
-    if (scenario == "bootstrap_conversation_reboot_stop_playback") {
+    if (scenario == "bootstrap_conversation_reboot_stop_playback" ||
+        scenario == "bootstrap_conversation_combined_after") {
       assert(state.phase == Phase::stopped && !board_bus_registered && !stop_timer_active);
       assert(calls == 6 && plays == 2 && !mic_open && !amp_open && network_stops == 1);
       const auto budget_at_stop = durable_budget;
-      const auto stopped_budget = BudgetLedger::restore(budget_at_stop);
-      assert(nvs_commits == 2 && stopped_budget && stopped_budget->count() == 3);
+      const auto stopped_budget = stored_budget(budget_at_stop);
+      assert(nvs_commits == 2 + combined_after() && stopped_budget && stopped_budget->count() == 3);
       now_us += 600'000;
       assert(conversation.poll().phase == Phase::stopped && calls == 6 && plays == 2);
       assert(!request(true, true) && !setup_usb && durable_budget == budget_at_stop);
-      assert(nvs_commits == 2 && network_starts == 1);
+      assert(nvs_commits == 2 + combined_after() && network_starts == 1);
       return;
     }
     assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::answered);

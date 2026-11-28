@@ -61,7 +61,8 @@ bool IsolatedNvs::init_without_erase() {
 }
 
 ReadValue IsolatedNvs::read(std::string_view key, size_t max_bytes) {
-  if (!initialized_ || !allowed_key(key) || max_bytes == 0 || max_bytes > 4096)
+  if (!initialized_ || (!allowed_key(key) && !trial_checkpoint(key)) ||
+      max_bytes == 0 || max_bytes > 4096)
     return {ReadCode::failure, {}};
   const std::string k(key);
   return read_blob(kNamespace, k.c_str(), max_bytes);
@@ -86,7 +87,8 @@ bool IsolatedNvs::commit(std::string_view key, std::span<const uint8_t> bytes) {
 
 bool IsolatedNvs::write_authorized(std::string_view key) const {
   if (key == "wake_profile") return approved_;
-  return key == "budget" && owner_ && owner_->load() && paid_consent_->load() &&
+  return (key == "budget" || trial_checkpoint(key)) && owner_ &&
+         owner_->load() && paid_consent_->load() &&
          budget_writes_->load() && !stop_->load();
 }
 

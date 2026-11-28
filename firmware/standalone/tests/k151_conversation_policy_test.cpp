@@ -173,6 +173,23 @@ int main() {
   auto observed_instead = reversible;
   observed_instead.one_turn_device_evidence = observations;
   assert(conversation_boot_stage(observed_instead, facts) == Boot::policy);
+  auto combined = reversible;
+  combined.mode = K151ConversationBuildMode::reboot_trial;
+  assert(!admit_conversation_boot(combined, facts));
+  combined.reboot_trial_id = K151BudgetDigest{0x37};
+  combined.trial_budget_must_be_missing = true;
+  const auto trial_plan = admit_conversation_boot(combined, facts);
+  assert(trial_plan && trial_plan->reboot_trial_id == combined.reboot_trial_id &&
+         trial_plan->reversible_owner_unlock && !trial_plan->owner_hmac_slot);
+  assert(matches_reviewed_trial_budget(combined, true, std::nullopt));
+  assert(!matches_reviewed_trial_budget(combined, false, K151BudgetDigest{1}));
+  auto missing_measurement = combined;
+  missing_measurement.output.aw88298_hardware_mute_measured = false;
+  assert(!admit_conversation_boot(missing_measurement, facts));
+  missing_measurement.one_turn_device_evidence = observations;
+  assert(!admit_conversation_boot(missing_measurement, facts));
+  combined.reboot_trial_id.reset();
+  assert(!admit_conversation_boot(combined, facts));
   reversible.owner_hmac_slot = 2;
   assert(conversation_boot_stage(reversible, facts) == Boot::policy);
   facts.security_matches = false;

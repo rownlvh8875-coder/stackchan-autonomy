@@ -18,13 +18,17 @@ enum class K151VoiceMode { continuous, one_paid_turn };
 // serializes all access to the bus. The HOLD entrypoint links a marker only.
 class K151VoiceBootstrap final {
  public:
-  explicit K151VoiceBootstrap(const K151VoiceHandoff& handoff, K151AudioBoardEvidence evidence);
+  explicit K151VoiceBootstrap(
+      const K151VoiceHandoff& handoff, K151AudioBoardEvidence evidence,
+      std::optional<RebootTrialScope> reboot_trial = std::nullopt,
+      PersistentGuard::BudgetBaselineCheck first_trial_budget = {});
   K151VoiceBootstrap(K151LocalOwnerSetup& setup, K151LcdPanel& panel,
                      const std::atomic_bool& paid_consent,
                      const std::atomic_bool& budget_writes, K151AudioBoardEvidence evidence,
                      i2c_master_bus_handle_t board_bus,
                      K151VoiceMode mode = K151VoiceMode::continuous,
-                     K151SetupLvgl* view = nullptr);
+                     K151SetupLvgl* view = nullptr,
+                     std::optional<RebootTrialScope> reboot_trial = std::nullopt);
   ~K151VoiceBootstrap();
   K151VoiceBootstrap(const K151VoiceBootstrap&) = delete;
   K151VoiceBootstrap& operator=(const K151VoiceBootstrap&) = delete;
@@ -50,6 +54,10 @@ class K151VoiceBootstrap final {
  private:
   bool authorized() const;
   bool confirmed_setup();
+  bool checkpoint_matches(const ReadValue& previous);
+  bool save_checkpoint(std::span<const uint8_t> budget);
+  std::vector<uint8_t> checkpoint_record(std::span<const uint8_t> budget) const;
+  bool save_reboot_checkpoint_and_present();
 
   K151LocalOwnerSetup& setup_;
   K151LcdPanel& panel_;
@@ -59,6 +67,8 @@ class K151VoiceBootstrap final {
   const i2c_master_bus_handle_t board_bus_;
   K151SetupLvgl* const view_;
   const bool one_paid_turn_;
+  const std::optional<RebootTrialScope> reboot_trial_;
+  PersistentGuard::BudgetBaselineCheck first_trial_budget_;
   IsolatedNvs storage_;
   PersistentGuard ledger_;
   K151WifiTimePort network_;

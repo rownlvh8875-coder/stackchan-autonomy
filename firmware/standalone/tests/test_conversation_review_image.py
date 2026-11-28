@@ -18,6 +18,7 @@ REVIEW = b"W (%lu) %s: K151_CONVERSATION_REVIEW_NO_RELEASE\n\0"
 ONE_TURN = b"K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN\0"
 DEVICE_OBSERVED = b"K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN_DEVICE_OBSERVED\0"
 CONTINUOUS = b"K151_CONVERSATION_LOCAL_RELEASE_CONTINUOUS\0"
+REBOOT_TRIAL = b"K151_CONVERSATION_LOCAL_RELEASE_REBOOT_TRIAL\0"
 STATUS = b"Say Hi StackChan\0Standby verified. Trial ended.\0"
 ROUTE = b"/v1/realtime?model=gpt-realtime-2.1-mini\0"
 PRIVATE_TABLE = "nvs,data,nvs,0x9000,0x4000,\n" + TABLE
@@ -69,7 +70,15 @@ def test_private_review_requires_one_turn_marker_and_keeps_approval_unset(
 
 @pytest.mark.parametrize(
     "markers",
-    [REVIEW, CONTINUOUS, ONE_TURN + CONTINUOUS, ONE_TURN + REVIEW, ONE_TURN + DEVICE_OBSERVED],
+    [
+        REVIEW,
+        CONTINUOUS,
+        REBOOT_TRIAL,
+        ONE_TURN + REBOOT_TRIAL,
+        ONE_TURN + CONTINUOUS,
+        ONE_TURN + REVIEW,
+        ONE_TURN + DEVICE_OBSERVED,
+    ],
 )
 def test_private_review_rejects_other_build_modes(pinned_pack, markers):
     fixture = image(pinned_pack + markers + STATUS + ROUTE, project=PROJECT)
