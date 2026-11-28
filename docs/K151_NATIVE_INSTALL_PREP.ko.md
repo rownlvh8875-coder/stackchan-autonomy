@@ -1,5 +1,60 @@
 # K151 native wake 설치 전 검토 자료
 
+## 2026-11-28 ESPHome과 Home Assistant 우선 검토
+
+K151은 `Hi StackChan` 감지·마이크·스피커를 맡고, 상시 실행 중인
+Home Assistant에서 한국어 Assist 파이프라인을 구동한다. “한국어 답변만”
+용도의 별도 파이프라인에서 OpenAI 대화 에이전트를 선택하고 기기 제어
+도구를 주지 않는 구성을 검토했다. 기본 로컬 명령 우선 옵션과 별도의
+문장 트리거가 요청을 먼저 처리할 수 있다.
+[Assist 파이프라인과 음성 위성](https://www.home-assistant.io/voice_control/) ·
+[OpenAI 대화 에이전트 설정](https://www.home-assistant.io/integrations/openai_conversation/)
+
+### 음성 모델과 한국어 모의 검증
+
+Home Assistant Core 2026.11.3 소스에서 OpenAI STT와 TTS의 한국어
+언어 항목 `ko-KR`을 확인했다. 이 버전의 기본 TTS는 `gpt-4o-mini-tts`와
+Speech API를 사용한다. OpenAI의 종료 예정일은 이 모델이 **2027-01-06**,
+기본 STT `gpt-4o-mini-transcribe`가 **2027-02-26**이다.
+[Home Assistant STT 코드](https://github.com/home-assistant/core/blob/92da9f154079459b9e547126f9bd9fce726de16a/homeassistant/components/openai_conversation/stt.py) ·
+[Home Assistant 모델 기본값](https://github.com/home-assistant/core/blob/92da9f154079459b9e547126f9bd9fce726de16a/homeassistant/components/openai_conversation/const.py) ·
+[OpenAI 종료 예정 목록](https://developers.openai.com/api/docs/deprecations)
+
+상시 사용 후보로 Home Assistant의 Wyoming 연동과
+`wyoming_openai` v0.9.1(`2f91ab5`)을 로컬의 별도 환경에서 검토했다.
+모의 시험에서 사용한 인식 모델은 `gpt-transcribe`, 합성 모델은
+`gpt-realtime-2.1-mini`다. 한국어 전용 음성 인식은
+`WYOMING_LANGUAGES=ko-KR` 광고와
+`STT_EXTRA_BODY={"languages":["ko"]}`를 함께 사용하는 구성을 시험했다.
+지정값 없이 `ko-KR`을 보내면 기본 경로가 그대로 OpenAI에 전달한다.
+공식 인식 API가 안내하는 한국어 형식에 맞춰 `ko`로 지정했다.
+[Wyoming 언어 및 모델 설정](https://github.com/roryeckel/wyoming_openai/blob/2f91ab5476b668e236eb846a63aa28b31eaf2f3a/README.md) ·
+[OpenAI 전사 언어 코드](https://developers.openai.com/api/docs/guides/speech-to-text#supported-languages)
+
+모의 요청에서 한국어 전사와 Realtime의 24kHz 모노 PCM 반환을
+확인했다. Wyoming 구성요소의 테스트는 658개 통과, Windows 소켓
+차이로 1개 건너뜀이었고 한국어 추가 시험 1개도 통과했다. 공급자의
+Realtime 합성은 실험 기능이며 기본 로그에 전사·합성 텍스트 일부가
+포함될 수 있다. 현재 프로젝트의 지속 예산 또한 이 구성요소에 자동으로
+적용되지 않는다. 이 항목은 실제 자격 증명이나 음성으로 시험하기 전에
+해결해야 한다.
+[Wyoming 음성 처리 코드](https://github.com/roryeckel/wyoming_openai/blob/2f91ab5476b668e236eb846a63aa28b31eaf2f3a/src/wyoming_openai/handler.py)
+
+### ESPHome 전환과 순정 전체 복구의 읽기 전용 검증
+
+`firmware/standalone/tools/check_esphome_transition.py`로 배포본 두
+파일의 해시, ESP32-S3 앱 체크섬과 새 파티션 배치를 확인할 수 있다.
+기존 순정 A/B와 기준 해시 및 M5Stack의 같은 릴리스에 속하는 factory·OTA
+파일을 넣는다. 기존 순정 A/B와 두 배포본으로 이 도구를 실제 실행했다.
+
+RAM에서 임시 이미지 쓰기 도중 중단, 새 NVS 쓰기, 전체 복구 도중
+중단을 각각 모사했다. 두 배포본 모두 순정 16MiB 전체와 일치하도록
+복구됐다. 기존 한 턴용 OTA1·NVS 복구와 초기 지움 범위만 복구하는
+방식은 해당 모의 조건에서 불일치했다. 두 파일의 경로와 순정 사본의
+내용은 보고서에 들어가지 않는다. 실제 복구와 앞면 STOP은 실물에서
+확인되지 않았다. 펌웨어 쓰기, 로봇 연결, 서버 배포 및 유료 요청은
+이번 검증에 포함하지 않았다.
+
 ## 2026-11-28 계측기 없이 검토한 상시 사용 경로
 
 ### 순정 펌웨어와 기존 GPT 연결을 상시 호스트에서 실행
