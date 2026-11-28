@@ -109,6 +109,78 @@ Home Assistant 설정에는 OpenAI 키를 넣지 않는다.
 Home Assistant 자체의 질문 로그·음성 캐시 정책, 실물 STOP, 유료 응답의
 실제 합성 및 재생은 상시 적용 전에 확인한다.
 
+### Linux 상시 호스트의 자동 시작과 예산 복구
+
+`config/home_assistant/systemd/`에는 같은 Linux 호스트에서 실행할
+systemd 서비스와 설정 예제가 있다. systemd 247 이상과
+호스트 네트워크를 사용하는 Home Assistant Container를 기준으로
+준비했다. Home Assistant의 별도 운영체제나 다른 컴퓨터에 설치한
+경우에는 두 서비스의 루프백 연결 구성을 별도로 준비해야 한다.
+[Home Assistant Container 설치](https://www.home-assistant.io/installation/linux/) ·
+[systemd 자격 증명](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#Credentials)
+
+`stackchan-assist.target`을 활성화하면 부팅 시 음성·GPT 서비스가 함께
+시작한다. 두 서비스는 같은 `settings.env`와 전용 계정
+`stackchan-assist`, 영구 저장 경로 `/var/lib/stackchan-assist/`를
+사용한다. 프로세스 오류는 제한된 횟수만 다시 시작하며, 설정이나
+예산을 확인할 수 없어 종료 코드 2로 멈추면 관리자가 상태를 확인한다.
+OpenAI 키는 root 권한으로 관리하는 `/etc/stackchan-assist/openai-key`를
+systemd 자격 증명으로 전달한다.
+[systemd 재시작 정책](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html#Restart=)
+
+호스트를 선택한 뒤 적용하는 순서다.
+
+1. 전용 계정을 준비한다. 고정된 프로젝트 버전으로
+   `/opt/stackchan/venv-conversation`에 잠금 파일의 의존성을 설치한다.
+   `/opt/stackchan/venv-voice`에는 앞서 검증한 Wyoming 버전과
+   `pydantic-settings`, `PyYAML`을 설치하고 로컬 프로젝트 wheel을
+   `--no-deps`로 추가한다. 음성 환경은 Python 3.12 이상을 사용한다.
+2. 처음 설치할 때만 예제 설정을 `/etc/stackchan-assist/settings.env`로
+   복사한다. 영구 경로와 예산 이름을 먼저 확정한다. 새 설치의 최초
+   예산 파일은 두 서비스가 정지한 상태에서 아래 명령으로 한 번 만든다.
+   기존 파일은 그대로 보존하며, 일시적으로 파일이 사라진 경우에는
+   복구 절차를 적용한다.
+
+```sh
+sudo systemd-run --pipe --collect -p User=stackchan-assist -p Group=stackchan-assist \
+  -p StateDirectory=stackchan-assist -p StateDirectoryMode=0700 -p UMask=0077 \
+  -p EnvironmentFile=/etc/stackchan-assist/settings.env \
+  /opt/stackchan/venv-conversation/bin/python -B -m stackchan_autonomy.ha_host initialize-budget
+```
+
+3. 소유자가 모델·비용·음성 전송 범위를 확인한 뒤 클라우드와 오디오
+   설정을 켠다. 키 파일은 root만 읽을 수 있게 두고, 두 유닛 파일을
+   `/etc/systemd/system/`에 배치한다. 아래 점검은 파일과 예산만
+   확인하고 `HA_HOST_READY`를 출력한다.
+
+```sh
+sudo systemd-run --pipe --collect -p User=stackchan-assist -p Group=stackchan-assist \
+  -p EnvironmentFile=/etc/stackchan-assist/settings.env -p UnsetEnvironment=OPENAI_API_KEY \
+  -p LoadCredential=openai-key:/etc/stackchan-assist/openai-key \
+  /opt/stackchan/venv-conversation/bin/python -B -m stackchan_autonomy.ha_host check
+sudo systemd-analyze verify /etc/systemd/system/stackchan-assist.target
+```
+
+4. 상시 사용 전환을 승인한 뒤 `sudo systemctl daemon-reload`와
+   `sudo systemctl enable --now stackchan-assist.target`로 시작한다.
+   `systemctl is-active stackchan-assist@voice.service stackchan-assist@conversation.service`에서
+   두 서비스 상태를 확인한다. 두 포트는 `127.0.0.1`에서만 열린다.
+   중단하거나 이전 운영 방식으로 돌리려면
+   `sudo systemctl disable --now stackchan-assist.target`을 사용한다.
+[일회성 systemd 명령](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html)
+
+정전이나 저장소 장애 후 파일이 없어졌거나 예산 이름이 달라졌다면,
+두 서비스를 정지하고 원래 경로·마운트·파일을 먼저 확인한다. 기존
+지출이 들어 있는 정상 DB가 복구되면 `check`를 실행한 뒤 시작한다.
+DB를 보관할 때는 두 서비스를 정지하고 SQLite 백업 기능을 사용한다.
+최근 사용량이 빠진 사본만 있다면 실제 지출과의 대조가 끝날 때까지
+유료 운영을 보류한다.
+
+오프라인 시험에서는 임시 DB로 음성 작업 프로세스가 예약을 확정한
+뒤 강제 종료하고 새 GPT 작업 프로세스에서 같은 분당 한도를 확인했다.
+빈 파일·파일 유실·다른 예산 이름에서는 작업이 시작되기 전에 멈췄다.
+이 시험으로 실제 호스트 전원 차단이나 systemd 부팅을 검증한 것은 아니다.
+
 ### ESPHome 전환과 순정 전체 복구의 읽기 전용 검증
 
 `firmware/standalone/tools/check_esphome_transition.py`로 배포본 두

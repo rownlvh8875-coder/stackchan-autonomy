@@ -57,27 +57,36 @@ class SQLiteState:
             raise StateUnavailable("coordination storage unavailable") from None
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, existing: bool = False):
         db = None
         try:
             with sqlite_timing("sqlite_connect"):
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                db = sqlite3.connect(self.path, timeout=0.25, isolation_level=None)
+                if existing:
+                    db = sqlite3.connect(
+                        self.path.as_uri() + "?mode=rw",
+                        uri=True,
+                        timeout=0.25,
+                        isolation_level=None,
+                    )
+                else:
+                    self.path.parent.mkdir(parents=True, exist_ok=True)
+                    db = sqlite3.connect(self.path, timeout=0.25, isolation_level=None)
                 db.execute("PRAGMA synchronous=FULL")
             with sqlite_timing("sqlite_begin"):
                 db.execute("BEGIN IMMEDIATE")
-            for statement in (
-                "CREATE TABLE IF NOT EXISTS autonomy_clock (scope TEXT PRIMARY KEY, at REAL NOT NULL)",
-                "CREATE TABLE IF NOT EXISTS control_leases (resource TEXT PRIMARY KEY, owner TEXT, "
-                "generation INTEGER NOT NULL, expires_at REAL NOT NULL)",
-                "CREATE TABLE IF NOT EXISTS api_requests (id INTEGER PRIMARY KEY, namespace TEXT NOT NULL, "
-                "at REAL NOT NULL)",
-                "CREATE INDEX IF NOT EXISTS api_requests_time ON api_requests(namespace, at)",
-                "CREATE TABLE IF NOT EXISTS api_usage (namespace TEXT PRIMARY KEY, requests INTEGER NOT NULL, "
-                "input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, failures INTEGER NOT NULL)",
-            ):
-                with sqlite_timing("sqlite_schema"):
-                    db.execute(statement)
+            if not existing:
+                for statement in (
+                    "CREATE TABLE IF NOT EXISTS autonomy_clock (scope TEXT PRIMARY KEY, at REAL NOT NULL)",
+                    "CREATE TABLE IF NOT EXISTS control_leases (resource TEXT PRIMARY KEY, owner TEXT, "
+                    "generation INTEGER NOT NULL, expires_at REAL NOT NULL)",
+                    "CREATE TABLE IF NOT EXISTS api_requests (id INTEGER PRIMARY KEY, namespace TEXT NOT NULL, "
+                    "at REAL NOT NULL)",
+                    "CREATE INDEX IF NOT EXISTS api_requests_time ON api_requests(namespace, at)",
+                    "CREATE TABLE IF NOT EXISTS api_usage (namespace TEXT PRIMARY KEY, requests INTEGER NOT NULL, "
+                    "input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, failures INTEGER NOT NULL)",
+                ):
+                    with sqlite_timing("sqlite_schema"):
+                        db.execute(statement)
             with sqlite_timing("sqlite_body"):
                 yield db
             with sqlite_timing("sqlite_commit"):
