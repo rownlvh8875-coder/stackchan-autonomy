@@ -1185,6 +1185,8 @@ dependencies = [
     { name = "pyserial" },
     { name = "pysqlite3", marker = "(implementation_name == 'cpython' and platform_machine == 'AMD64' and sys_platform == 'win32') or (implementation_name == 'cpython' and platform_machine == 'x86' and sys_platform == 'win32')" },
     { name = "pyyaml" },
+    { name = "starlette" },
+    { name = "uvicorn" },
     { name = "websockets" },
 ]
 
@@ -1205,6 +1207,8 @@ requires-dist = [
     { name = "pyserial", specifier = "==3.5" },
     { name = "pysqlite3", marker = "(implementation_name == 'cpython' and platform_machine == 'AMD64' and sys_platform == 'win32') or (implementation_name == 'cpython' and platform_machine == 'x86' and sys_platform == 'win32')", specifier = "==0.6.2" },
     { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "starlette", specifier = "==1.10.0" },
+    { name = "uvicorn", specifier = "==0.54.0" },
     { name = "websockets", specifier = "==15.0.1" },
 ]
 

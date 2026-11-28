@@ -61,9 +61,9 @@ Realtime 합성은 실험 기능이며 기본 로그에 전사·합성 텍스트
 - 이 서비스는 음성을 파일에 저장하지 않고, 공급자 및 Wyoming 로그를
   끈다. 실패 상태는 고정 코드로 남기고 Home Assistant에 전달하는 오류
   메시지에서 요청과 공급자 예외 내용을 제거한다.
-- Home Assistant의 GPT 대화 에이전트 호출은 이 예산 밖에 있다. Home
-  Assistant의 로그·음성 캐시 정책, 실물 STOP, 합성 음성의 실제 발음과
-  재생은 상시 적용 전 확인해야 한다.
+- 기본 Home Assistant OpenAI 통합을 선택하면 그 GPT 요청은 이
+  예산을 사용하지 않는다. 아래 `StackChan GPT` 대화 에이전트를
+  선택하면 같은 예산에 GPT 요청을 포함할 수 있다.
 
 Home Assistant가 사용하는 이벤트 순서로 로컬 TCP의 서비스에 합성
 PCM을 보냈다. 모의 OpenAI로 한국어 전사, 24kHz PCM 응답, 한도 초과
@@ -71,6 +71,43 @@ PCM을 보냈다. 모의 OpenAI로 한국어 전사, 24kHz PCM 응답, 한도 �
 연결하거나 Home Assistant를 배포하거나 유료 API를 호출하지 않았다.
 [Home Assistant Wyoming STT 코드](https://github.com/home-assistant/core/blob/92da9f154079459b9e547126f9bd9fce726de16a/homeassistant/components/wyoming/stt.py) ·
 [Home Assistant Wyoming TTS 코드](https://github.com/home-assistant/core/blob/92da9f154079459b9e547126f9bd9fce726de16a/homeassistant/components/wyoming/tts.py)
+
+### GPT 답변을 포함한 연속 대화와 지속 예산
+
+별도 작업인 `python -m stackchan_autonomy.ha_conversation`은
+`127.0.0.1:10301`에서 Home Assistant의 질문 텍스트를 받는다.
+기존 GPT Responses 처리기의 모델 설정, 답변 길이 제한, 재시도 금지,
+`store=false` 및 SQLite 선예약을 재사용한다. 이 경로는 요청마다
+현재 질문을 보내고 직전 질문·답변을 모델에 다시 전송하지 않는다.
+연속 대화는 재생 뒤 대기로 돌아가고 새 호출어로 다음 질문을 받는
+경로다. GPT 응답이 물음표로 끝나도 자동 수신을 요청하지 않는다.
+
+추후 설치 시 두 서비스에 같은 `STACKCHAN_STATE_PATH`, 같은
+`STACKCHAN_BUDGET_NAMESPACE`와 같은 시간별 한도를 공급한다.
+GPT 서비스에는 계정에서 쓸 `STACKCHAN_OPENAI_MODEL`도 지정한다.
+인식·GPT·합성에 각각 한 건이 들어가므로, 60초 안에 두 번 대화하는
+시험 설정은 `STACKCHAN_REQUESTS_PER_MINUTE=6`이다. 기본값은 2건이며
+전체 세 단계를 허용할 분·시간·24시간 한도가 각각 3건 이상이어야
+GPT 서비스가 시작된다. 요청 실패나 이미 전송한 질문의 취소는 예약을
+반환하지 않는다. 단계별로 예약하므로 잔여 한도에 따라 응답 도중
+합성이 차단될 수 있다.
+
+Home Assistant의 설정 폴더에
+`config/home_assistant/custom_components/stackchan_gpt`를
+`custom_components/stackchan_gpt`로 복사한 뒤 통합을 추가한다.
+한국어 Assist의 대화 에이전트는 **StackChan GPT**, 인식과 합성은
+로컬 Wyoming 서비스를 선택한다. 질문 전용 파이프라인에서 로컬 명령
+우선 및 별도로 설정한 문장 트리거의 우선 적용을 확인한다. 두 서비스
+포트는 Home Assistant와 같은 루프백을 사용할 때 접근할 수 있다.
+Home Assistant 설정에는 OpenAI 키를 넣지 않는다.
+[Home Assistant 대화 엔티티 인터페이스](https://contributors.home-assistant.io/core/entities/conversation/)
+
+모의 OpenAI 요청으로 두 턴의 여섯 단계, 같은 SQLite 경로로 재시작한
+후의 차단, 60초 뒤 재개, 연결이 끊긴 대기 요청의 미전송을 확인했다.
+실제 Home Assistant Core 2026.11.3을 임시 환경에서 실행해 통합 추가,
+로컬 TCP를 통한 한국어 모의 답변, 한도 차단과 통합 해제를 검증했다.
+Home Assistant 자체의 질문 로그·음성 캐시 정책, 실물 STOP, 유료 응답의
+실제 합성 및 재생은 상시 적용 전에 확인한다.
 
 ### ESPHome 전환과 순정 전체 복구의 읽기 전용 검증
 
