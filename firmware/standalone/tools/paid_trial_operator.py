@@ -119,7 +119,7 @@ def exercise_reboot_trial(
             return False
         next_allowed = now() + 60
         say(
-            "USB를 분리한 상태로 로봇 전원을 껐다 켜세요. "
+            "USB를 분리한 상태로 로봇 전원을 한 번 껐다 켜세요. "
             "기존 분당 제한에 맞춰 60초 뒤 잠금 해제를 안내합니다. 중단하려면 N을 누르세요."
         )
         while now() < next_allowed:
@@ -129,7 +129,8 @@ def exercise_reboot_trial(
         if not confirm(
             "Enter your unlock code가 보이면 로봇 화면에서 저장한 코드를 입력하세요. "
             "TRIAL: TWO PAID TURNS가 나오면 앞면을 1초 눌렀다 떼고 "
-            "예산 확인을 거쳐 Say Hi StackChan 대기 화면이 나오는지 확인하세요.",
+            "Previous budget verified(이전 예산 확인)와 "
+            "이후 Say Hi StackChan 대기 화면을 확인하세요.",
             180,
             "2",
         ):
@@ -143,8 +144,7 @@ def exercise_reboot_trial(
             return False
         return confirm(
             "다시 Hi StackChan과 질문을 한 번씩 말하세요. "
-            "로봇 답변 소리가 나는 동안 앞면을 한 번 터치하세요. "
-            "소리가 멈추고 다시 재생되지 않는지 확인하세요.",
+            "답변을 끝까지 듣고 Standby verified. Trial ended. 표시를 확인하세요.",
             120,
             "4",
         )

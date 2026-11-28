@@ -161,6 +161,7 @@ def _run_runtime(binary, scenario):
         "bootstrap_conversation_combined_before_stop_at_frame",
         "bootstrap_conversation_combined_before_stop_at_release",
         "bootstrap_conversation_combined_after",
+        "bootstrap_conversation_combined_after_finish",
         "bootstrap_conversation_combined_after_bad_checkpoint",
         "bootstrap_conversation_combined_after_missing_checkpoint",
         "bootstrap_conversation_combined_after_spent",
@@ -233,6 +234,7 @@ def test_runtime_owner_lifecycle(runtime_binary, scenario):
         "bootstrap_conversation_reboot_stop_playback",
         "bootstrap_conversation_combined_before",
         "bootstrap_conversation_combined_after",
+        "bootstrap_conversation_combined_after_finish",
         "bootstrap_conversation_tts_failure",
     ],
 )

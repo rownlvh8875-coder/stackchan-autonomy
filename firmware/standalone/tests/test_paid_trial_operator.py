@@ -406,7 +406,8 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
 
 
 @pytest.mark.parametrize(
-    "failed_stage", [None, "before_reboot", "after_reboot", "standby", "stop", "usb", "held_key"]
+    "failed_stage",
+    [None, "before_reboot", "after_reboot", "standby", "final_answer", "usb", "held_key"],
 )
 def test_combined_exercise_requires_each_observation_and_returns_to_usb(failed_stage):
     operator = SimulatedOperator(reconnect_at=130)
@@ -416,7 +417,7 @@ def test_combined_exercise_requires_each_observation_and_returns_to_usb(failed_s
     elif failed_stage == "held_key":
         keys = dict.fromkeys(range(2, 130), "1")
     elif failed_stage is not None:
-        denied_at = {"before_reboot": 2, "after_reboot": 68, "standby": 75, "stop": 95}[
+        denied_at = {"before_reboot": 2, "after_reboot": 68, "standby": 75, "final_answer": 95}[
             failed_stage
         ]
         keys[denied_at] = "n"
@@ -442,3 +443,8 @@ def test_combined_exercise_requires_each_observation_and_returns_to_usb(failed_s
         assert not any(
             event[0] == "prompt" and "재부팅 뒤 첫" in event[1] for event in operator.events
         )
+    if failed_stage is None:
+        assert operator.prompt("Previous budget verified")[2] >= 62
+        final_prompt = operator.prompt("Standby verified. Trial ended.")[1]
+        assert "답변을 끝까지 듣고" in final_prompt
+        assert "터치" not in final_prompt

@@ -532,7 +532,9 @@ bool K151SetupLvgl::present_voice_status(K151VoiceStatus status) {
     default: break;
   }
   if (status == K151VoiceStatus::trial_finished || status == K151VoiceStatus::reboot_ready) {
-    assert(mic_opens == 3 && plays == 1 && !mic_open && !amp_open && !pending_pcm);
+    const int completed_turns = combined_after() ? 2 : 1;
+    assert(mic_opens == 2 * completed_turns + 1 && plays == completed_turns &&
+           !mic_open && !amp_open && !pending_pcm);
     assert(!codec_running && !model_loaded && codec_stops == 1 && network_stops == 1);
   }
   if (status == K151VoiceStatus::reboot_ready &&
@@ -1073,6 +1075,23 @@ void exercise_conversation() {
     }
     assert(state.phase == Phase::voice && state.voice == NativeVoiceStep::answered);
     assert(calls == 6 && plays == 2 && !mic_open && !amp_open && !pending_pcm);
+    if (scenario == "bootstrap_conversation_combined_after_finish") {
+      const auto completed_budget = durable_budget;
+      const auto ledger = stored_budget(completed_budget);
+      assert(ledger && ledger->count() == 3 && nvs_commits == 3);
+      now_us += 600'000;
+      state = conversation.poll();
+      assert(state.phase == Phase::showing_trial_result &&
+             state.voice == NativeVoiceStep::trial_standby);
+      assert(voice_status.back() == K151VoiceStatus::trial_finished);
+      assert(!mic_open && !amp_open && !model_loaded && !stop_timer_active &&
+             network_starts == 1 && network_stops == 1 && mic_opens == 5 && !setup_usb);
+      now_us += 4'000'000;
+      assert(conversation.poll().phase == Phase::trial_complete && !board_bus_registered);
+      assert(!request(true, true) && calls == 6 && plays == 2 && nvs_commits == 3 &&
+             durable_budget == completed_budget);
+      return;
+    }
     assert(nvs_commits == (restored_conversation() ? 2 : 3));
     now_us += 600'000;
     state = conversation.poll();
