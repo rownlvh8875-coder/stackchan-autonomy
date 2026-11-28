@@ -13,6 +13,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  assist-systemd:
+    name: Linux Assist start and recovery rehearsal
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.0
+        with:
+          version: "0.13.4"
+      - name: Exercise temporary systemd units with a synthetic budget and credential
+        run: |
+          set -euo pipefail
+          runtime_dir="$(sudo mktemp -d /opt/stackchan-assist-ci.XXXXXXXX)"
+          trap 'sudo rm -rf -- "$runtime_dir"' EXIT
+          sudo chown "$(id -u):$(id -g)" "$runtime_dir"
+          chmod 755 "$runtime_dir"
+          UV_PROJECT_ENVIRONMENT="$runtime_dir/venv" uv sync --frozen --no-dev --no-editable
+          sudo env GITHUB_ACTIONS=true "$runtime_dir/venv/bin/python" \
+            scripts/ci_assist_systemd.py "$runtime_dir" "$(id -u)" "$(id -g)"
+
   verify:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}

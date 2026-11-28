@@ -89,7 +89,16 @@ def test_managed_worker_restart_recovers_committed_budget_after_kill(host_env):
                 report = pool.submit(worker.stdout.readline).result(timeout=15)
                 assert report.strip() == "COMMITTED"
             finally:
-                worker.kill()
+                if worker.poll() is None and sys.platform == "win32":
+                    # The venv redirector PID can differ from the Python worker PID.
+                    subprocess.run(
+                        ["taskkill", "/T", "/F", "/PID", str(worker.pid)],
+                        capture_output=True,
+                        timeout=10,
+                        check=True,
+                    )
+                elif worker.poll() is None:
+                    worker.kill()
     finally:
         worker.communicate(timeout=10)
 
