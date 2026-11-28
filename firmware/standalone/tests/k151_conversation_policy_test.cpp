@@ -4,6 +4,41 @@
 
 using namespace stackchan::standalone;
 
+namespace {
+
+void assert_measured_output_required(const K151ConversationPolicy& approved,
+                                     const K151ConversationBootFacts& facts,
+                                     const K151OneTurnDeviceEvidence& observations) {
+  using Boot = K151ConversationBootStage;
+  assert(conversation_boot_stage(approved, facts) == Boot::ready);
+
+  for (bool K151OutputEvidence::*field : {
+       &K151OutputEvidence::exact_board_revision_verified,
+       &K151OutputEvidence::exclusive_i2c_ownership_verified,
+       &K151OutputEvidence::axp2101_rails_measured,
+       &K151OutputEvidence::aw9523_reset_sequence_verified,
+       &K151OutputEvidence::aw88298_hardware_mute_measured,
+       &K151OutputEvidence::independent_stop_latency_measured,
+       &K151OutputEvidence::dma_tx_empty_and_codec_idle_observable}) {
+    auto denied = approved;
+    denied.output.*field = false;
+    assert(!local_conversation_scope_complete(denied));
+    assert(conversation_boot_stage(denied, facts) == Boot::policy);
+  }
+
+  auto with_one_turn_receipts = approved;
+  with_one_turn_receipts.one_turn_device_evidence = observations;
+  assert(!local_conversation_scope_complete(with_one_turn_receipts));
+  assert(conversation_boot_stage(with_one_turn_receipts, facts) == Boot::policy);
+
+  // The known one-turn evidence has board/I2C identity and DMA/codec observations.
+  with_one_turn_receipts.output = {true, true, false, false, false, false, true};
+  assert(!local_conversation_scope_complete(with_one_turn_receipts));
+  assert(conversation_boot_stage(with_one_turn_receipts, facts) == Boot::policy);
+}
+
+} // namespace
+
 int main() {
   K151ConversationPolicy policy;
   K151ConversationBootFacts facts;
@@ -140,15 +175,7 @@ int main() {
     denied.*field = false;
     assert(!admit_conversation_boot(denied, facts));
   }
-  for (bool K151OutputEvidence::*field : {
-       &K151OutputEvidence::exact_board_revision_verified, &K151OutputEvidence::exclusive_i2c_ownership_verified,
-       &K151OutputEvidence::axp2101_rails_measured, &K151OutputEvidence::aw9523_reset_sequence_verified,
-       &K151OutputEvidence::aw88298_hardware_mute_measured, &K151OutputEvidence::independent_stop_latency_measured,
-       &K151OutputEvidence::dma_tx_empty_and_codec_idle_observable}) {
-    auto denied = policy;
-    denied.output.*field = false;
-    assert(!admit_conversation_boot(denied, facts));
-  }
+  assert_measured_output_required(policy, facts, observations);
   for (bool K151ConversationBootFacts::*field : {
        &K151ConversationBootFacts::esp32s3, &K151ConversationBootFacts::ota1,
        &K151ConversationBootFacts::psram_ready}) {
@@ -167,12 +194,7 @@ int main() {
   facts.reversible_unlock_verified = true;
   auto local = admit_conversation_boot(reversible, facts);
   assert(local && local->reversible_owner_unlock && !local->owner_hmac_slot);
-  auto incomplete_output = reversible;
-  incomplete_output.output.independent_stop_latency_measured = false;
-  assert(conversation_boot_stage(incomplete_output, facts) == Boot::policy);
-  auto observed_instead = reversible;
-  observed_instead.one_turn_device_evidence = observations;
-  assert(conversation_boot_stage(observed_instead, facts) == Boot::policy);
+  assert_measured_output_required(reversible, facts, observations);
   auto combined = reversible;
   combined.mode = K151ConversationBuildMode::reboot_trial;
   assert(!admit_conversation_boot(combined, facts));
@@ -183,11 +205,7 @@ int main() {
          trial_plan->reversible_owner_unlock && !trial_plan->owner_hmac_slot);
   assert(matches_reviewed_trial_budget(combined, true, std::nullopt));
   assert(!matches_reviewed_trial_budget(combined, false, K151BudgetDigest{1}));
-  auto missing_measurement = combined;
-  missing_measurement.output.aw88298_hardware_mute_measured = false;
-  assert(!admit_conversation_boot(missing_measurement, facts));
-  missing_measurement.one_turn_device_evidence = observations;
-  assert(!admit_conversation_boot(missing_measurement, facts));
+  assert_measured_output_required(combined, facts, observations);
   combined.reboot_trial_id.reset();
   assert(!admit_conversation_boot(combined, facts));
   reversible.owner_hmac_slot = 2;
