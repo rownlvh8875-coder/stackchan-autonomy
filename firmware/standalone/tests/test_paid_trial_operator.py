@@ -15,11 +15,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import paid_trial_operator as operator_tool  # noqa: E402
 from paid_trial_sequence import TrialStep  # noqa: E402
+from test_paid_trial_binding import reboot_review as reboot_review_fixture  # noqa: E402
 from test_paid_trial_binding import review as review_fixture  # noqa: E402
 from test_paid_trial_binding import run_bound_paid_trial  # noqa: E402
 from test_paid_trial_rom import Chip, Tool  # noqa: E402
 
 review = review_fixture
+reboot_review = reboot_review_fixture
 
 
 def trial_args(paths):
@@ -213,12 +215,26 @@ def test_missing_observation_or_attachment_cannot_report_a_successful_turn(setti
 
 @pytest.mark.parametrize(
     "outcome",
-    ["ready", "saved_setup", "renumbered", "wrong_port", "replacement", "occupied", "ctrl_break"],
+    [
+        "ready",
+        "saved_setup",
+        "renumbered",
+        "wrong_port",
+        "replacement",
+        "occupied",
+        "ctrl_break",
+        "reboot_ok",
+        "reboot_budget",
+        "reboot_stop",
+        "reboot_usb",
+        "reboot_wrong_board",
+    ],
 )
 def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
-    review, monkeypatch, capsys, outcome
+    review, monkeypatch, capsys, outcome, request
 ):
-    paths, _, _ = review
+    combined = outcome.startswith("reboot_")
+    paths, _, _ = request.getfixturevalue("reboot_review") if combined else review
     device = Tool(paths)
     operator = SimulatedOperator()
     original = SimpleNamespace(vid=0x303A, pid=0x1001, device="COM3", serial_number="original")
@@ -272,7 +288,15 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
             *source_options,
         ]
         assert 0 < timeout <= 145 and check is False
-        operator.unplug_at, operator.reconnect_at = 2, 5
+        operator.unplug_at = 2
+        operator.reconnect_at = {
+            "reboot_ok": 98,
+            "reboot_budget": 70,
+            "reboot_stop": 98,
+            "reboot_usb": 6,
+            "reboot_wrong_board": 98,
+        }.get(outcome, 5)
+        device.wrong_recovery_board = outcome == "reboot_wrong_board"
         device.events.append(("trial", 1))
         device.flash[0x9000] = b"trial changed the NVS"
         if outcome == "ctrl_break":
@@ -296,7 +320,19 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
             return tty if sys.stdout is console_stdout else sys.stdout
 
     clock = SimpleNamespace(monotonic=lambda: operator.seconds, sleep=operator.advance)
-    keyboard = SimpleNamespace(kbhit=lambda: operator.seconds >= 3, getwch=lambda: "y")
+    keys = {
+        3: "1",
+        68: "n" if outcome == "reboot_budget" else "2",
+        75: "3",
+        95: "n" if outcome == "reboot_stop" else "4",
+    }
+    keyboard = (
+        SimpleNamespace(
+            kbhit=lambda: operator.seconds in keys, getwch=lambda: keys.pop(operator.seconds)
+        )
+        if combined
+        else SimpleNamespace(kbhit=lambda: operator.seconds >= 3, getwch=lambda: "y")
+    )
     monkeypatch.setattr(operator_tool, "sys", Console())
     monkeypatch.setattr(operator_tool, "time", clock)
     monkeypatch.setattr(operator_tool.subprocess, "run", run_pairing)
@@ -315,9 +351,33 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
     monkeypatch.setattr("paid_trial_rom._load_esptool", lambda: (detect, Chip, device))
     monkeypatch.setattr(operator_tool, "_windows_port_available", available, raising=False)
 
-    status = operator_tool.main(["--execute", *trial_args(paths), *source_options])
+    mode_args = ["--execute", "--reboot-trial"] if combined else ["--execute"]
+    status = operator_tool.main([*mode_args, *trial_args(paths), *source_options])
     result = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert handlers[break_signal] is signal.SIG_DFL
+    if combined:
+        assert result["trial_scope"] == "reboot_trial"
+        if outcome == "reboot_wrong_board":
+            assert status == 3 and result["recovery_failure"] == TrialStep.REBIND_FOR_RESTORE
+            assert not result["factory_boot_requested"]
+            assert [event for event in device.events if event[0] == "write"] == [
+                ("write", 1, 0x510000),
+            ]
+            return
+        assert status == (0 if outcome == "reboot_ok" else 1)
+        assert result["trial_failure"] == (
+            None if outcome == "reboot_ok" else TrialStep.BOOT_AND_RUN_REBOOT_TRIAL
+        )
+        assert result["factory_boot_requested"]
+        assert [event for event in device.events if event[0] == "write"] == [
+            ("write", 1, 0x510000),
+            ("write", 2, 0x510000),
+            ("write", 2, 0x9000),
+        ]
+        assert device.flash[0x510000] == paths.ota1.read_bytes()
+        assert device.flash[0x9000] == paths.nvs.read_bytes()
+        assert device.events[-2:] == [("reset", 2), ("close", 2)]
+        return
     if outcome == "occupied":
         assert status == 2
         assert result["trial_failure"] == TrialStep.PREFLIGHT
@@ -343,3 +403,42 @@ def test_cli_waits_for_original_usb_identity_and_restores_reviewed_ranges(
         assert device.flash[0x9000] == paths.nvs.read_bytes()
         assert checks == ["COM3", "COM3"]
         assert device.events[-2:] == [("reset", 2), ("close", 2)]
+
+
+@pytest.mark.parametrize(
+    "failed_stage", [None, "before_reboot", "after_reboot", "standby", "stop", "usb", "held_key"]
+)
+def test_combined_exercise_requires_each_observation_and_returns_to_usb(failed_stage):
+    operator = SimulatedOperator(reconnect_at=130)
+    keys = {2: "1", 68: "2", 75: "3", 95: "4"}
+    if failed_stage == "usb":
+        operator.reconnect_at = 6
+    elif failed_stage == "held_key":
+        keys = dict.fromkeys(range(2, 130), "1")
+    elif failed_stage is not None:
+        denied_at = {"before_reboot": 2, "after_reboot": 68, "standby": 75, "stop": 95}[
+            failed_stage
+        ]
+        keys[denied_at] = "n"
+        operator.reconnect_at = denied_at + 4
+
+    assert operator_tool.exercise_reboot_trial(
+        operator.pair,
+        operator.present,
+        lambda: keys.pop(operator.seconds, None),
+        operator.say,
+        lambda: operator.seconds,
+        operator.advance,
+    ) is (failed_stage is None)
+    assert operator.prompt("다시 연결")[2] <= operator.reconnect_at
+    if failed_stage not in ("before_reboot", "usb"):
+        assert operator.prompt("Enter your unlock code")[2] >= 62
+    else:
+        assert not any(
+            event[0] == "prompt" and "Enter your unlock code" in event[1]
+            for event in operator.events
+        )
+    if failed_stage == "held_key":
+        assert not any(
+            event[0] == "prompt" and "재부팅 뒤 첫" in event[1] for event in operator.events
+        )

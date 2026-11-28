@@ -341,3 +341,126 @@ def test_another_review_directory_cannot_open_the_same_port_during_a_trial(revie
     result = run_bound_paid_trial(paths, perform)
     assert result.trial_failure is None
     assert observed == []
+
+
+@pytest.fixture
+def reboot_review(review):
+    paths, manifest, approval = review
+    reviewed = json.loads(manifest.read_bytes())
+    app = b"synthetic app\0K151_CONVERSATION_LOCAL_RELEASE_REBOOT_TRIAL\0"
+    paths.app.write_bytes(app)
+    reviewed.update(
+        kind="LOCAL_REBOOT_PAID_TRIAL_REVIEW",
+        image_sha256=digest(app),
+        write_bytes=len(app),
+        runtime_budget_write_scope=["sc_gpt/budget", "sc_gpt/trial_ckpt"],
+        reboot_trial_paid_turns={"before_reboot": 1, "after_reboot": 2},
+        runtime_owner_setup_write_scope="sc_owner/owner_cfg_v2",
+        fresh_reboot_state_verified=True,
+        budget_baseline={
+            "pretrial_nvs_sha256": digest(paths.nvs.read_bytes()),
+            "trial_budget_must_be_missing": True,
+            "trial_budget_sha256": None,
+        },
+    )
+    manifest.write_text(json.dumps(reviewed), encoding="utf-8")
+    record = json.loads(approval.read_bytes())
+    del record["one_paid_turn"]
+    record.update(
+        review_sha256=digest(manifest.read_bytes()),
+        reboot_trial_paid_turns=reviewed["reboot_trial_paid_turns"],
+        create_initial_budget=True,
+    )
+    approval.write_text(json.dumps(record), encoding="utf-8")
+    return review
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "one_turn",
+        "mixed",
+        "wider",
+        "boolean",
+        "initial_missing",
+        "other_nvs",
+        "wrong_app",
+        "checkpoints",
+        "owner_setup",
+    ],
+)
+def test_reboot_review_rejects_changed_scope_before_device_contact(reboot_review, scope):
+    paths, manifest, approval = reboot_review
+    record = json.loads(approval.read_bytes())
+    reviewed = json.loads(manifest.read_bytes())
+    if scope == "one_turn":
+        del record["reboot_trial_paid_turns"]
+        record["one_paid_turn"] = True
+    elif scope == "mixed":
+        record["one_paid_turn"] = True
+    elif scope == "wider":
+        record["reboot_trial_paid_turns"]["after_reboot"] = 3
+    elif scope == "boolean":
+        record["reboot_trial_paid_turns"]["before_reboot"] = True
+    elif scope == "checkpoints":
+        reviewed["runtime_budget_write_scope"] = ["sc_gpt/budget"]
+    elif scope == "owner_setup":
+        reviewed["runtime_owner_setup_write_scope"] = "other/owner_cfg_v2"
+    elif scope == "initial_missing":
+        del record["create_initial_budget"]
+    elif scope == "other_nvs":
+        reviewed["budget_baseline"]["pretrial_nvs_sha256"] = "a" * 64
+    elif scope == "wrong_app":
+        app = b"synthetic app\0K151_CONVERSATION_LOCAL_RELEASE_ONE_PAID_TURN\0"
+        paths.app.write_bytes(app)
+        reviewed.update(image_sha256=digest(app), write_bytes=len(app))
+    manifest.write_text(json.dumps(reviewed), encoding="utf-8")
+    record["review_sha256"] = digest(manifest.read_bytes())
+    approval.write_text(json.dumps(record), encoding="utf-8")
+    denied = run_bound(
+        paths, lambda *_: pytest.fail("opened backend"), port="COM3", reboot_trial=True
+    )
+    assert denied.approval_rejected
+    assert not (paths.review_dir / "install-started.json").exists()
+
+
+def test_explicit_trial_modes_cannot_cross(reboot_review):
+    paths, _, _ = reboot_review
+    assert run_bound(paths, lambda *_: pytest.fail("opened backend"), port="COM3").approval_rejected
+
+
+def test_combined_boot_failure_and_recovery_only_do_not_repeat_paid_trial(reboot_review):
+    paths, _, _ = reboot_review
+    attempted = []
+
+    def interrupted(step, _):
+        attempted.append(step)
+        return step not in (TrialStep.BOOT_AND_RUN_REBOOT_TRIAL, TrialStep.REBIND_FOR_RESTORE)
+
+    first = run_bound(paths, interrupted, port="COM3", reboot_trial=True)
+    assert first.trial_failure == TrialStep.BOOT_AND_RUN_REBOOT_TRIAL
+    assert first.recovery_failure == TrialStep.REBIND_FOR_RESTORE
+    assert not first.factory_boot_requested
+    assert (paths.review_dir / "install-started.json").is_file()
+    recovered = []
+
+    def restore(step, _):
+        recovered.append(step)
+        return True
+
+    assert run_bound(paths, restore, port="COM3", recover_only=True).approval_rejected
+    retry = run_bound(paths, restore, port="COM3", reboot_trial=True, recover_only=True)
+    assert retry.factory_boot_requested
+    assert recovered == [
+        TrialStep.REBIND_FOR_RESTORE,
+        TrialStep.WRITE_ORIGINAL_OTA1,
+        TrialStep.VERIFY_ORIGINAL_OTA1,
+        TrialStep.WRITE_PRETRIAL_NVS,
+        TrialStep.VERIFY_PRETRIAL_NVS,
+        TrialStep.VERIFY_FACTORY_METADATA,
+        TrialStep.REQUEST_FACTORY_BOOT,
+    ]
+    assert (
+        run_bound(paths, restore, port="COM3", reboot_trial=True).trial_failure
+        == TrialStep.CLAIM_ONCE
+    )

@@ -1,11 +1,13 @@
 """The public operating review must contain the model and deny device activation."""
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import check_conversation_image as checker  # noqa: E402
 from check_conversation_image import inspect_image, main, verify_sdkconfig  # noqa: E402
 from test_board_probe_image import TABLE  # noqa: E402
 from test_resource_bench_image import ELF_SHA, image  # noqa: E402
@@ -86,9 +88,10 @@ def test_private_review_rejects_other_build_modes(pinned_pack, markers):
         inspect_image(fixture, ELF_SHA, PRIVATE_TABLE, local_one_turn=True)
 
 
-def test_local_review_refuses_ci_before_opening_any_artifact(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("mode", ["--local-one-turn", "--local-reboot-trial"])
+def test_local_review_refuses_ci_before_opening_any_artifact(monkeypatch, tmp_path, capsys, mode):
     monkeypatch.setenv("CI", "true")
-    argv = ["--local-one-turn"]
+    argv = [mode]
     for option in (
         "elf",
         "bin",
@@ -103,6 +106,8 @@ def test_local_review_refuses_ci_before_opening_any_artifact(monkeypatch, tmp_pa
         argv.extend((f"--{option}", str(tmp_path / option)))
     for option in ("idf-head", "source-head", "factory-sha256"):
         argv.extend((f"--{option}", "fixture"))
+    if mode == "--local-reboot-trial":
+        argv.extend(("--idf-dir", str(tmp_path / "idf")))
     with pytest.raises(SystemExit) as error:
         main(argv)
     assert error.value.code == 2
@@ -128,3 +133,106 @@ def test_review_requires_psram_serial_separation_and_one_ms_scheduler():
     verify_sdkconfig(config)
     with pytest.raises(ValueError, match="CONFIG_SPIRAM_USE_MALLOC"):
         verify_sdkconfig(config.replace("CONFIG_SPIRAM_USE_MALLOC=y", ""))
+
+
+REBOOT_STATUS = b"Reboot ready. Power off and on.\0Previous budget verified\0"
+
+
+def test_reboot_review_binds_separate_cap_and_nvs_scope(pinned_pack):
+    fixture = image(pinned_pack + REBOOT_TRIAL + STATUS + REBOOT_STATUS + ROUTE, project=PROJECT)
+    report = inspect_image(fixture, ELF_SHA, PRIVATE_TABLE, local_reboot_trial=True)
+    assert report["kind"] == "LOCAL_REBOOT_PAID_TRIAL_REVIEW"
+    assert report["reboot_trial_paid_turns"] == {"before_reboot": 1, "after_reboot": 2}
+    assert report["runtime_budget_write_scope"] == ["sc_gpt/budget", "sc_gpt/trial_ckpt"]
+    assert report["install_authorized"] is False and report["paid_api_called"] is False
+    with pytest.raises(ValueError, match="NVS"):
+        inspect_image(fixture, ELF_SHA, TABLE, local_reboot_trial=True)
+
+
+@pytest.mark.parametrize(
+    "markers,status",
+    [
+        (REBOOT_TRIAL, STATUS),
+        (CONTINUOUS, STATUS + REBOOT_STATUS),
+        (ONE_TURN, STATUS + REBOOT_STATUS),
+        (REBOOT_TRIAL + ONE_TURN, STATUS + REBOOT_STATUS),
+        (REBOOT_TRIAL + DEVICE_OBSERVED, STATUS + REBOOT_STATUS),
+        (REBOOT_TRIAL + REVIEW, STATUS + REBOOT_STATUS),
+        (REBOOT_TRIAL + CONTINUOUS, STATUS + REBOOT_STATUS),
+    ],
+)
+def test_combined_review_refuses_incompatible_images(pinned_pack, markers, status):
+    fixture = image(pinned_pack + markers + status + ROUTE, project=PROJECT)
+    with pytest.raises(ValueError):
+        inspect_image(fixture, ELF_SHA, PRIVATE_TABLE, local_reboot_trial=True)
+
+
+@pytest.mark.parametrize("changed_snapshot", [False, True])
+def test_reboot_manifest_uses_verified_restore_snapshot(
+    pinned_pack, monkeypatch, tmp_path, capsys, changed_snapshot
+):
+    monkeypatch.delenv("CI", raising=False)
+    app = image(pinned_pack + REBOOT_TRIAL + STATUS + REBOOT_STATUS + ROUTE, project=PROJECT)
+    (tmp_path / "bin").write_bytes(app)
+    (tmp_path / "partition-csv").write_text(PRIVATE_TABLE, encoding="utf-8")
+    (tmp_path / "sdkconfig").touch()
+    monkeypatch.setattr(checker, "verify_sdkconfig", lambda _: None)
+    monkeypatch.setattr(
+        checker, "validate", lambda *_: {"elf": {"sha256": ELF_SHA}, "idf_commit": "fixture"}
+    )
+    monkeypatch.setattr(
+        checker,
+        "verify_trial_restore",
+        lambda *_: {
+            "restore_authorized": False,
+            "restore_in_order": [{"partition": "ota_1"}, {"partition": "nvs", "sha256": "a" * 64}],
+        },
+    )
+
+    def read_baseline(snapshot, idf, *, require_fresh_reboot_trial):
+        assert snapshot == tmp_path / "pretrial-nvs" and idf == tmp_path / "idf-dir"
+        assert require_fresh_reboot_trial is True
+        return {
+            "pretrial_nvs_sha256": ("b" if changed_snapshot else "a") * 64,
+            "trial_budget_must_be_missing": False,
+            "trial_budget_sha256": "c" * 64,
+        }
+
+    monkeypatch.setattr(checker, "inspect_pinned_snapshot", read_baseline)
+    args = ["--local-reboot-trial"]
+    for option in (
+        "elf",
+        "bin",
+        "partition-csv",
+        "sdkconfig",
+        "out",
+        "idf-dir",
+        "factory-a",
+        "factory-b",
+        "factory-ota1",
+        "pretrial-nvs",
+    ):
+        args.extend((f"--{option}", str(tmp_path / option)))
+    args.extend(
+        (
+            "--idf-head",
+            "fixture",
+            "--source-head",
+            "012345abcdef" + "0" * 28,
+            "--factory-sha256",
+            "fixture",
+        )
+    )
+    status = main(args)
+    output = tmp_path / "out"
+    if changed_snapshot:
+        assert status == 2 and not output.exists()
+        assert capsys.readouterr().out.strip() == "LOCAL_REBOOT_PAID_TRIAL_REVIEW_REJECTED"
+    else:
+        assert status == 0
+        report = json.loads(output.read_bytes())
+        assert report["budget_baseline"]["trial_budget_sha256"] == "c" * 64
+        assert report["fresh_reboot_state_verified"] is True
+        assert report["runtime_owner_setup_write_scope"] == "sc_owner/owner_cfg_v2"
+        assert report["install_authorized"] is False
+        assert report["recovery"]["restore_authorized"] is False

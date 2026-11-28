@@ -38,10 +38,10 @@ def _load_esptool():
 
 
 class _RomPaidTrial:
-    def __init__(self, port, port_available, exercise_one_turn):
+    def __init__(self, port, port_available, exercise_trial):
         self.port = port
         self.port_available = port_available
-        self.exercise_one_turn = exercise_one_turn
+        self.exercise_trial = exercise_trial
         self.esptool = None
         self.chip = None
         self.preflight_factory_verified = False
@@ -141,7 +141,11 @@ class _RomPaidTrial:
                     self._write(SLOT_OFFSET, files.app)
                 case TrialStep.VERIFY_APP:
                     self._verify(SLOT_OFFSET, files.app)
-                case TrialStep.BOOT_AND_RUN_ONE_TURN | TrialStep.REQUEST_FACTORY_BOOT:
+                case (
+                    TrialStep.BOOT_AND_RUN_ONE_TURN
+                    | TrialStep.BOOT_AND_RUN_REBOOT_TRIAL
+                    | TrialStep.REQUEST_FACTORY_BOOT
+                ):
                     self._reset_and_release()
                 case TrialStep.REBIND_FOR_RESTORE:
                     self._open_bound(files)
@@ -157,8 +161,8 @@ class _RomPaidTrial:
                     self._check_factory_metadata(files)
                 case _:
                     return False
-        if step is TrialStep.BOOT_AND_RUN_ONE_TURN:
-            return self.exercise_one_turn is not None and self.exercise_one_turn() is True
+        if step in (TrialStep.BOOT_AND_RUN_ONE_TURN, TrialStep.BOOT_AND_RUN_REBOOT_TRIAL):
+            return self.exercise_trial is not None and self.exercise_trial() is True
         return True
 
 
@@ -169,6 +173,7 @@ def run_rom_paid_trial(
     exercise_one_turn: Callable[[], bool] | None,
     *,
     recover_only: bool = False,
+    reboot_trial: bool = False,
 ) -> TrialResult:
     adapter = _RomPaidTrial(port, port_available, exercise_one_turn)
     try:
@@ -177,6 +182,7 @@ def run_rom_paid_trial(
             adapter,
             port=port,
             recover_only=recover_only,
+            reboot_trial=reboot_trial,
             release_preflight=adapter.release_preflight,
         )
     finally:

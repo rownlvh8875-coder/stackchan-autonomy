@@ -41,7 +41,7 @@ def entry(ns, kind, name, data, *, chunk=255, children=(), data_crc=0):
     )
 
 
-def inspect(entries, *, raw=SNAPSHOT, page_state="Active"):
+def inspect(entries, *, raw=SNAPSHOT, page_state="Active", **scope):
     page = SimpleNamespace(
         header={
             "status": page_state,
@@ -52,7 +52,7 @@ def inspect(entries, *, raw=SNAPSHOT, page_state="Active"):
         entries=entries,
         start_address=0,
     )
-    return inspect_snapshot(raw, lambda *_: SimpleNamespace(pages=[page]))
+    return inspect_snapshot(raw, lambda *_: SimpleNamespace(pages=[page]), **scope)
 
 
 def fixture(payload=None):
@@ -139,3 +139,18 @@ def test_bad_budget_wire_does_not_produce_a_digest():
     value = ledger()
     with pytest.raises(ValueError):
         inspect(fixture(value[:-1] + bytes([value[-1] ^ 1])))
+
+
+@pytest.mark.parametrize(
+    "namespace,key",
+    [("sc_gpt", "trial_ckpt"), ("sc_owner", "owner_cfg_v2")],
+)
+def test_combined_review_refuses_preexisting_trial_state(namespace, key):
+    rows = fixture()
+    slot = 7 if namespace == "sc_gpt" else 8
+    if slot == 8:
+        rows.append(entry(0, "uint8_t", namespace, {"value": slot}))
+    rows.append(entry(slot, "blob_index", key, {"size": 48}))
+    assert inspect(rows)["trial_budget_must_be_missing"] is False
+    with pytest.raises(ValueError, match="preexisting trial state"):
+        inspect(rows, require_fresh_reboot_trial=True)

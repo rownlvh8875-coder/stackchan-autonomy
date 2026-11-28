@@ -1,4 +1,4 @@
-"""Bind a K151 one-turn trial backend to its local review, consent and files.
+"""Bind a one-turn or reboot K151 trial backend to its local review, consent and files.
 
 The backend still verifies the live board and controls any transport. This
 module has no device/API client and never creates an approval record.
@@ -15,12 +15,15 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import BinaryIO
 
+from check_conversation_image import REBOOT_TRIAL_MARKER, verify_reboot_trial_marker
 from esp_app_image import NVS_BYTES, NVS_OFFSET, SLOT_BYTES, SLOT_OFFSET
 from paid_trial_sequence import (
+    REBOOT_TRIAL_BUDGET_KEYS,
     PreflightFactoryBoot,
     TrialResult,
     TrialScopes,
     TrialStep,
+    matches_reboot_trial_cap,
     recover_paid_trial,
     run_paid_trial,
 )
@@ -77,19 +80,41 @@ def _read_verified(path: Path, size: int, digest: str) -> bytes:
     return data
 
 
-def _bind_files(paths: PaidTrialPaths, reviewed: dict, approval: dict) -> BoundPaidTrial:
-    size = reviewed["write_bytes"]
+def _verify_reboot_budget(reviewed: dict, approved: dict, nvs_sha256: str) -> None:
+    baseline = reviewed.get("budget_baseline")
+    if not isinstance(baseline, dict) or baseline.get("pretrial_nvs_sha256") != nvs_sha256:
+        raise ValueError("budget review differs from pretrial NVS")
+    missing = baseline.get("trial_budget_must_be_missing")
+    digest = baseline["trial_budget_sha256"]
     if (
-        reviewed.get("kind") != "LOCAL_ONE_PAID_TURN_REVIEW"
+        type(missing) is not bool
+        or approved.get("create_initial_budget") is not missing
+        or (missing and digest is not None)
+        or (
+            not missing
+            and (not isinstance(digest, str) or not re.fullmatch("[0-9a-f]{64}", digest))
+        )
+    ):
+        raise ValueError("budget baseline or initial creation approval differs")
+
+
+def _bind_files(
+    paths: PaidTrialPaths, reviewed: dict, approval: dict, *, reboot_trial: bool
+) -> BoundPaidTrial:
+    size = reviewed["write_bytes"]
+    kind = "LOCAL_REBOOT_PAID_TRIAL_REVIEW" if reboot_trial else "LOCAL_ONE_PAID_TURN_REVIEW"
+    budget_scope = list(REBOOT_TRIAL_BUDGET_KEYS) if reboot_trial else "sc_gpt/budget"
+    if (
+        reviewed.get("kind") != kind
         or reviewed.get("private_board_policy_embedded") is not True
         or reviewed.get("install_authorized") is not False
-        or reviewed.get("runtime_budget_write_scope") != "sc_gpt/budget"
+        or reviewed.get("runtime_budget_write_scope") != budget_scope
         or reviewed.get("write_offset") != SLOT_OFFSET
         or type(size) is not int
         or not 0 < size <= SLOT_BYTES
         or reviewed.get("erase_span_bytes") != (size + 4095) // 4096 * 4096
     ):
-        raise ValueError("invalid one-turn app scope")
+        raise ValueError("invalid trial app scope")
     recovery = reviewed["recovery"]
     if not isinstance(recovery, dict) or recovery.get("restore_authorized") is not False:
         raise ValueError("invalid recovery scope")
@@ -114,8 +139,20 @@ def _bind_files(paths: PaidTrialPaths, reviewed: dict, approval: dict) -> BoundP
     board = _read_bounded(paths.board_reference, 16 * 1024)
     if _sha256(board) != approval.get("board_reference_sha256"):
         raise ValueError("board reference differs from approved reference")
+    app = _read_verified(paths.app, size, reviewed["image_sha256"])
+    if reboot_trial:
+        if (
+            not matches_reboot_trial_cap(reviewed.get("reboot_trial_paid_turns"))
+            or reviewed.get("runtime_owner_setup_write_scope") != "sc_owner/owner_cfg_v2"
+            or reviewed.get("fresh_reboot_state_verified") is not True
+        ):
+            raise ValueError("invalid reviewed reboot trial scope")
+        _verify_reboot_budget(reviewed, approval, ranges[1]["sha256"])
+        verify_reboot_trial_marker(app)
+    elif REBOOT_TRIAL_MARKER in app:
+        raise ValueError("reboot trial image requires its own approval")
     return BoundPaidTrial(
-        app=_read_verified(paths.app, size, reviewed["image_sha256"]),
+        app=app,
         ota1=_read_verified(paths.ota1, SLOT_BYTES, ranges[0]["sha256"]),
         nvs=_read_verified(paths.nvs, NVS_BYTES, ranges[1]["sha256"]),
         board_reference=board,
@@ -158,6 +195,7 @@ def run_bound_paid_trial(
     *,
     port: str,
     recover_only: bool = False,
+    reboot_trial: bool = False,
     release_preflight: Callable[[], PreflightFactoryBoot | None] | None = None,
 ) -> TrialResult:
     claim = paths.review_dir / "install-started.json"
@@ -176,13 +214,18 @@ def run_bound_paid_trial(
             install_and_restore_ota1=approved.get("install_and_restore_ota1") is True,
             one_paid_turn=approved.get("one_paid_turn") is True,
             restore_nvs=approved.get("restore_nvs") is True,
+            reboot_paid_trial=matches_reboot_trial_cap(approved.get("reboot_trial_paid_turns")),
         )
-        if not scopes.complete:
+        if (
+            not scopes.complete(reboot_trial=reboot_trial)
+            or (reboot_trial and scopes.one_paid_turn)
+            or (not reboot_trial and "reboot_trial_paid_turns" in approved)
+        ):
             return TrialResult(approval_rejected=True)
         reviewed = json.loads(document)
         if not isinstance(reviewed, dict):
             return TrialResult(approval_rejected=True)
-        inputs = _bind_files(paths, reviewed, approved)
+        inputs = _bind_files(paths, reviewed, approved, reboot_trial=reboot_trial)
     except (OSError, KeyError, ValueError, TypeError):
         return TrialResult(approval_rejected=True)
 
@@ -241,7 +284,7 @@ def run_bound_paid_trial(
                 trial_boot_possible=TrialStep.RECORD_TRIAL_BOOT_INTENT in phases,
                 factory_boot_possible=TrialStep.RECORD_FACTORY_BOOT_INTENT in phases,
             )
-        result = run_paid_trial(scopes, step_for_review)
+        result = run_paid_trial(scopes, step_for_review, reboot_trial=reboot_trial)
         # Keep both locks through the same-handle return to factory boot.
         # An existing or partial journal belongs to the recovery path.
         if (

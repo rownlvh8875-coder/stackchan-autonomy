@@ -107,7 +107,12 @@ def _ledger_sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def inspect_snapshot(snapshot: bytes, parse: Callable[[str, bytearray], Any]) -> dict:
+def inspect_snapshot(
+    snapshot: bytes,
+    parse: Callable[[str, bytearray], Any],
+    *,
+    require_fresh_reboot_trial: bool = False,
+) -> dict:
     if len(snapshot) != NVS_BYTES:
         raise ValueError("pretrial NVS snapshot size rejected")
     entries = _written_entries(snapshot, parse("pretrial", bytearray(snapshot)))
@@ -126,6 +131,12 @@ def inspect_snapshot(snapshot: bytes, parse: Callable[[str, bytearray], Any]) ->
             raise ValueError("unresolved NVS namespace")
         names.add(item.key)
         namespaces[namespace] = item.key
+    if require_fresh_reboot_trial and any(
+        (namespaces.get(item.metadata["namespace"]), item.key)
+        in (("sc_gpt", "trial_ckpt"), ("sc_owner", "owner_cfg_v2"))
+        for item in entries
+    ):
+        raise ValueError("preexisting trial state in NVS")
     selected = [
         item
         for item in entries
@@ -154,6 +165,17 @@ def _pinned_parser(idf_dir: Path) -> Callable[[str, bytearray], Any]:
     return namespace["NVS_Partition"]
 
 
+def inspect_pinned_snapshot(
+    path: Path, idf_dir: Path, *, require_fresh_reboot_trial: bool = False
+) -> dict:
+    with path.open("rb") as snapshot:
+        return inspect_snapshot(
+            snapshot.read(NVS_BYTES + 1),
+            _pinned_parser(idf_dir),
+            require_fresh_reboot_trial=require_fresh_reboot_trial,
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("idf-dir", "snapshot", "out"):
@@ -162,8 +184,7 @@ def main() -> int:
     if "CI" in os.environ:
         parser.error("the NVS budget baseline requires local execution")
     try:
-        with args.snapshot.open("rb") as snapshot:
-            report = inspect_snapshot(snapshot.read(NVS_BYTES + 1), _pinned_parser(args.idf_dir))
+        report = inspect_pinned_snapshot(args.snapshot, args.idf_dir)
         with args.out.open("x", encoding="utf-8") as output:
             output.write(json.dumps(report, indent=2) + "\n")
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):

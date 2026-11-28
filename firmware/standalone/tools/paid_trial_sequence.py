@@ -11,6 +11,16 @@ from enum import StrEnum
 from typing import Literal
 
 PreflightFactoryBoot = Literal["requested", "unconfirmed"]
+REBOOT_TRIAL_PAID_TURNS = {"before_reboot": 1, "after_reboot": 2}
+REBOOT_TRIAL_BUDGET_KEYS = ("sc_gpt/budget", "sc_gpt/trial_ckpt")
+
+
+def matches_reboot_trial_cap(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and value == REBOOT_TRIAL_PAID_TURNS
+        and all(type(count) is int for count in value.values())
+    )
 
 
 class TrialStep(StrEnum):
@@ -20,6 +30,7 @@ class TrialStep(StrEnum):
     VERIFY_APP = "verify_app"
     RECORD_TRIAL_BOOT_INTENT = "record_trial_boot_intent"
     BOOT_AND_RUN_ONE_TURN = "boot_and_run_one_turn"
+    BOOT_AND_RUN_REBOOT_TRIAL = "boot_and_run_reboot_trial"
     REBIND_FOR_RESTORE = "rebind_for_restore"
     WRITE_ORIGINAL_OTA1 = "write_original_ota1"
     VERIFY_ORIGINAL_OTA1 = "verify_original_ota1"
@@ -38,13 +49,11 @@ class TrialScopes:
     install_and_restore_ota1: bool = False
     one_paid_turn: bool = False
     restore_nvs: bool = False
+    reboot_paid_trial: bool = False
 
-    @property
-    def complete(self) -> bool:
-        return all(
-            scope is True
-            for scope in (self.install_and_restore_ota1, self.one_paid_turn, self.restore_nvs)
-        )
+    def complete(self, *, reboot_trial: bool) -> bool:
+        paid = self.reboot_paid_trial if reboot_trial else self.one_paid_turn
+        return self.install_and_restore_ota1 is True and self.restore_nvs is True and paid is True
 
 
 @dataclass(frozen=True)
@@ -119,16 +128,18 @@ def recover_paid_trial(
     )
 
 
-def run_paid_trial(scopes: TrialScopes, perform: Callable[[TrialStep], bool]) -> TrialResult:
+def run_paid_trial(
+    scopes: TrialScopes, perform: Callable[[TrialStep], bool], *, reboot_trial: bool = False
+) -> TrialResult:
     """Run once. A failed write may have changed flash, so recover from that point.
 
     PREFLIGHT verifies the bound board, current layout, OTA data, and both
     original ranges. CLAIM_ONCE durably consumes the scoped authorization.
-    Before BOOT_AND_RUN_ONE_TURN, all commands must leave the board in ROM.
+    All commands before trial boot must leave the board in ROM.
     REBIND_FOR_RESTORE re-verifies identity and immutable metadata before
     writing, even if the board or the serial connection reset during the trial.
     """
-    if not scopes.complete:
+    if not scopes.complete(reboot_trial=reboot_trial):
         return TrialResult(approval_rejected=True)
     failure = _first_failed(perform, (TrialStep.PREFLIGHT, TrialStep.CLAIM_ONCE))
     if failure is not None:
@@ -142,7 +153,12 @@ def run_paid_trial(scopes: TrialScopes, perform: Callable[[TrialStep], bool]) ->
         if failure is None:
             # A boot request can take effect even when the transport then fails.
             trial_boot_possible = True
-            failure = _first_failed(perform, (TrialStep.BOOT_AND_RUN_ONE_TURN,))
+            boot_step = (
+                TrialStep.BOOT_AND_RUN_REBOOT_TRIAL
+                if reboot_trial
+                else TrialStep.BOOT_AND_RUN_ONE_TURN
+            )
+            failure = _first_failed(perform, (boot_step,))
     finally:
         recovery_failure = _restore(
             perform, trial_boot_possible=trial_boot_possible, factory_boot_possible=False
