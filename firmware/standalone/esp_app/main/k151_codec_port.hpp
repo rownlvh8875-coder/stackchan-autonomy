@@ -73,6 +73,7 @@ class K151CodecPort final {
   bool cleanup_unverified() const { return cleanup_unverified_; }
 #ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
   bool start_aec_reference();
+  const char* aec_setup_stage() const { return aec_setup_stage_; }
 #endif
 
  private:
@@ -149,6 +150,9 @@ class K151CodecPort final {
   bool tx_tail_registered_ = false;
   OutputData output_data_ = OutputData::empty;
   K151MicWakeStage prepare_stage_ = K151MicWakeStage::admission;
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  const char* aec_setup_stage_ = "audio_admission";
+#endif
   K151SpeakerStartupDiagnostic speaker_startup_{K151SpeakerStartupStage::audio_guard};
   K151SpeakerCleanupStage speaker_cleanup_stage_ = K151SpeakerCleanupStage::none;
 #ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE

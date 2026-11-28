@@ -69,7 +69,14 @@ def embedded_trial_binary(tmp_path_factory):
 
 
 def _build_port(
-    compiler, binary, app, *, embedded_trial=False, speaker_probe=False, conversation=False
+    compiler,
+    binary,
+    app,
+    *,
+    embedded_trial=False,
+    speaker_probe=False,
+    aec_probe=False,
+    conversation=False,
 ):
     sources = [
         BASE / "tests/k151_codec_io_test.cpp",
@@ -90,7 +97,7 @@ def _build_port(
         "-DCONFIG_CODEC_AW88298_SUPPORT=1",
     ]
     command += ["-isystem", str(SDK)]  # Unmodified vendor C anonymous unions.
-    if speaker_probe:
+    if speaker_probe or aec_probe:
         command += [
             "-DSTACKCHAN_K151_SPEAKER_PROBE=1",
             "-DSTACKCHAN_K151_SPEAKER_STOP_PROBE=1",
@@ -102,6 +109,9 @@ def _build_port(
             app / "k151_speaker_stop_probe.cpp",
             app / "k151_install_hold.cpp",
         ]
+    if aec_probe:
+        command += ["-DSTACKCHAN_K151_AEC_REFERENCE_PROBE=1"]
+        sources += [app / "k151_aec_dma.cpp"]
     if conversation:
         command += ["-DSTACKCHAN_K151_CONVERSATION_IMAGE=1"]
     for directory in [
@@ -139,6 +149,40 @@ def speaker_probe_binary(tmp_path_factory):
         pytest.skip("C++20 compiler required")
     binary = tmp_path_factory.mktemp("speaker-probe") / "speaker"
     return _build_port(compiler, binary, BASE / "esp_app/main", speaker_probe=True)
+
+
+@pytest.fixture(scope="module")
+def aec_probe_binary(tmp_path_factory):
+    compiler = shutil.which("g++")
+    if not compiler:
+        pytest.skip("C++20 compiler required")
+    binary = tmp_path_factory.mktemp("aec-stop-probe") / "aec-stop-probe"
+    return _build_port(compiler, binary, BASE / "esp_app/main", aec_probe=True)
+
+
+@pytest.mark.parametrize(
+    ("case", "stage"),
+    [
+        ("panel", "panel_start"),
+        ("rx_configure", "i2s_rx_configure"),
+        ("pair", "i2s_duplex_pair"),
+        ("clock", "i2s_duplex_clock"),
+        ("rx_callback", "i2s_rx_callback"),
+        ("clock_start", "i2s_rx_clock_start"),
+        ("amplifier", "amplifier_standby_before_init"),
+    ],
+)
+def test_aec_prepare_failure_identifies_the_driver_boundary(aec_probe_binary, case, stage):
+    process = subprocess.run(
+        [str(aec_probe_binary), f"aec_prepare_{case}"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert process.returncode == 0, process.stderr
+    report = json.loads(process.stdout)
+    assert (report["result"], report["failure_stage"]) == ("preparation_failed", stage)
+    assert report["pcm_blocks"] == 0 and report["reference_timing"] is None
 
 
 @pytest.mark.parametrize(

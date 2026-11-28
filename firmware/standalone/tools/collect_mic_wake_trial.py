@@ -257,13 +257,55 @@ def _validate_stop_shutdown(record):
         raise ValueError("Reset timing requires a verified fallback and idle TX")
 
 
+AEC_PREPARATION_STAGES = {
+    "board_admission",
+    "board_bus",
+    "panel_start",
+    "panel_label",
+    "panel_present",
+    "stop_input",
+    "audio_admission",
+    "audio_i2c_bus",
+    "audio_board_power",
+    "amplifier_reset_assert",
+    "i2s_rx_allocate",
+    "i2s_rx_configure",
+    "i2s_tx_allocate",
+    "i2s_tx_configure",
+    "i2s_tx_callback",
+    "i2s_duplex_info",
+    "i2s_duplex_pair",
+    "i2s_duplex_clock",
+    "i2s_duplex_dma_layout",
+    "i2s_rx_callback",
+    "i2s_tx_data_attach",
+    "amplifier_reset_release",
+    "i2s_rx_clock_start",
+    "amplifier_standby_before_init",
+    "amplifier_muted_init",
+    "amplifier_standby_after_init",
+    "amplifier_device",
+    "es7210_control",
+    "es7210_create",
+    "audio_quiesce",
+}
+AEC_REFERENCE_STAGES = {
+    "es7210_admission",
+    "es7210_format",
+    "es7210_enable",
+    "es7210_format_readback",
+    "es7210_slot_readback",
+    "es7210_dma_start",
+}
+
+
 def validate_aec_report(record):
     result = record.get("result")
     blocks = record.get("pcm_blocks")
     standby = record.get("standby_confirmed")
     timing = record.get("reference_timing")
     if (
-        set(record)
+        set(record) - {"failure_stage"}
         != {
             "aec_stop_trial",
             "result",
@@ -297,6 +339,19 @@ def validate_aec_report(record):
         )
     ):
         raise ValueError("Invalid AEC reference diagnostic")
+    if "failure_stage" in record:
+        stage = record["failure_stage"]
+        if result == "preparation_failed":
+            stages = AEC_PREPARATION_STAGES
+        elif result == "reference_setup_failed":
+            stages = AEC_REFERENCE_STAGES
+        elif result == "cleanup_failed" and stage is not None:
+            stages = AEC_PREPARATION_STAGES | AEC_REFERENCE_STAGES
+        else:
+            stages = set()
+        if stages or stage is not None:
+            if not isinstance(stage, str) or stage not in stages or blocks or standby:
+                raise ValueError("Invalid AEC setup failure stage")
     if result != AEC_STOP_OK:
         if timing is not None or (result == "cleanup_failed" and standby):
             raise ValueError("Unexpected AEC timing or standby assertion")

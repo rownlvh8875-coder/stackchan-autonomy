@@ -38,6 +38,7 @@ def inspect_image(
             b'"K151_AEC_REFERENCE_STOP_V1"',
             b'"SPEAKER_STOP_PLAYING"',
             b'"reference_timing"',
+            b'"failure_stage"',
             b'"rx_eof_us"',
             b'"operating_admission":false',
         )
@@ -64,6 +65,7 @@ def inspect_image(
             "tone_peak_pcm16": 4096,
             "sample_rate_hz": 24_000,
             "adc_reference_slot": 1,
+            "preparation_failure_stage": True,
             "microphone_enabled": False,
             "raw_pcm_exported": False,
             "cloud_enabled": False,

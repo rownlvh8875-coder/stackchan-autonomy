@@ -36,7 +36,10 @@ struct i2c_master_dev_t { uint16_t address; bool open=false; };
 struct Dev { const audio_codec_data_if_t* data{}; esp_codec_dev_type_t type{}; bool open=false; };
 namespace {
 std::string mode;
-bool screen_stop_probe() { return mode.starts_with("speaker_probe_screen_stop_"); }
+bool aec_prepare_probe() { return mode.starts_with("aec_prepare_"); }
+bool screen_stop_probe() {
+  return aec_prepare_probe() || mode.starts_with("speaker_probe_screen_stop_");
+}
 int64_t sampled_display_stop = -1;
 #ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
 K151SpeakerStopCue stop_cue;
@@ -67,7 +70,7 @@ bool base_open=true;
 bool exercise_release_faults=false;
 bool mic_only() { return mode.starts_with("mic_only_"); }
 bool duplex_runtime() { return mode.starts_with("duplex_runtime_"); }
-bool speaker_probe() { return mode.starts_with("speaker_probe_"); }
+bool speaker_probe() { return aec_prepare_probe() || mode.starts_with("speaker_probe_"); }
 bool conversation_audio() { return mode.starts_with("conversation_audio_"); }
 bool exercise_playback() { return speaker_probe() || conversation_audio(); }
 int64_t speaker_clock_us=1000;
@@ -531,7 +534,7 @@ extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev,const uint8
   if (mic_only() || reset_writes==0) {
     assert(channels_created==0 && data[1]==0xa3 && reset_writes==0);
   } else if (data[1]==0xa7) {
-    assert(reset_waits==1 && reset_writes==1 && channels_created==1);
+    assert(reset_waits==1 && reset_writes==1 && channels_created==(aec_prepare_probe() ? 2 : 1));
     amp_registers[0x04] = {0x40, 0x03};
     amp_registers[0x05] = {0x00, static_cast<uint8_t>(
         mode == "duplex_board_unmuted" ? 0x00 : 0x10)};
@@ -545,6 +548,18 @@ extern "C" esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev,const uint8
   return ESP_OK;
 }
 extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_t* t,i2s_chan_handle_t* r){
+  if (aec_prepare_probe()) {
+    assert(c->dma_desc_num==6 && c->dma_frame_num==240 && c->auto_clear_after_cb);
+    assert(reset_read_back && output_latch==0xa3 && !pmic.open && expander.open);
+    if (channels_created++==0) {
+      assert(!t && r);
+      *r=&rx;
+    } else {
+      assert(t && !r && tdm_inits==1);
+      *t=&tx;
+    }
+    return ESP_OK;
+  }
   assert(c->dma_frame_num==240 && (r==nullptr)==speaker_probe());
   assert((t==nullptr)==mic_only());
   assert(c->dma_desc_num == 6 && c->auto_clear_after_cb == (t != nullptr));
@@ -559,9 +574,20 @@ extern "C" esp_err_t i2s_new_channel(const i2s_chan_config_t* c,i2s_chan_handle_
   if(r)*r=&rx;
   return 0;
 }
-extern "C" esp_err_t i2s_channel_init_std_mode(i2s_chan_handle_t,const i2s_std_config_t*){assert(!mic_only());return 0;}
+extern "C" esp_err_t i2s_channel_init_std_mode(i2s_chan_handle_t h,const i2s_std_config_t* c){
+  assert(!mic_only());
+  if (aec_prepare_probe()) {
+    assert(h==&tx && c->clk_cfg.sample_rate_hz==24000 && c->clk_cfg.mclk_multiple==512);
+    assert(c->slot_cfg.slot_mode==I2S_SLOT_MODE_MONO && c->slot_cfg.slot_bit_width==32);
+  }
+  return ESP_OK;
+}
 extern "C" esp_err_t i2s_channel_register_event_callback(i2s_chan_handle_t h,
     const i2s_event_callbacks_t* callbacks, void* data) {
+  if (aec_prepare_probe() && h==&rx) {
+    assert(callbacks->on_recv && !callbacks->on_sent && !data);
+    return mode=="aec_prepare_rx_callback" ? ESP_FAIL : ESP_OK;
+  }
   assert(!mic_only() && h == &tx && h->alive && !h->enabled);
   assert(callbacks && callbacks->on_sent && data);
   if (exercise_playback()) {
@@ -614,7 +640,7 @@ void vTaskDelay(unsigned ticks) {
   ++reset_waits;
 }
 extern "C" esp_err_t i2s_channel_init_tdm_mode(i2s_chan_handle_t h,const i2s_tdm_config_t* c){
-  assert(!speaker_probe());
+  assert(!speaker_probe() || aec_prepare_probe());
   ++tdm_inits;
   assert(h==&rx && c->clk_cfg.sample_rate_hz==24000 && c->gpio_cfg.dout==I2S_GPIO_UNUSED);
   if(mic_only()) {
@@ -622,9 +648,17 @@ extern "C" esp_err_t i2s_channel_init_tdm_mode(i2s_chan_handle_t h,const i2s_tdm
     assert(c->slot_cfg.ws_width==16 && c->slot_cfg.slot_bit_width==16);
     assert(c->gpio_cfg.mclk==0 && c->gpio_cfg.din==14);
   } else assert(c->slot_cfg.slot_mask==15);
+  if (aec_prepare_probe()) {
+    assert(c->clk_cfg.mclk_multiple==512 && c->slot_cfg.total_slot==4);
+    if (mode=="aec_prepare_rx_configure") return ESP_FAIL;
+  }
   return 0;
 }
 extern "C" esp_err_t i2s_channel_enable(i2s_chan_handle_t h){
+  if (mode=="aec_prepare_clock_start" && h==&rx) {
+    assert(reset_waits==2 && (output_latch & 0x04));
+    return ESP_FAIL;
+  }
   assert(!mic_only() || h==&rx);
   if (h == &tx && channels_created) {
     assert(reset_waits == 2 && (output_latch & 0x04) && !local_stop);
@@ -674,6 +708,12 @@ extern "C" esp_err_t i2s_channel_get_info(i2s_chan_handle_t h,i2s_chan_info_t* i
   info->pair_chan=mode=="mic_only_peer"?&tx:invalid_speaker_pair?&rx:nullptr;
   if (conversation_audio()) info->pair_chan=h==&tx ? &rx : &tx;
   if (exercise_playback()) info->total_dma_buf_size=6*480;
+  if (aec_prepare_probe()) {
+    info->pair_chan=mode=="aec_prepare_pair" ? nullptr : h==&tx ? &rx : &tx;
+    info->role=h==&tx ? I2S_ROLE_SLAVE : I2S_ROLE_MASTER;
+    info->bclk_hz=mode=="aec_prepare_clock" && h==&tx ? 768000 : 1536000;
+    info->total_dma_buf_size=6*480*(h==&rx ? 4 : 1);
+  }
   return 0;
 }
 extern "C" esp_err_t i2s_channel_read(i2s_chan_handle_t h,void* p,size_t n,size_t* bytes,uint32_t ms) {
@@ -807,6 +847,10 @@ extern "C" const audio_codec_ctrl_if_t* audio_codec_new_i2c_ctrl(audio_codec_i2c
   const bool out=cfg->addr==AW88298_CODEC_DEFAULT_ADDR;
   assert(out || cfg->addr==ES7210_CODEC_DEFAULT_ADDR);
   assert(!out || !mic_only());
+  if (mode=="aec_prepare_amplifier") {
+    assert(out && reset_waits==2 && output_latch==0xa7 && rx.enabled && !tx.enabled);
+    return nullptr;
+  }
   if (out) assert(reset_waits == 2 && output_latch == 0xa7 && tx.enabled && !rx.enabled);
   auto* c=&controls[out?0:1];
   assert(!c->is_open);
@@ -889,7 +933,7 @@ K151LcdPanel::~K151LcdPanel() = default;
 bool K151LcdPanel::start(i2c_master_bus_handle_t board_bus, bool requested) {
   assert(!display_ && board_bus == &bus && bus.alive && requested && !tx.enabled);
   assert(!K151InstallHold::device_activation_allowed());
-  if (!K151InstallHold::display_activation_allowed()) return false;
+  if (!K151InstallHold::display_activation_allowed() || mode=="aec_prepare_panel") return false;
   display_ = &::display;
   return true;
 }
@@ -925,6 +969,11 @@ bool k151_conversation_boot_armed() {
 int main(int argc,char** argv) {
   assert(argc==2 || (argc==3 && std::string_view(argv[2])=="--report"));mode=argv[1];
 #ifdef STACKCHAN_K151_SPEAKER_STOP_PROBE
+  if (aec_prepare_probe()) {
+    report_k151_speaker_stop_probe(local_owner, {true, true}, stop_cue);
+    assert(playback_writes==0 && !tx.enabled && !rx.enabled && !bus.alive);
+    return 0;
+  }
   if (screen_stop_probe()) {
     report_k151_speaker_stop_probe(local_owner, {true, true}, stop_cue);
     if (mode=="speaker_probe_screen_stop_early") assert(playback_writes==0);

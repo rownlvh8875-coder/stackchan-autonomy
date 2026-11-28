@@ -1027,6 +1027,61 @@ AUTO_STOP_REPORT = {
 }
 
 
+@pytest.mark.parametrize(
+    ("result", "stage", "armed"),
+    [
+        ("preparation_failed", "panel_start", False),
+        ("preparation_failed", "i2s_duplex_clock", False),
+        ("preparation_failed", "es7210_create", False),
+        ("reference_setup_failed", "es7210_slot_readback", True),
+        ("cleanup_failed", "i2s_rx_callback", False),
+    ],
+)
+def test_aec_preparation_failure_reports_the_stage_without_a_playback_cue(
+    receiver, result, stage, armed
+):
+    protocol = receiver.AEC_STOP_PROTOCOL
+    challenge = AUTO_STOP_WAIT | {"mic_trial": receiver.SPEAKER_CHALLENGES[protocol]}
+    report = {
+        "aec_stop_trial": protocol,
+        "result": result,
+        "sample_rate_hz": 24_000,
+        "pcm_blocks": 0,
+        "standby_confirmed": False,
+        "operating_admission": False,
+        "reference_timing": None,
+        "failure_stage": stage,
+    }
+    records = [challenge, *([AUTO_STOP_ARMED] if armed else []), report, HOLD]
+    assert (
+        receiver.receive_once(
+            FakeSerial(records), lambda: None, speaker=True, speaker_protocol=protocol
+        )
+        == report
+    )
+    for corrupt in ({"failure_stage": "untrusted_register_dump"}, {"pcm_blocks": 1}):
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | corrupt, speaker=True, speaker_protocol=protocol
+            )
+    if result == "preparation_failed":
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | {"failure_stage": None}, speaker=True, speaker_protocol=protocol
+            )
+        with pytest.raises(ValueError):
+            receiver.validate_output_report(
+                report | {"failure_stage": "es7210_slot_readback"},
+                speaker=True,
+                speaker_protocol=protocol,
+            )
+    # Old reports remain readable with the same wire protocol.
+    del report["failure_stage"]
+    assert (
+        receiver.validate_output_report(report, speaker=True, speaker_protocol=protocol) == report
+    )
+
+
 def test_aec_cutoff_requires_a_live_cue_and_a_consistent_reference_interval(receiver):
     protocol = receiver.AEC_STOP_PROTOCOL
     challenge = AUTO_STOP_WAIT | {"mic_trial": receiver.SPEAKER_CHALLENGES[protocol]}
@@ -1037,6 +1092,7 @@ def test_aec_cutoff_requires_a_live_cue_and_a_consistent_reference_interval(rece
         "pcm_blocks": 25,
         "standby_confirmed": True,
         "operating_admission": False,
+        "failure_stage": None,
         "reference_timing": {
             "gpio_sample_us": 25_000,
             "rx_eof_us": [20_000, 30_000],

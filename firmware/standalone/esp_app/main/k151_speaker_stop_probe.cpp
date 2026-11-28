@@ -84,8 +84,17 @@ struct Report {
   StopDiagnostic stop{};
 #ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
   std::optional<AecStopResult> aec{};
+  const char* failure_stage = nullptr;
 #endif
 };
+
+Report preparation_failure([[maybe_unused]] const char* stage) {
+  Report report{"preparation_failed"};
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  report.failure_stage = stage;
+#endif
+  return report;
+}
 }
 
 class K151SpeakerStopProbe final {
@@ -114,20 +123,21 @@ class K151SpeakerStopProbe final {
  private:
   Report exercise(const std::atomic_bool& owner, K151AudioBoardEvidence evidence,
                   K151SpeakerStopCue& cue) {
-    if (!owner.load() || !evidence.verified() || lv_is_initialized() ||
-        !k151::open_board_bus(bus_)) return {"preparation_failed"};
+    if (!owner.load() || !evidence.verified() || lv_is_initialized())
+      return preparation_failure("board_admission");
+    if (!k151::open_board_bus(bus_)) return preparation_failure("board_bus");
     lv_init();
     lvgl_owned_ = true;
-    if (!panel_.start(bus_, true) || !owner.load()) return {"preparation_failed"};
+    if (!panel_.start(bus_, true) || !owner.load()) return preparation_failure("panel_start");
     auto* label = lv_label_create(lv_display_get_screen_active(panel_.display()));
-    if (!label) return {"preparation_failed"};
+    if (!label) return preparation_failure("panel_label");
     lv_label_set_text(label, "Wait for PC, then tap screen");
     lv_obj_center(label);
-    if (!panel_.present_now() || !owner.load()) return {"preparation_failed"};
+    if (!panel_.present_now() || !owner.load()) return preparation_failure("panel_present");
 
     const auto armed = K151DisplayStop::arm(bus_, panel_);
     stop_owned_ = armed != K151DisplayStop::ArmResult::unavailable;
-    if (armed != K151DisplayStop::ArmResult::armed) return {"preparation_failed"};
+    if (armed != K151DisplayStop::ArmResult::armed) return preparation_failure("stop_input");
     const auto settled_from = esp_timer_get_time();
     for (;;) {
       const auto now = esp_timer_get_time();
@@ -139,8 +149,13 @@ class K151SpeakerStopProbe final {
     }
 
     AudioGuard audio{k151_audio_hooks(codec_, owner, stop_, owner, evidence, bus_)};
-    if (!audio.initialize(owner.load() && !stop_.load(), evidence.verified()))
-      return {"preparation_failed"};
+    if (!audio.initialize(owner.load() && !stop_.load(), evidence.verified())) {
+#ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+      return preparation_failure(codec_.aec_setup_stage());
+#else
+      return preparation_failure("audio_admission");
+#endif
+    }
     std::puts("{\"mic_trial\":\"SPEAKER_STOP_ARMED\",\"operating_admission\":false}");
     (void)std::fflush(stdout);
     if (!owner.load()) return {"host_stopped"};
@@ -156,7 +171,8 @@ class K151SpeakerStopProbe final {
 #ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
   Report play_aec(AudioGuard& audio, const std::atomic_bool& owner, K151SpeakerStopCue& cue) {
     AecObservation observation;
-    if (!codec_.start_aec_reference()) return {"reference_setup_failed"};
+    if (!codec_.start_aec_reference())
+      return {.result = "reference_setup_failed", .failure_stage = codec_.aec_setup_stage()};
     const auto start = esp_timer_get_time();
     int64_t previous = start;
     const auto elapsed_ok = [&](int64_t from, int64_t limit) {
@@ -319,6 +335,9 @@ void report_k151_speaker_stop_probe(const std::atomic_bool& owner, K151AudioBoar
   static K151SpeakerStopProbe probe;
   const auto report = probe.run(owner, evidence, cue);
 #ifdef STACKCHAN_K151_AEC_REFERENCE_PROBE
+  char failure[48] = "null";
+  if (report.failure_stage)
+    std::snprintf(failure, sizeof(failure), "\"%s\"", report.failure_stage);
   char timing[224] = "null";
   if (const auto& aec = report.aec) {
     std::snprintf(timing, sizeof(timing),
@@ -332,8 +351,9 @@ void report_k151_speaker_stop_probe(const std::atomic_bool& owner, K151AudioBoar
   }
   std::printf("{\"aec_stop_trial\":\"K151_AEC_REFERENCE_STOP_V1\",\"result\":\"%s\","
               "\"sample_rate_hz\":24000,\"pcm_blocks\":%u,\"standby_confirmed\":%s,"
-              "\"operating_admission\":false,\"reference_timing\":%s}\n",
-              report.result, report.pcm_blocks, report.standby_confirmed ? "true" : "false", timing);
+              "\"operating_admission\":false,\"failure_stage\":%s,\"reference_timing\":%s}\n",
+              report.result, report.pcm_blocks, report.standby_confirmed ? "true" : "false",
+              failure, timing);
 #else
   char delta[12] = "null";
   char reset_delta[12] = "null";
