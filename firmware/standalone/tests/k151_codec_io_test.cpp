@@ -74,6 +74,8 @@ int64_t speaker_clock_us=1000;
 int switching_samples_before_tx_stop=0;
 bool tx_disable_reported_early=false;
 bool speaker_unmuted=false;
+bool second_reply=false;
+int speaker_unmutes=0;
 int speaker_peak=0, speaker_eof=0, playback_writes=0, duplex_reads=0;
 i2s_isr_callback_t speaker_callback=nullptr;
 void* speaker_callback_data=nullptr;
@@ -250,6 +252,17 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
         if (speaker_clock_us==1000) speaker_clock_us=1570;
         if (speaker_clock_us<2709 || mode=="conversation_audio_persistent_uvls") bytes[0] |= 0x40;
       }
+      if (second_reply && power == 0x42 && tx.enabled) {
+        if (mode == "conversation_audio_second_uvls") {
+          assert(speaker_unmutes == 1 && (amp_registers[0x05][1] & 0x10));
+          bytes[0] |= 0x40;
+        }
+        if (speaker_unmutes == 2) {
+          assert((amp_registers[0x05][1] & 0x10) && !rx.enabled);
+          ++switching_samples_before_tx_stop;
+          if (mode == "conversation_audio_second_sticky_switch") bytes[0] |= 1;
+        }
+      }
       if (power == 0x03 &&
           ((phase.empty() && mode=="speaker_probe_uvls_before_codec_init") ||
            (phase=="init" && mode=="speaker_probe_uvls_after_codec_init")))
@@ -276,6 +289,7 @@ int ctrl_io(const audio_codec_ctrl_if_t* h,int reg,int reg_len,void* data,int n,
         assert(exercise_playback() && tx.enabled && !rx.enabled && !local_stop);
         assert((amp_registers[0x04][1] & 0x43) == 0x40 && amp_registers[0x0c][0] == 0x60);
         speaker_unmuted = true;
+        ++speaker_unmutes;
       }
       if (reg == 0x0c) assert(bytes[0] == 0x60);
       stored = {bytes[0], bytes[1]};
@@ -576,11 +590,12 @@ void vTaskDelay(unsigned ticks) {
   }
   if (exercise_playback() && reset_waits==2) {
     assert(ticks==1 && tx.enabled && !rx.enabled);
-    if (speaker_unmuted && (amp_registers[0x04][1] & 0x43) == 0x42) {
+    if (speaker_unmuted && (amp_registers[0x04][1] & 0x43) == 0x42 &&
+        (!second_reply || speaker_unmutes == 2)) {
       speaker_clock_us+=10'000;  // Speaker probe uses 100 Hz FreeRTOS ticks.
       return;
     }
-    const auto full_clip_writes=screen_stop_probe() ? 250 : 25;
+    const auto full_clip_writes=screen_stop_probe() ? 250 : second_reply ? 50 : 25;
     speaker_clock_us += playback_writes==full_clip_writes ? 10'000 : 1000;
     if (mode=="speaker_probe_stop_during_settling") local_stop=true;
     if (playback_writes==full_clip_writes && mode!="speaker_probe_dma_failure") {
@@ -1402,7 +1417,8 @@ int main(int argc,char** argv) {
       return 0;
     }
 
-    const bool should_play = mode == "conversation_audio_transient_uvls";
+    const bool two_turns = mode.starts_with("conversation_audio_second_");
+    const bool should_play = mode == "conversation_audio_transient_uvls" || two_turns;
     assert(audio.playback_begin() == should_play);
     const auto startup = port.speaker_startup();
     if (!should_play) {
@@ -1421,8 +1437,9 @@ int main(int argc,char** argv) {
       return 0;
     }
 
-    assert(startup.stage == Stage::none && startup.settling_uvls_us == 570);
-    assert(startup.clock_ready_after_uvls_us >= 2000 && !rx.enabled && tx.enabled);
+    assert(startup.stage == Stage::none && !rx.enabled && tx.enabled);
+    if (!two_turns)
+      assert(startup.settling_uvls_us == 570 && startup.clock_ready_after_uvls_us >= 2000);
     assert(sink.play_pcm24k(reply, static_cast<uint64_t>(speaker_clock_us / 1000)).complete);
     assert(playback_writes == 25 && speaker_peak == 2048 && speaker_eof == 7);
     assert(audio.playback_end() && audio.state() == AudioState::idle);
@@ -1434,6 +1451,35 @@ int main(int argc,char** argv) {
     for (const auto sample : pcm) assert(sample == 284);
     assert(duplex_reads == 4 && channels_created == 1 && bus_created == 1);
     assert(audio.capture_end() && !rx.enabled && !tx.enabled);
+    if (two_turns) {
+      const auto resets_before_second = reset_writes;
+      second_reply = true;
+      const bool undervoltage = mode == "conversation_audio_second_uvls";
+      assert(audio.playback_begin() == !undervoltage);
+      if (undervoltage) {
+        assert(port.speaker_startup().stage == Stage::wait_clock);
+        assert(port.speaker_startup().clock_wait_exit == K151ClockWaitExit::protection_active);
+        assert(speaker_unmutes == 1 && playback_writes == 25 && speaker_eof == 7);
+      } else {
+        assert(reset_writes == resets_before_second && speaker_unmutes == 2);
+        assert(sink.play_pcm24k(reply, static_cast<uint64_t>(speaker_clock_us / 1000)).complete);
+        assert(playback_writes == 50 && speaker_eof == 14);
+        const bool standby = mode == "conversation_audio_second_clean";
+        assert(audio.playback_end() == standby && switching_samples_before_tx_stop >= 1);
+        if (standby) {
+          assert(audio.state() == AudioState::idle && !rx.enabled && !tx.enabled);
+          assert((amp_registers[0x04][1] & 0x43) == 0x03 &&
+                 (amp_registers[0x05][1] & 0x10));
+          assert(reset_writes == resets_before_second && port.shutdown());
+          assert(!rx.alive && !tx.alive && !bus.alive);
+          return 0;
+        }
+        assert(switching_samples_before_tx_stop == 8 && reset_writes > resets_before_second);
+      }
+      assert(audio.state() == AudioState::fault && !audio.capture_begin() && !audio.playback_begin());
+      assert(!port.shutdown() && !rx.enabled && !tx.enabled && (output_latch & 0x04) == 0);
+      return 0;
+    }
     assert(port.shutdown() && !rx.alive && !tx.alive && !bus.alive);
     return 0;
   }

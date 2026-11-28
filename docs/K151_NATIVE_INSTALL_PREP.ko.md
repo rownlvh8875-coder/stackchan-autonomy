@@ -297,6 +297,40 @@ A/B 사본을 RAM에서 사용했다. 기존 한 턴용 OTA1·NVS 복구만 하�
 [앞면 STOP 기록](validation/2026-11-23-k151-panel-live.md) ·
 [계측 로그 검증기](../firmware/standalone/docs/2026-11-19-bench-trace-audit.md)
 
+### 회로도와 실물 기록을 대조해 보완한 근거
+
+| 조건 | 기록으로 확인한 범위 | 아직 필요한 관측 |
+| --- | --- | --- |
+| 전원 | AXP2101 VSYS의 대기 표본은 4.443V다. V5와 리셋 순서 수정 시험의 AW88298는 각각 저전압 상태를 읽은 **572µs·568µs 뒤** VDD 4.370V·4.382V를 보고했다. 두 시험 모두 PCM 전송 전에 정지했다. | 저전압 표시와 VDD 표본 사이의 전압 및 재생·정지 중 각 전원 레일. 두 내부 ADC 표본을 같은 시각의 전압으로 합칠 수 없다. |
+| 리셋 | 제조사의 호스트 회로도에서 AW9523의 `P0_2`가 AW88298의 활성 로우 `RSTN`에 연결된다. 보드 조회의 포트 0 래치 `0x07`과 방향 `0x18`을 대조하면, 조회 순간 그 비트는 출력 방향에 높은 값으로 설정돼 있었다. | 로봇 기판 핀의 실제 전압 및 전원과 리셋의 시간 관계. 레지스터는 한 시점의 설정을 알려 준다. |
+| 음소거 | V13은 정상 종료 시 앰프 스위칭 종료와 대기 상태를 기록했다. V3은 앞면 STOP, 앰프 대기, I²S 송신 유휴와 사용자가 들은 소리 중단을 같은 시험에서 확인했다. | 스피커 양단 신호가 실제로 사라진 시점. V3의 15.830ms는 GPIO 표본부터 앰프 대기를 읽어 확인하기까지의 시간이다. |
+
+[M5Stack 호스트 오디오 회로](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf#page=4) ·
+[M5Stack GPIO 확장기 회로](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf#page=5) ·
+[AW88298의 UVLS 및 SWS 상태 비트](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/datasheet/core/k127%20CM4STACK/AW88298.pdf#page=31) ·
+[보드 조회 원본 대조](validation/2026-11-21-k151-board-readback-live.md) ·
+[정상 종료와 수동 STOP 기록](validation/2026-11-24-k151-speaker-live.md)
+
+호스트 회로도에는 스피커의 차동 출력에서 ES7210 `MIC3P/MIC3N`으로
+들어가는 `AEC_P/AEC_N` 경로가 있다. 제조사의 ESPHome 설정은
+48kHz 4슬롯 TDM에서 이 입력을 슬롯 1로 사용한다. 이 연결이 해당
+기기의 24kHz 경로에서도 확인되면 별도 마이크 없이 재생 신호의 상대
+크기와 중단 시점을 관찰할 후보다. 현재 대화 경로는 재생 중에 마이크
+입력을 열지 않고 캡처 시 마이크 0만 남긴다. 기존 보고서에는 AEC
+표본이 없다. 별도 진단에서 마이크 채널을 제외하고 기준 신호와 STOP을
+같은 시간축에 기록하며 필터 지연을 확인해야 한다. 이 경로로 전원·리셋
+파형을 확인할 수는 없다.
+[M5Stack 오디오 회로의 AEC 입력](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf#page=4)
+· [M5Stack ESPHome의 TDM 기준 채널 설정](https://github.com/m5stack/esphome-yaml/blob/ef4542ab698daf3ceca1784afd5947a344733162/common/stackchan-voice-assistant-base.yaml#L930)
+
+현재 코덱 코드에 같은 보드 제어와 오디오 채널을 재사용하는 두 턴 회귀를
+추가했다. 정상 두 번째 재생에서도 새 DMA 완료와 앰프 대기를 확인했다.
+두 번째 시작에 저전압 상태를 넣으면 음소거를 해제하기 전에 정지했고,
+두 번째 종료 중 스위칭이 계속되면 리셋을 요청하고 추가 캡처·재생을
+거부했다. 코덱·정책·보고 검증 503개를 통과했다. 공급 전압과 핀 전압,
+실제 스피커 신호는 이 호스트 시험의 관찰 범위 밖이다. 통합 설치는
+HOLD이며 이 작업에서 로봇 접속·쓰기·녹음·유료 호출은 없었다.
+
 ## 2026-11-28 재부팅·연속 대화·STOP 통합 시험 준비
 
 ### 계측기 없이 확인할 수 있는 기능과 기존 기록
