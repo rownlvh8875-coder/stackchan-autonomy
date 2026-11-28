@@ -9,12 +9,15 @@ import time
 from pathlib import Path
 
 import pytest
+from test_collect_mic_wake_trial import AUTO_STOP_REPORT
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 OPERATOR = TOOLS / "panel_probe_operator.py"
 PWSH = shutil.which("pwsh")
 pytestmark = pytest.mark.skipif(not PWSH, reason="PowerShell unavailable")
 ENV = {**os.environ, "PYTHONUTF8": "1"}
+SPEAKER_CUES = ["SPEAKER_STOP_PREPARE", "SPEAKER_STOP_PLAYING", "SPEAKER_STOP_WINDOW_CLOSED"]
+HEARD_STOP = "heard_stop"
 
 
 def command(directory, mode):
@@ -150,3 +153,133 @@ def test_without_review_approval_worker_never_invokes_scripts(reviewed):
     assert failure.returncode == 2
     assert not (reviewed / "prewrite-ok.json").exists()
     assert not (reviewed / "panel-operator-events.log").exists()
+
+
+def test_manual_speaker_view_prompts_once_then_closes_and_recovers(reviewed):
+    (reviewed / "run-once-and-restore.ps1").write_text(
+        """
+$review=$PSScriptRoot
+Set-Content -LiteralPath (Join-Path $review 'install-started.json') '{}'
+Write-Output 'SPEAKER_STOP_PREPARE'
+Write-Output 'SPEAKER_STOP_PLAYING'
+Write-Output 'SPEAKER_STOP_PLAYING'
+$deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+while (-not (Test-Path -LiteralPath (Join-Path $review 'viewer-closed'))) {
+  if ([DateTimeOffset]::UtcNow -ge $deadline) { exit 11 }
+  Start-Sleep -Milliseconds 50
+}
+Write-Output 'SPEAKER_STOP_WINDOW_CLOSED'
+Write-Output 'SPEAKER_STOP_PLAYING'
+Write-Output 'flash-id-before-restore exit=0'
+Write-Output 'SPEAKER_STOP_PLAYING'
+exit 9
+""",
+        encoding="utf-8",
+    )
+    transcript = reviewed / "mock-viewer-output.txt"
+    with (
+        transcript.open("wb") as view_out,
+        subprocess.Popen(command(reviewed, "--view"), env=ENV, stdout=view_out) as viewer,
+        subprocess.Popen(command(reviewed, "--run"), env=ENV, stdout=subprocess.PIPE) as worker,
+    ):
+        try:
+            cue = "삐 소리가 들리는 동안 로봇 앞면 화면을 한 번만 가볍게 터치하세요.".encode()
+            wait_for(lambda: cue in transcript.read_bytes())
+        finally:
+            (reviewed / "viewer-closed").touch()
+            worker.communicate(timeout=18)
+            viewer.communicate(timeout=8)
+    assert transcript.read_bytes().count(cue) == 1
+    events = (reviewed / "panel-operator-events.log").read_text(encoding="ascii").splitlines()
+    assert events.count("SPEAKER_STOP_PLAYING") == 1
+    assert events[2:5] == SPEAKER_CUES
+    assert (reviewed / "factory-boot-requested.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("observation", "case", "passed"),
+    [
+        (HEARD_STOP, "manual", True),
+        ("no_tone", "manual", False),
+        ("continued", "manual", False),
+        ("unclear", "manual", False),
+        (HEARD_STOP, "host_stopped", False),
+        (HEARD_STOP, "full_queue", False),
+        (HEARD_STOP, "no_cue", False),
+        (HEARD_STOP, "late_cue", False),
+        (HEARD_STOP, "collector_failed", False),
+        (HEARD_STOP, "fallback", False),
+        (HEARD_STOP, "auto_review", None),
+        (HEARD_STOP, "restore_failed", None),
+    ],
+)
+def test_listening_result_requires_one_bound_manual_trial_and_restoration(
+    reviewed, observation, case, passed
+):
+    digest = "a" * 64
+    scope = "ONE_SYNTHETIC_SPEAKER_SCREEN_STOP_AND_OTA1_RESTORE"
+    mode = "SYNTHETIC_SPEAKER_SCREEN_STOP"
+    binding = {"image_sha256": digest, "review_id": reviewed.name}
+    records = {
+        "review-manifest": binding
+        | {
+            "port": "COM7",
+            "operator_mode": mode,
+            "kind": "REVIEW_ONLY_SPEAKER_STOP_V3",
+            "expected_protocol": "K151_SPEAKER_STOP_V3",
+            "scope": scope,
+        },
+        "approval": binding | {"approved": True, "scope": scope, "operator_mode": mode},
+        "install-verified": binding
+        | {"independent_verify_passed": True, "offset": 0x510000, "port": "COM7"},
+        "mic-receive-intent": {"image_sha256": digest},
+        "operator-result": {
+            "preflight_exit": 0,
+            "trial_runner_exit": 0,
+            "fallback_recovery_exit": None,
+            "factory_restore_verified": True,
+        },
+        "speaker-result": AUTO_STOP_REPORT
+        | {
+            "result": "screen_stop_and_standby_observed",
+            "sample_to_standby_us": 5_000,
+            "stop_diagnostic": AUTO_STOP_REPORT["stop_diagnostic"] | {"screen_stop_sampled": True},
+        },
+        "restore-verified": {"independent_verify_passed": True, "metadata_matches": True},
+        "factory-boot-requested": {"restored_boot_requested": True, "scope_consumed": True},
+    }
+    if case == "auto_review":
+        records["approval"]["operator_mode"] = "SYNTHETIC_SPEAKER_AUTOMATIC_STOP"
+    elif case == "host_stopped":
+        records["speaker-result"] = AUTO_STOP_REPORT
+    elif case == "full_queue":
+        records["speaker-result"]["pcm_blocks"] = 250
+    elif case == "collector_failed":
+        records["operator-result"]["trial_runner_exit"] = 1
+    elif case == "fallback":
+        records["operator-result"]["fallback_recovery_exit"] = 0
+    elif case == "restore_failed":
+        records["restore-verified"]["independent_verify_passed"] = False
+    for file, data in records.items():
+        (reviewed / f"{file}.json").write_text(json.dumps(data), encoding="utf-8")
+    events = ["preflight", "installing", *SPEAKER_CUES, "restoring", "finished"]
+    if case == "no_cue":
+        events.remove("SPEAKER_STOP_PLAYING")
+    elif case == "late_cue":
+        events.remove("restoring")
+        events.insert(3, "restoring")
+    (reviewed / "panel-operator-events.log").write_text("\n".join(events) + "\n", encoding="ascii")
+    args = command(reviewed, f"--record-listening={observation}")
+    trial = subprocess.run(args, env=ENV, timeout=10, check=False, capture_output=True)
+    evidence = reviewed / "speaker-screen-audible-result.json"
+    if passed is None:
+        assert trial.returncode == 2
+        assert not evidence.exists()
+        return
+    assert trial.returncode == (0 if passed else 1)
+    result = json.loads(evidence.read_bytes())
+    assert result["functional_stop_confirmed"] is passed
+    assert result["listening_observation"] == observation
+    assert result["electrical_stop_mute_verified"] is False
+    repeated = subprocess.run(args, env=ENV, timeout=10, check=False, capture_output=True)
+    assert repeated.returncode == 2

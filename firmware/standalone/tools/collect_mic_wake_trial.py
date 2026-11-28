@@ -42,6 +42,8 @@ SPEAKER_AUTO_STOP_MODE = "SYNTHETIC_SPEAKER_AUTOMATIC_STOP"
 SPEAKER_AUTO_STOP_KIND = "REVIEW_ONLY_SPEAKER_AUTO_STOP_V3"
 SPEAKER_STOP_CUE = "SPEAKER_STOP_ARMED"
 SPEAKER_STOP_PROGRESS_CUE = "SPEAKER_STOP_PLAYING"
+SPEAKER_STOP_PREPARE = "SPEAKER_STOP_PREPARE"
+SPEAKER_STOP_WINDOW_CLOSED = "SPEAKER_STOP_WINDOW_CLOSED"
 SPEAKER_STOP_OK = "screen_stop_and_standby_observed"
 SPEAKER_STOP_BLOCKS = 250
 SPEAKER_CHALLENGES = {
@@ -546,6 +548,7 @@ def receive_once(
     announce,
     *,
     announce_question=None,
+    announce_speaker_end=None,
     wake_only_control=False,
     question_only=False,
     silent_tx=False,
@@ -584,8 +587,17 @@ def receive_once(
     started = listening = complete = False
     report = question_report = None
     question_cued = speaker_stop_armed = speaker_stop_cued = False
+    speaker_window_open = False
     auto_stop_attempted = auto_stop_sent = False
     pending = bytearray()
+
+    def close_speaker_window():
+        nonlocal speaker_window_open
+        if speaker_window_open:
+            speaker_window_open = False
+            if announce_speaker_end is not None:
+                announce_speaker_end()
+
     try:
         while clock() < deadline:
             if not started and clock() >= next_hello:
@@ -687,6 +699,7 @@ def receive_once(
                             raise ValueError("Incomplete automatic STOP")
                         auto_stop_sent = True
                     else:
+                        speaker_window_open = True
                         announce()
             elif marker in ("QUESTION_NOW", "QUIET_OBSERVATION_NOW", "QUESTION_ONLY_NOW"):
                 if (
@@ -706,6 +719,7 @@ def receive_once(
             elif "tx_dma_probe" in record or "speaker_probe" in record:
                 if not output_only or not started or report is not None:
                     raise ValueError("Unexpected or repeated output result")
+                close_speaker_window()
                 report = validate_output_report(
                     record, speaker=speaker, speaker_protocol=speaker_protocol
                 )
@@ -748,11 +762,14 @@ def receive_once(
                 return {"wake": report, "question": question_report} if question_mode else report
         raise TimeoutError("Trial deadline elapsed")
     finally:
-        if started and not complete and not auto_stop_attempted:
-            try:
-                port.write(b"STOP\n")
-            except OSError:
-                pass
+        try:
+            close_speaker_window()
+        finally:
+            if started and not complete and not auto_stop_attempted:
+                try:
+                    port.write(b"STOP\n")
+                except OSError:
+                    pass
 
 
 def verified_port(
@@ -905,7 +922,10 @@ def main():
                 print("지금 짧은 질문을 한 번 말하고 잠시 기다려 주세요.", flush=True)
 
         if args.speaker:
-            print("SPEAKER_PREPARE", flush=True)
+            manual_playback = (
+                args.speaker_protocol in SPEAKER_STOP_PROGRESS_PROTOCOLS and not args.auto_stop
+            )
+            print(SPEAKER_STOP_PREPARE if manual_playback else "SPEAKER_PREPARE", flush=True)
         port = open_port(serial, port_name)
         try:
             cue = {
@@ -928,6 +948,7 @@ def main():
                 speaker=args.speaker,
                 speaker_protocol=args.speaker_protocol,
                 auto_stop=args.auto_stop,
+                announce_speaker_end=lambda: print(SPEAKER_STOP_WINDOW_CLOSED, flush=True),
             )
         finally:
             port.close()

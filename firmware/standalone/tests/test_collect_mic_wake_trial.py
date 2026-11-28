@@ -1085,6 +1085,39 @@ def test_standby_timing_rejects_a_contradictory_cleanup_failure(receiver):
         )
 
 
+@pytest.mark.parametrize("finish", ["hold", "bad_report", "bad_hold", "no_playback"])
+def test_manual_speaker_closes_the_touch_window_once(receiver, finish):
+    cues = []
+    records = [AUTO_STOP_WAIT, AUTO_STOP_ARMED]
+    if finish != "no_playback":
+        records.append(AUTO_STOP_PLAYING)
+    report = AUTO_STOP_REPORT | {"result": "preparation_failed"}
+    records.extend([report if finish != "bad_report" else {}, HOLD])
+    if finish == "bad_report":
+        records[-2] = {"speaker_probe": "invalid"}
+    if finish == "bad_hold":
+        records[-1] = HOLD | {"operating_admission": True}
+    port = FakeSerial(records)
+
+    def receive():
+        return receiver.receive_once(
+            port,
+            lambda: cues.append("playing"),
+            announce_speaker_end=lambda: cues.append("closed"),
+            speaker=True,
+            speaker_protocol="K151_SPEAKER_STOP_V3",
+        )
+
+    if finish in {"bad_report", "bad_hold"}:
+        with pytest.raises(ValueError):
+            receive()
+        assert port.writes.count(b"STOP\n") == 1
+    else:
+        assert receive() == report
+        assert b"STOP\n" not in port.writes
+    assert cues == ([] if finish == "no_playback" else ["playing", "closed"])
+
+
 @pytest.mark.parametrize(
     ("changes", "late_cue", "passed"),
     [
